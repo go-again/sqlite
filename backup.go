@@ -39,14 +39,20 @@ func (b *Backup) Step(n int32) (bool, error) {
 
 // Finish releases all resources associated with the Backup object. The Backup
 // object is invalid and may not be used following a call to Finish.
+//
+// When the Backup was produced by NewBackup or NewRestore, the destination
+// connection it implicitly opened is also closed. When the Backup was produced
+// by (*Conn).Backup (the mattn-compat factory), the destination connection is
+// owned by the caller and is not closed here.
 func (b *Backup) Finish() error {
 	rc := sqlite3.Xsqlite3_backup_finish(b.srcConn.tls, b.pBackup)
-	b.dstConn.Close()
+	if b.dstConn != nil {
+		b.dstConn.Close()
+	}
 	if rc == sqlite3.SQLITE_OK {
 		return nil
-	} else {
-		return b.srcConn.errstr(rc)
 	}
+	return b.srcConn.errstr(rc)
 }
 
 // Commit releases all resources associated with the Backup object but does not
