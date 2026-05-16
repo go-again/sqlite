@@ -93,6 +93,62 @@ func TestTranslateMattnDSN_UserauthRejected(t *testing.T) {
 	}
 }
 
+// TestTranslateMattnDSN_MutexHonest asserts _mutex behavior:
+//   - "full" / boolean-true values are a no-op (we already open FULLMUTEX).
+//   - "no" / boolean-false values return a clear error rather than silently
+//     producing FULLMUTEX (the opposite of what the user asked for).
+//   - Garbage values surface a "must be one of …" message.
+func TestTranslateMattnDSN_MutexHonest(t *testing.T) {
+	// "full" and boolean-true forms accepted and stripped.
+	for _, v := range []string{"full", "true", "1", "on", "yes"} {
+		out, err := translateMattnDSN("_mutex=" + v)
+		if err != nil {
+			t.Errorf("_mutex=%s should succeed, got %v", v, err)
+		}
+		if strings.Contains(out, "_mutex") {
+			t.Errorf("_mutex=%s should be stripped from output, got %q", v, out)
+		}
+	}
+	// "no" and boolean-false forms return a clear error.
+	for _, v := range []string{"no", "false", "0", "off"} {
+		_, err := translateMattnDSN("_mutex=" + v)
+		if err == nil {
+			t.Errorf("_mutex=%s should error", v)
+			continue
+		}
+		if !strings.Contains(err.Error(), "NOMUTEX") {
+			t.Errorf("_mutex=%s error %q should mention NOMUTEX", v, err)
+		}
+	}
+	// Bogus value also errors.
+	_, err := translateMattnDSN("_mutex=banana")
+	if err == nil {
+		t.Errorf("_mutex=banana should error")
+	}
+}
+
+// TestTranslateMattnDSN_StmtCacheSize asserts the no-op handling: accepted
+// (with integer validation), stripped from the output, and not flagged in
+// strict mode. The actual cache implementation is plan-audit-followup.md P1.1.
+func TestTranslateMattnDSN_StmtCacheSize(t *testing.T) {
+	out, err := translateMattnDSN("_stmt_cache_size=100")
+	if err != nil {
+		t.Fatalf("valid integer: %v", err)
+	}
+	if strings.Contains(out, "_stmt_cache_size") {
+		t.Errorf("flag should be stripped; got %q", out)
+	}
+
+	if _, err := translateMattnDSN("_stmt_cache_size=banana"); err == nil {
+		t.Errorf("non-integer should error")
+	}
+
+	// strict mode accepts _stmt_cache_size silently.
+	if _, err := translateMattnDSN("_stmt_cache_size=10&_strict=1"); err != nil {
+		t.Errorf("strict mode should accept stmt cache size: %v", err)
+	}
+}
+
 func TestTranslateMattnDSN_StrictMode(t *testing.T) {
 	_, err := translateMattnDSN("_strict=1&_unknown_flag=foo")
 	if err == nil {

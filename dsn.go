@@ -133,14 +133,34 @@ func translateMattnDSN(query string) (string, error) {
 		}
 	}
 
-	// _mutex is handled at open by openV2's flags; we surface a clear error
-	// because we don't currently respect it.
+	// _mutex requires choosing between SQLITE_OPEN_NOMUTEX and SQLITE_OPEN_FULLMUTEX
+	// at sqlite3_open_v2 time. The current fork always opens with FULLMUTEX
+	// (matching modernc's default) and database/sql's connection pool already
+	// pins one *Conn per goroutine, so NOMUTEX would either be unnecessary or
+	// unsafe. We accept _mutex=full / _mutex=true / 1 / on as no-ops and
+	// reject _mutex=no / false / 0 / off so callers don't silently get the
+	// opposite of what they asked for.
 	if v := q.Get("_mutex"); v != "" {
-		// Modernc always opens with SQLITE_OPEN_FULLMUTEX; honoring _mutex=no
-		// would require plumbing through openV2. Document and move on rather
-		// than silently ignoring.
-		_ = v
-		q.Del("_mutex")
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "full", "1", "t", "true", "yes", "on":
+			// Already what we do; drop the flag without changing behavior.
+			q.Del("_mutex")
+		case "no", "0", "f", "false", "off":
+			return "", fmt.Errorf("_mutex=%q (NOMUTEX) is not supported: this driver always opens with SQLITE_OPEN_FULLMUTEX, which is safe for database/sql's connection pool", v)
+		default:
+			return "", fmt.Errorf("_mutex=%q: must be one of full/no (mattn-style) or true/false (boolean)", v)
+		}
+	}
+
+	// _stmt_cache_size is accepted but does nothing (the prepared-statement
+	// cache isn't built yet — plan-audit-followup.md P1.1). Drop it from the
+	// translated query so it isn't surfaced to applyQueryParams or SQLite's
+	// URI parser as an unknown key.
+	if q.Has("_stmt_cache_size") {
+		if _, err := strconv.Atoi(q.Get("_stmt_cache_size")); err != nil {
+			return "", fmt.Errorf("_stmt_cache_size: must be an integer, got %q: %w", q.Get("_stmt_cache_size"), err)
+		}
+		q.Del("_stmt_cache_size")
 	}
 
 	if strict {
@@ -168,11 +188,17 @@ func parseBoolish(s string) (bool, error) {
 }
 
 // knownDSNFlags lists DSN flag names that pass strict-mode validation.
+//
+// Note: _stmt_cache_size is accepted but currently a no-op — this driver does
+// not yet have a prepared-statement cache. The flag is listed here so
+// _strict=1 mode doesn't reject mattn DSNs verbatim. See
+// plan-audit-followup.md P1.1.
 var knownDSNFlags = map[string]bool{
 	"_pragma":              true,
 	"_time_format":         true,
 	"_time_integer_format": true,
 	"_inttotime":           true,
+	"_stmt_cache_size":     true,
 	"_texttotime":          true,
 	"_timezone":            true,
 	"_txlock":              true,
