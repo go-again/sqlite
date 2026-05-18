@@ -33,7 +33,19 @@ type conn struct {
 	intToTime         bool
 	textToTime        bool
 	integerTimeFormat string
+
+	// stmts caches prepared statements by trimmed SQL text. nil-safe (a nil
+	// *stmtCache reports "disabled"); applyQueryParams installs a populated
+	// one when _stmt_cache_size > 0. database/sql pins one goroutine per
+	// conn at a time so no locking is needed around the cache itself.
+	stmts *stmtCache
 }
+
+// defaultStmtCacheSize matches mattn's _stmt_cache_size default. A cache that
+// retains at most this many prepared statements per connection covers the
+// common ORM-driven hot loops (a few-dozen distinct queries reused millions
+// of times) while bounding the per-conn memory footprint.
+const defaultStmtCacheSize = 100
 
 func newConn(dsn string) (*conn, error) {
 	var query, vfsName string
@@ -64,7 +76,10 @@ func newConn(dsn string) (*conn, error) {
 		}
 	}
 
-	c := &conn{tls: libc.NewTLS()}
+	c := &conn{
+		tls:   libc.NewTLS(),
+		stmts: newStmtCache(defaultStmtCacheSize),
+	}
 	db, err := c.openV2(
 		dsn,
 		vfsName,
@@ -788,6 +803,14 @@ func (c *conn) Close() (err error) {
 	defer c.Unlock()
 
 	if c.db != 0 {
+		// Finalize cached prepared statements before closeV2; otherwise
+		// sqlite3_close returns SQLITE_BUSY due to outstanding stmts.
+		if c.stmts != nil {
+			for _, e := range c.stmts.drainAll() {
+				_ = c.finalize(e.pstmt)
+				c.free(e.psql)
+			}
+		}
 		if err := c.closeV2(c.db); err != nil {
 			return err
 		}

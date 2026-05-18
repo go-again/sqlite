@@ -229,6 +229,30 @@ func applyQueryParams(c *conn, query string) error {
 		c.textToTime = onoff
 	}
 
+	// _stmt_cache_size overrides the default cache capacity. 0 disables the
+	// cache for this connection; negative values are rejected at the DSN
+	// translation step. The default was already installed in newConn so we
+	// only have to swap if the user opted in explicitly.
+	if v := q.Get("_stmt_cache_size"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("_stmt_cache_size: %w", err)
+		}
+		if n < 0 {
+			return fmt.Errorf("_stmt_cache_size: must be >= 0, got %d", n)
+		}
+		// drainAll before swap so the previously installed default cache's
+		// retained entries (there shouldn't be any yet, but be safe) are
+		// returned to the caller for finalization.
+		if c.stmts != nil {
+			for _, e := range c.stmts.drainAll() {
+				_ = c.finalize(e.pstmt)
+				c.free(e.psql)
+			}
+		}
+		c.stmts = newStmtCache(n)
+	}
+
 	return nil
 }
 

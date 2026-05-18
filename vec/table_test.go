@@ -156,6 +156,38 @@ func TestTyped_Delete_RemovesRow(t *testing.T) {
 	}
 }
 
+// TestTyped_Update_ChangesEmbedding asserts that Update actually overwrites
+// the stored embedding (same rowid, new vector pushes the row's distance to
+// the new value). The method is a thin alias for Insert; the test exists so
+// a future refactor that breaks the semantic doesn't slip past silently.
+func TestTyped_Update_ChangesEmbedding(t *testing.T) {
+	db := openDB(t)
+	ctx := context.Background()
+	tbl, err := vec.Create(ctx, db, "docs", 4, vec.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Insert at rowid 1 pointing in one direction.
+	if err := tbl.Insert(ctx, 1, []float32{1, 0, 0, 0}); err != nil {
+		t.Fatal(err)
+	}
+	// Update to point in the opposite direction.
+	if err := tbl.Update(ctx, 1, []float32{0, 1, 0, 0}); err != nil {
+		t.Fatal(err)
+	}
+	// Query close to the new direction; rowid 1 should match with small distance.
+	matches, err := tbl.KNNSlice(ctx, []float32{0, 0.99, 0, 0}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 || matches[0].Rowid != 1 {
+		t.Fatalf("matches=%+v, want [{Rowid:1, …}]", matches)
+	}
+	if matches[0].Distance > 0.1 {
+		t.Errorf("after Update, distance=%f should be small (close to new vector)", matches[0].Distance)
+	}
+}
+
 // TestTyped_Insert_DimMismatch ensures we don't ship malformed vectors to
 // SQLite, since sqlite-vec's error messages there aren't always actionable.
 func TestTyped_Insert_DimMismatch(t *testing.T) {

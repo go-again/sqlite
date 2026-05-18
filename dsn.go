@@ -152,15 +152,13 @@ func translateMattnDSN(query string) (string, error) {
 		}
 	}
 
-	// _stmt_cache_size is accepted but does nothing (the prepared-statement
-	// cache isn't built yet — plan-audit-followup.md P1.1). Drop it from the
-	// translated query so it isn't surfaced to applyQueryParams or SQLite's
-	// URI parser as an unknown key.
+	// _stmt_cache_size is read by applyQueryParams, where the cache lives on
+	// the *conn. We only validate the integer here so a clearly-wrong DSN
+	// fails fast at translate time rather than waiting for conn-open.
 	if q.Has("_stmt_cache_size") {
 		if _, err := strconv.Atoi(q.Get("_stmt_cache_size")); err != nil {
 			return "", fmt.Errorf("_stmt_cache_size: must be an integer, got %q: %w", q.Get("_stmt_cache_size"), err)
 		}
-		q.Del("_stmt_cache_size")
 	}
 
 	if strict {

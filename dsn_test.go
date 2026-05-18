@@ -127,16 +127,17 @@ func TestTranslateMattnDSN_MutexHonest(t *testing.T) {
 	}
 }
 
-// TestTranslateMattnDSN_StmtCacheSize asserts the no-op handling: accepted
-// (with integer validation), stripped from the output, and not flagged in
-// strict mode. The actual cache implementation is plan-audit-followup.md P1.1.
+// TestTranslateMattnDSN_StmtCacheSize asserts the DSN-translation half of
+// the contract: integer validation and strict-mode acceptance. The flag is
+// preserved through to applyQueryParams so the *conn can read it (the
+// cache lives on the conn, not on the parsed DSN).
 func TestTranslateMattnDSN_StmtCacheSize(t *testing.T) {
 	out, err := translateMattnDSN("_stmt_cache_size=100")
 	if err != nil {
 		t.Fatalf("valid integer: %v", err)
 	}
-	if strings.Contains(out, "_stmt_cache_size") {
-		t.Errorf("flag should be stripped; got %q", out)
+	if !strings.Contains(out, "_stmt_cache_size=100") {
+		t.Errorf("flag should be preserved for applyQueryParams; got %q", out)
 	}
 
 	if _, err := translateMattnDSN("_stmt_cache_size=banana"); err == nil {

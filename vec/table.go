@@ -131,14 +131,18 @@ func (t *Table) Metric() Metric { return t.metric }
 // Encoding returns the wire encoding used for vector values.
 func (t *Table) Encoding() Encoding { return t.encoding }
 
-// Insert adds (or replaces) a single row keyed by rowid. The embedding length
-// must match the table's dim.
+// Insert adds a single row keyed by rowid. Returns an error if the rowid
+// already exists — sqlite-vec's vec0 INSERT does not honor SQLite's
+// OR REPLACE conflict resolution, so we report the conflict honestly. Use
+// Update to overwrite an existing row.
+//
+// The embedding length must match the table's dim.
 func (t *Table) Insert(ctx context.Context, rowid int64, embedding []float32) error {
 	if len(embedding) != t.dim {
 		return fmt.Errorf("vec.Insert: embedding length %d != dim %d", len(embedding), t.dim)
 	}
 	q := fmt.Sprintf(
-		"INSERT OR REPLACE INTO %s (rowid, %s) VALUES (?, %s)",
+		"INSERT INTO %s (rowid, %s) VALUES (?, %s)",
 		quote(t.name), quote(t.embedding), matchPlaceholder(t.encoding),
 	)
 	_, err := t.db.ExecContext(ctx, q, rowid, encodeValue(embedding, t.encoding))
@@ -151,16 +155,16 @@ type Item struct {
 	Embedding []float32
 }
 
-// BatchInsert inserts (or replaces) every item in a single transaction. This
-// is significantly faster than calling Insert in a loop because SQLite only
-// commits once.
+// BatchInsert inserts every item in a single transaction. Each rowid must be
+// unique within the table; conflicts surface as errors (sqlite-vec's vec0
+// INSERT does not honor OR REPLACE).
 func (t *Table) BatchInsert(ctx context.Context, items []Item) error {
 	tx, err := t.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	q := fmt.Sprintf(
-		"INSERT OR REPLACE INTO %s (rowid, %s) VALUES (?, %s)",
+		"INSERT INTO %s (rowid, %s) VALUES (?, %s)",
 		quote(t.name), quote(t.embedding), matchPlaceholder(t.encoding),
 	)
 	stmt, err := tx.PrepareContext(ctx, q)
@@ -180,6 +184,25 @@ func (t *Table) BatchInsert(ctx context.Context, items []Item) error {
 		}
 	}
 	return tx.Commit()
+}
+
+// Update replaces the embedding for an existing rowid via a real UPDATE
+// statement. If the rowid doesn't exist, Update is a no-op and returns nil
+// (matching SQL's UPDATE-without-matching-row semantics).
+//
+// Use Insert to add a new rowid. Callers wanting upsert behavior should
+// dispatch on a prior existence check or fall back from Update to Insert
+// based on rows-affected.
+func (t *Table) Update(ctx context.Context, rowid int64, embedding []float32) error {
+	if len(embedding) != t.dim {
+		return fmt.Errorf("vec.Update: embedding length %d != dim %d", len(embedding), t.dim)
+	}
+	q := fmt.Sprintf(
+		"UPDATE %s SET %s = %s WHERE rowid = ?",
+		quote(t.name), quote(t.embedding), matchPlaceholder(t.encoding),
+	)
+	_, err := t.db.ExecContext(ctx, q, encodeValue(embedding, t.encoding), rowid)
+	return err
 }
 
 // Delete removes the row with the given rowid. Returns nil if the row didn't
@@ -221,11 +244,19 @@ type Match struct {
 // and returns an iter.Seq2 cursor over the results in ascending-distance
 // order. Yielding stops at k rows or on error.
 //
+// Optional QueryOptions filter the result set. WithWhere appends a custom
+// WHERE conjunct (e.g. "rowid IN (1, 2, 3)" to restrict to known IDs); see
+// vec.WithWhere for details.
+//
 // The yielded error is always nil except for the final iteration after a
 // row-scan failure, where it carries the scan error and the Match is the
 // zero value. Iterating with `for m, err := range tbl.KNN(...)` follows the
 // idiomatic Go-1.23 range-over-func convention.
-func (t *Table) KNN(ctx context.Context, query []float32, k int) iter.Seq2[Match, error] {
+func (t *Table) KNN(ctx context.Context, query []float32, k int, opts ...QueryOption) iter.Seq2[Match, error] {
+	cfg := &queryConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
 	return func(yield func(Match, error) bool) {
 		if len(query) != t.dim {
 			yield(Match{}, fmt.Errorf("vec.KNN: query length %d != dim %d", len(query), t.dim))
@@ -234,11 +265,32 @@ func (t *Table) KNN(ctx context.Context, query []float32, k int) iter.Seq2[Match
 		if k <= 0 {
 			return
 		}
-		q := fmt.Sprintf(
-			"SELECT rowid, distance FROM %s WHERE %s MATCH %s ORDER BY distance LIMIT ?",
-			quote(t.name), quote(t.embedding), matchPlaceholder(t.encoding),
-		)
-		rows, err := t.db.QueryContext(ctx, q, encodeValue(query, t.encoding), k)
+		var b strings.Builder
+		b.WriteString("SELECT rowid, distance FROM ")
+		b.WriteString(quote(t.name))
+		b.WriteString(" WHERE ")
+		b.WriteString(quote(t.embedding))
+		b.WriteString(" MATCH ")
+		b.WriteString(matchPlaceholder(t.encoding))
+		// User-provided filter, AND'd onto MATCH.
+		if cfg.whereSQL != "" {
+			b.WriteString(" AND (")
+			b.WriteString(cfg.whereSQL)
+			b.WriteString(")")
+		}
+		// LIMIT is inlined as a literal integer (no injection risk; k is a
+		// Go int controlled by the caller) because sqlite-vec's vec0 module
+		// requires a literal LIMIT or a `k = ?` constraint to identify the
+		// nearest-neighbour cap, and a parameterized LIMIT can confuse its
+		// planner when other WHERE conjuncts are present.
+		b.WriteString(" ORDER BY distance LIMIT ")
+		fmt.Fprintf(&b, "%d", k)
+
+		args := make([]any, 0, 1+len(cfg.whereArgs))
+		args = append(args, encodeValue(query, t.encoding))
+		args = append(args, cfg.whereArgs...)
+
+		rows, err := t.db.QueryContext(ctx, b.String(), args...)
 		if err != nil {
 			yield(Match{}, err)
 			return
@@ -261,10 +313,11 @@ func (t *Table) KNN(ctx context.Context, query []float32, k int) iter.Seq2[Match
 }
 
 // KNNSlice is a convenience wrapper that collects the first k matches into a
-// slice. Use it when you don't need streaming behavior.
-func (t *Table) KNNSlice(ctx context.Context, query []float32, k int) ([]Match, error) {
+// slice. Use it when you don't need streaming behavior. Accepts the same
+// QueryOptions as KNN.
+func (t *Table) KNNSlice(ctx context.Context, query []float32, k int, opts ...QueryOption) ([]Match, error) {
 	out := make([]Match, 0, k)
-	for m, err := range t.KNN(ctx, query, k) {
+	for m, err := range t.KNN(ctx, query, k, opts...) {
 		if err != nil {
 			return nil, err
 		}

@@ -18,17 +18,41 @@ type stmt struct {
 	c     *conn
 	psql  uintptr
 	pstmt uintptr // The cached SQLite statement handle
+
+	// cacheKey is set to the normalized SQL when this *stmt is eligible for
+	// donation back to c.stmts on Close (single-statement, non-script, with
+	// caching enabled). Empty cacheKey means Close should finalize + free.
+	cacheKey string
 }
 
 func newStmt(c *conn, sql string) (*stmt, error) {
+	// Fast path: cache hit. Take the cached entry, reset its pstmt + clear
+	// any leftover bindings, and hand it back wrapped in a *stmt whose Close
+	// will donate it back to the cache instead of finalizing.
+	if c.stmts != nil && c.stmts.enabled() {
+		if entry := c.stmts.take(sql); entry != nil {
+			// Reset to a clean state — required before binding new params.
+			// We deliberately ignore reset's return value: even if the
+			// previous execution finished with SQLITE_ERROR, reset clears
+			// the error state, which is what we want.
+			sqlite3.Xsqlite3_reset(c.tls, entry.pstmt)
+			sqlite3.Xsqlite3_clear_bindings(c.tls, entry.pstmt)
+			return &stmt{
+				c:        c,
+				psql:     entry.psql,
+				pstmt:    entry.pstmt,
+				cacheKey: entry.key,
+			}, nil
+		}
+	}
+
+	// Cache miss (or cache disabled). Allocate + prepare the usual way.
 	p, err := libc.CString(sql)
 	if err != nil {
 		return nil, err
 	}
 	s := &stmt{c: c, psql: p}
 
-	// Attempt to prepare the statement immediately
-	// We make a copy of the pointer because prepareV2 advances it
 	psql := p
 	pstmt, err := c.prepareV2(&psql)
 	if err != nil {
@@ -36,32 +60,55 @@ func newStmt(c *conn, sql string) (*stmt, error) {
 		return nil, err
 	}
 
-	// Check if there is trailing SQL (indicating a script/multi-statement)
-	// If *psql (the tail) is 0, we consumed the whole string.
+	// If we consumed all input we have a single statement we can cache.
+	// Otherwise this is a script (semicolon-separated) or a comment-only
+	// blob; those aren't eligible for caching.
 	hasTail := *(*byte)(unsafe.Pointer(psql)) != 0
 	if pstmt != 0 && !hasTail {
-		// Optimization: Single statement. Cache it.
 		s.pstmt = pstmt
+		if c.stmts != nil && c.stmts.enabled() {
+			s.cacheKey = normalize(sql)
+		}
 		return s, nil
 	}
 
-	// It is either a script (hasTail) or a comment-only string (pstmt==0).
-	// For scripts: Finalize now. We will re-parse iteratively in Exec/Query
-	// to handle the multiple statements correctly using the existing loop logic.
+	// Script or comment-only: discard the partial prepare and let
+	// exec/query re-parse iteratively.
 	if pstmt != 0 {
 		if err := c.finalize(pstmt); err != nil {
 			c.free(p)
 			return nil, err
 		}
 	}
-
 	return s, nil
 }
 
-// Close closes the statement.
+// Close closes the statement. If the *stmt is eligible for caching, the
+// underlying prepared-statement handle is reset and donated to c.stmts
+// instead of being finalized; the next Prepare with the same SQL will
+// pull it back out cheaply.
 //
 // As of Go 1.1, a Stmt will not be closed if it's in use by any queries.
 func (s *stmt) Close() (err error) {
+	if s.pstmt != 0 && s.cacheKey != "" && s.c.stmts != nil && s.c.stmts.enabled() {
+		// Donate back. Reset clears any execution state; clear_bindings
+		// releases any blob/text bindings the user may have set so the
+		// retained pstmt doesn't hold ref counts on caller memory.
+		sqlite3.Xsqlite3_reset(s.c.tls, s.pstmt)
+		sqlite3.Xsqlite3_clear_bindings(s.c.tls, s.pstmt)
+		if evicted := s.c.stmts.put(s.cacheKey, s.psql, s.pstmt); evicted != nil {
+			// Cache was full or the same key was re-inserted; finalize the
+			// loser. Ignore the finalize error here — the new entry is in
+			// the cache and the user already got the success they expected.
+			_ = s.c.finalize(evicted.pstmt)
+			s.c.free(evicted.psql)
+		}
+		// Ownership of psql + pstmt has been transferred to the cache.
+		s.pstmt = 0
+		s.psql = 0
+		return nil
+	}
+
 	if s.pstmt != 0 {
 		if e := s.c.finalize(s.pstmt); e != nil {
 			err = e

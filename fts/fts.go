@@ -237,6 +237,17 @@ func (i *Index[K, V]) Drop(ctx context.Context) error {
 	return err
 }
 
+// Close releases any resources owned by the Index. The current implementation
+// is a no-op because *Index holds no per-instance handles — the underlying
+// *sql.DB is owned by the caller and Index keeps only configuration.
+//
+// Provided for API symmetry with similar libraries (e.g. zalgonoise/fts) so
+// `defer idx.Close()` is harmless. Callers should still Close the *sql.DB
+// they passed to New / Open.
+func (i *Index[K, V]) Close() error {
+	return nil
+}
+
 // SearchOption configures a single Search call.
 type SearchOption func(*searchConfig)
 

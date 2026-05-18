@@ -138,11 +138,11 @@ func (o *Observable) Delete(ctx context.Context, rowid int64) error {
 
 // KNN wraps the underlying iter.Seq2 so the recorder/logger fire exactly
 // once per KNN invocation, after the iterator is fully drained or cleaned
-// up by an early break.
-func (o *Observable) KNN(ctx context.Context, query []float32, k int) iter.Seq2[Match, error] {
+// up by an early break. Forwards QueryOptions to the underlying Table.KNN.
+func (o *Observable) KNN(ctx context.Context, query []float32, k int, opts ...QueryOption) iter.Seq2[Match, error] {
 	start := time.Now()
 	dim := len(query)
-	inner := o.inner.KNN(ctx, query, k)
+	inner := o.inner.KNN(ctx, query, k, opts...)
 	return func(yield func(Match, error) bool) {
 		var firstErr error
 		defer func() {
@@ -169,10 +169,10 @@ func (o *Observable) KNN(ctx context.Context, query []float32, k int) iter.Seq2[
 	}
 }
 
-// KNNSlice mirrors Table.KNNSlice with observability.
-func (o *Observable) KNNSlice(ctx context.Context, query []float32, k int) ([]Match, error) {
+// KNNSlice mirrors Table.KNNSlice with observability. Forwards QueryOptions.
+func (o *Observable) KNNSlice(ctx context.Context, query []float32, k int, opts ...QueryOption) ([]Match, error) {
 	var out []Match
-	for m, err := range o.KNN(ctx, query, k) {
+	for m, err := range o.KNN(ctx, query, k, opts...) {
 		if err != nil {
 			return nil, err
 		}
