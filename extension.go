@@ -38,6 +38,14 @@ func (c *conn) enableLoadExtension(on bool) error {
 // the connection was opened by a Driver whose Extensions field was non-empty.
 //
 // Mattn compatibility: equivalent to mattn's SQLiteConn.LoadExtension.
+//
+// Platform note: success depends on dlopen support in modernc.org/libc.
+// As of v1.72.x, libc's Xdlopen is not implemented on darwin — calling
+// LoadExtension there with a valid extension path will trigger libc's
+// "TODOTODO" abort path even if EnableLoadExtension(true) was called. On
+// linux/freebsd/windows the call works as expected. Plan-audit-followup.md
+// P2.12 documents the constraint and the rationale for leaving the negative
+// path the only one we currently exercise in tests.
 func (c *Conn) LoadExtension(libPath, entry string) error {
 	return c.loadExtension(libPath, entry)
 }

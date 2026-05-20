@@ -7,10 +7,11 @@ package vec_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"math"
 	"testing"
 
-	_ "github.com/go-again/sqlite"
+	sqlite "github.com/go-again/sqlite"
 	"github.com/go-again/sqlite/vec"
 )
 
@@ -127,6 +128,101 @@ func TestTyped_CosineMetric(t *testing.T) {
 		if m.Distance < 0 || m.Distance > 2 {
 			t.Errorf("[%d] cosine distance %f out of [0, 2]", i, m.Distance)
 		}
+	}
+}
+
+// TestTyped_DotMetric exercises the Dot metric path (mapped to sqlite-vec's
+// inner-product metric). We can't assert specific distance values because
+// sqlite-vec's IP metric is implementation-specific, but we can assert:
+//  1. Create + BatchInsert + KNN succeed.
+//  2. The result set has every input row (k = N).
+//  3. Distances are non-decreasing across the result list.
+//
+// That's enough to catch regressions where the "ip" keyword stops being
+// honored or KNN ordering breaks.
+func TestTyped_DotMetric(t *testing.T) {
+	db := openDB(t)
+	ctx := context.Background()
+	tbl, err := vec.Create(ctx, db, "docs", 8, vec.Options{Metric: vec.Dot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tbl.BatchInsert(ctx, fixture); err != nil {
+		t.Fatal(err)
+	}
+	matches, err := tbl.KNNSlice(ctx, fixtureQuery, len(fixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != len(fixture) {
+		t.Fatalf("got %d matches, want %d", len(matches), len(fixture))
+	}
+	for i := 1; i < len(matches); i++ {
+		if matches[i].Distance < matches[i-1].Distance {
+			t.Errorf("Dot metric distances not monotonic at [%d]: %+v", i, matches)
+		}
+	}
+}
+
+// TestTyped_BatchInsert_OneTx asserts BatchInsert wraps every item in a
+// single transaction by installing a commit hook on the underlying *Conn
+// before the call and counting commits. Without the wrapping, we'd see one
+// commit per item (4 commits for 4 items); with it, we expect exactly 1.
+//
+// Uses Conn.Raw to reach the *Conn so we can install the per-conn hook;
+// pins MaxOpenConns to 1 so subsequent BatchInsert reuses the same conn
+// the hook was installed on.
+func TestTyped_BatchInsert_OneTx(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	db.SetMaxOpenConns(1)
+
+	ctx := context.Background()
+	sc, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Install the commit hook before any vec work happens, otherwise the
+	// CREATE VIRTUAL TABLE's autocommit pre-counts against us. With
+	// MaxOpenConns=1 the pool will reuse this same physical conn for
+	// subsequent db.ExecContext calls, so the hook stays attached.
+	var commits int32
+	if err := sc.Raw(func(dc any) error {
+		c, ok := dc.(*sqlite.Conn)
+		if !ok {
+			return errors.New("driver conn is not *sqlite.Conn")
+		}
+		c.RegisterCommitHook(func() int32 { commits++; return 0 })
+		return nil
+	}); err != nil {
+		sc.Close()
+		t.Fatal(err)
+	}
+	// Release the pinned conn back to the pool so vec.Create (which calls
+	// db.ExecContext) can grab it. Hook stays installed on the physical
+	// conn the pool then hands back.
+	if err := sc.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	tbl, err := vec.Create(ctx, db, "docs", 8, vec.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// CREATE VIRTUAL TABLE counts as one autocommit; capture the baseline so
+	// we can assert the BatchInsert delta exactly.
+	baseline := commits
+
+	if err := tbl.BatchInsert(ctx, fixture); err != nil {
+		t.Fatal(err)
+	}
+	got := commits - baseline
+	if got != 1 {
+		t.Errorf("BatchInsert fired %d commits, want 1", got)
 	}
 }
 

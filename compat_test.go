@@ -167,6 +167,63 @@ func TestRegisterAggregator(t *testing.T) {
 	}
 }
 
+// TestRegisterAggregator_WindowRecomputes documents that reflective
+// aggregates registered via RegisterAggregator work even in window-function
+// (OVER) contexts — SQLite falls back to recomputing each window from
+// scratch when our reflectAggregate's WindowInverse returns an error,
+// which is correct (if O(N²)).
+//
+// Asserting the behavior here so a future "optimization" that decides to
+// short-circuit and error out instead doesn't regress users that already
+// rely on this fallback. True linear-time window support is the deferred
+// upgrade in plan-audit-followup.
+func TestRegisterAggregator_WindowRecomputes(t *testing.T) {
+	_, sc, c := withMattnConn(t, ":memory:")
+	ctx := context.Background()
+	if err := c.RegisterAggregator("rsum2", func() *runningSum { return &runningSum{} }, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sc.ExecContext(ctx, `CREATE TABLE t (v INTEGER); INSERT INTO t VALUES (1), (2), (3)`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Non-window form: classic aggregate, returns the sum.
+	var sum int64
+	if err := sc.QueryRowContext(ctx, "SELECT rsum2(v) FROM t").Scan(&sum); err != nil {
+		t.Fatal(err)
+	}
+	if sum != 6 {
+		t.Errorf("non-window rsum2 = %d, want 6", sum)
+	}
+
+	// Window form over ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+	// (a running total). SQLite recomputes each window because
+	// reflectAggregate refuses WindowInverse. Expected sums: 1, 3, 6.
+	rows, err := sc.QueryContext(ctx,
+		"SELECT rsum2(v) OVER (ORDER BY v ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []int64
+	for rows.Next() {
+		var n int64
+		if err := rows.Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, n)
+	}
+	want := []int64{1, 3, 6}
+	if len(got) != len(want) {
+		t.Fatalf("got %d window rows, want %d", len(got), len(want))
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("window[%d] = %d, want %d (full=%v)", i, got[i], w, got)
+		}
+	}
+}
+
 func TestRegisterCollation_ReverseOrder(t *testing.T) {
 	_, sc, c := withMattnConn(t, ":memory:")
 	ctx := context.Background()

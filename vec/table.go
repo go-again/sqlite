@@ -219,16 +219,16 @@ func (t *Table) Drop(ctx context.Context) error {
 	return err
 }
 
-// metricKeyword maps a Metric to the keyword sqlite-vec expects in vec0's
-// distance_metric option. Values other than the known three fall through to
-// "L2" (the sqlite-vec default), matching the zero-value behavior.
+// metricKeyword maps a Metric to the keyword sqlite-vec accepts in vec0's
+// distance= option. sqlite-vec supports exactly three: l1, l2, cosine.
+// Our Dot constant is kept as a name alias for L1 for plan/historical
+// reasons — see types.go.
 func metricKeyword(m Metric) string {
 	switch m {
 	case Cosine:
 		return "cosine"
 	case Dot:
-		// sqlite-vec uses "ip" (inner product) for negative dot product.
-		return "ip"
+		return "l1"
 	}
 	// L2 / unknown
 	return "l2"

@@ -184,6 +184,53 @@ func TestSearch_WithRanking(t *testing.T) {
 	}
 }
 
+// TestSearch_RankingWithColumnWeights confirms that per-column BM25
+// weights shift the result order. We index two rows where each contains the
+// query term once — once in the title, once in the body — then query under
+// two weight configurations:
+//   - title weight=10, body weight=1 → title-bearing row ranks first
+//   - title weight=1, body weight=10 → body-bearing row ranks first
+//
+// Catches regressions in WithRanking's varargs threading through the SQL.
+func TestSearch_RankingWithColumnWeights(t *testing.T) {
+	db := openDB(t)
+	ctx := context.Background()
+	idx, err := fts.New[int64, string](ctx, db, "docs", fts.Options{
+		Columns: []string{"title", "body"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Doc 1: "fox" only in title. Doc 2: "fox" only in body.
+	err = idx.Insert(ctx,
+		fts.Attr[int64, string]{Key: 1, Value: "fox news", Extras: map[string]any{"body": "a story about animals"}},
+		fts.Attr[int64, string]{Key: 2, Value: "animals", Extras: map[string]any{"body": "a fox sighting"}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Weight 1: title heavy → doc 1 (title-match) ranks first.
+	titleHeavy, err := idx.SearchSlice(ctx, fts.Term("fox"), fts.WithRanking(10.0, 1.0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(titleHeavy) < 2 || titleHeavy[0].Key != 1 {
+		t.Errorf("title-heavy weights: first match=%v, want Key=1; full=%v",
+			titleHeavy[0], titleHeavy)
+	}
+
+	// Weight 2: body heavy → doc 2 (body-match) ranks first.
+	bodyHeavy, err := idx.SearchSlice(ctx, fts.Term("fox"), fts.WithRanking(1.0, 10.0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bodyHeavy) < 2 || bodyHeavy[0].Key != 2 {
+		t.Errorf("body-heavy weights: first match=%v, want Key=2; full=%v",
+			bodyHeavy[0], bodyHeavy)
+	}
+}
+
 // TestSearch_SnippetAndHighlight requests both snippet and highlight outputs
 // and confirms they wrap matched terms with the configured delimiters.
 func TestSearch_SnippetAndHighlight(t *testing.T) {
@@ -224,6 +271,43 @@ func TestSearch_LimitOffset(t *testing.T) {
 	}
 	if len(matches) != 3 {
 		t.Errorf("limit=3 offset=2 returned %d rows, want 3", len(matches))
+	}
+}
+
+// TestTokenizer_Ascii asserts the ASCII tokenizer indexes plain words case-
+// insensitively (uppercase queries match lowercased tokens) and ignores the
+// Unicode-specific features Unicode61 brings. Used by callers who know their
+// corpus is pure 7-bit ASCII and want the cheapest possible tokenizer.
+func TestTokenizer_Ascii(t *testing.T) {
+	db := openDB(t)
+	ctx := context.Background()
+	idx := newIdx(t, db, fts.Options{Tokenizer: fts.Ascii{}})
+
+	if err := idx.Insert(ctx,
+		fts.Attr[int64, string]{Key: 1, Value: "hello world"},
+		fts.Attr[int64, string]{Key: 2, Value: "Goodbye Galaxy"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	// Case-insensitive: uppercase query hits lowercased token.
+	matches, err := idx.SearchSlice(ctx, fts.Term("GALAXY"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(keysOf(matches), int64(2)) {
+		t.Errorf("Ascii GALAXY should match doc 2; got %v", keysOf(matches))
+	}
+	// Diacritics are NOT folded by Ascii (that's Unicode61's job) — a query
+	// for an ASCII letter should not match a diacritic-bearing variant.
+	if err := idx.Insert(ctx, fts.Attr[int64, string]{Key: 3, Value: "café"}); err != nil {
+		t.Fatal(err)
+	}
+	matches, err = idx.SearchSlice(ctx, fts.Term("cafe"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(keysOf(matches), int64(3)) {
+		t.Errorf("Ascii('cafe') should NOT match 'café' (no diacritic fold); got %v", keysOf(matches))
 	}
 }
 

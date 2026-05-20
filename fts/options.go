@@ -61,14 +61,25 @@ type Options struct {
 	Columns []string
 
 	// External enables FTS5's external-content mode; see the External type.
+	// Mutually exclusive with Contentless.
 	External *External
+
+	// Contentless enables FTS5's contentless mode (`content=''`). The
+	// table stores only the inverted index — the original column text is
+	// discarded, so SELECT of the column from a contentless table returns
+	// NULL. Useful when the source text is reproducible elsewhere and you
+	// only need the rowids matching a query.
+	//
+	// Mutually exclusive with External. Combine with ContentlessDelete to
+	// also allow DELETE operations.
+	Contentless bool
 
 	// Detail picks the index granularity; defaults to DetailFull.
 	Detail Detail
 
 	// ContentlessDelete enables FTS5's contentless_delete=1 option, allowing
-	// rows to be DELETEd from a contentless table. Only valid when External
-	// is nil. Requires SQLite >= 3.43.
+	// rows to be DELETEd from a contentless table. Has no effect unless
+	// Contentless=true. Requires SQLite >= 3.43.
 	ContentlessDelete bool
 }
 
@@ -103,16 +114,20 @@ func (o Options) prefixExpr() string {
 }
 
 // externalExpr renders the content= and content_rowid= options for the
-// external-content mode.
+// external-content mode, or content='' for the contentless mode. Returns
+// empty when neither is configured (the FTS5 default: own-content storage).
 func (o Options) externalExpr() string {
-	if o.External == nil {
-		return ""
+	if o.External != nil {
+		out := "content = '" + o.External.ContentTable + "'"
+		if o.External.ContentRowid != "" {
+			out += ", content_rowid = '" + o.External.ContentRowid + "'"
+		}
+		return out
 	}
-	out := "content = '" + o.External.ContentTable + "'"
-	if o.External.ContentRowid != "" {
-		out += ", content_rowid = '" + o.External.ContentRowid + "'"
+	if o.Contentless {
+		return "content = ''"
 	}
-	return out
+	return ""
 }
 
 func (o Options) detailExpr() string {
@@ -123,7 +138,7 @@ func (o Options) detailExpr() string {
 }
 
 func (o Options) contentlessDeleteExpr() string {
-	if !o.ContentlessDelete {
+	if !o.ContentlessDelete || !o.Contentless {
 		return ""
 	}
 	return "contentless_delete = 1"

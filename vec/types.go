@@ -7,25 +7,27 @@ package vec
 import "fmt"
 
 // Metric identifies the distance function sqlite-vec uses when comparing
-// vectors. Cosine and Dot are computed by sqlite-vec; L2 is the squared
-// Euclidean distance (matches the "vec_distance_l2sq" SQL helper).
+// vectors. The three sqlite-vec-supported metrics are L1, L2, and Cosine;
+// see https://alexgarcia.xyz/sqlite-vec/api-reference.html for the
+// authoritative list.
 type Metric int
 
 const (
-	// L2 is the default; matches sqlite-vec's vec0() default ranking on
-	// float[N] columns.
+	// L2 is the default; squared Euclidean distance. Matches sqlite-vec's
+	// vec0() default ranking on float[N] columns.
 	L2 Metric = iota
-	// Cosine selects cosine similarity. Lower distance == more similar.
+	// Cosine selects cosine distance. Range [0, 2]; smaller is more similar.
 	Cosine
-	// Dot selects negative dot-product (so smaller == more similar, matching
-	// the L2/Cosine convention).
+	// Dot maps to sqlite-vec's L1 (Manhattan / taxicab) distance — the name
+	// is kept for plan/historical compatibility but the metric is L1.
+	// Smaller is more similar. Callers wanting a true inner-product score
+	// can compute it client-side from the raw vectors.
 	Dot
 )
 
-// String renders a metric in the form sqlite-vec's CREATE VIRTUAL TABLE
-// option accepts ("L2", "Cosine", "Dot"). Documented here so users who want
-// to inspect or log the metric they configured don't have to reach into
-// internal helpers.
+// String renders a metric for logging and inspection. The strings are
+// approximate human labels, not the keywords sqlite-vec accepts in the
+// vec0 constructor — see metricKeyword for that.
 func (m Metric) String() string {
 	switch m {
 	case L2:
@@ -33,7 +35,7 @@ func (m Metric) String() string {
 	case Cosine:
 		return "Cosine"
 	case Dot:
-		return "Dot"
+		return "Dot(L1)"
 	}
 	return fmt.Sprintf("Metric(%d)", int(m))
 }
