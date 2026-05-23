@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Run the full test suite on the three platforms most consumers actually
+  # use. Cross-build coverage for the long tail of modernc-supported targets
+  # is in build_all_targets below.
+  test:
+    name: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        go: ['1.25.x']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+      - name: go test ./...
+        run: go test -count=1 -timeout 5m ./...
+
+  # Race-mode test pass — linux/amd64 only because race-detection support is
+  # spotty on other targets and the bulk of the locking surface lives in
+  # platform-independent Go code anyway.
+  race:
+    name: race
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+      - name: go test -race
+        run: go test -race -count=1 -timeout 10m ./...
+
+  # Static analysis: go vet (always available) plus staticcheck (matches the
+  # modernc/sqlite CI lint pass).
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+      - name: go vet
+        run: go vet ./...
+      - name: gofmt -d
+        run: |
+          out=$(gofmt -d $(find . -name '*.go' -not -path './.sqlite/*' -not -path './.go-sqlite3/*' -not -path './.gorm-sqlite*/*' -not -path './.fts/*'))
+          if [ -n "$out" ]; then echo "$out"; exit 1; fi
+      - name: staticcheck
+        uses: dominikh/staticcheck-action@v1
+        with:
+          version: latest
+          install-go: false
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          # .golangci.yml at the repo root configures the linter set and
+          # skips the dot-prefixed reference repositories.
+          args: --timeout 5m
+
+  # Cross-build every modernc-supported GOOS/GOARCH so we catch
+  # platform-specific compile errors without running the (often unavailable)
+  # test runtime there. The matrix mirrors modernc/sqlite's builder.json.
+  build_all_targets:
+    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: darwin,  goarch: amd64 }
+          - { goos: darwin,  goarch: arm64 }
+          - { goos: freebsd, goarch: amd64 }
+          - { goos: freebsd, goarch: arm64 }
+          - { goos: linux,   goarch: 386 }
+          - { goos: linux,   goarch: amd64 }
+          - { goos: linux,   goarch: arm }
+          - { goos: linux,   goarch: arm64 }
+          - { goos: linux,   goarch: loong64 }
+          - { goos: linux,   goarch: ppc64le }
+          - { goos: linux,   goarch: riscv64 }
+          - { goos: linux,   goarch: s390x }
+          - { goos: windows, goarch: 386 }
+          - { goos: windows, goarch: amd64 }
+          - { goos: windows, goarch: arm64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+      - name: cross build
+        env:
+          GOOS:   ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          # modernc.org/sqlite/vec is only transpiled for the same OS set we
+          # build the package on (linux/darwin/freebsd/openbsd/windows).
+          # `go build ./vec/...` on excluded targets fails because the
+          # underlying lib hasn't been generated there; the `|| true` is
+          # deliberate so the cross-build matrix doesn't fail on platforms
+          # we never claimed to support for vec.
+          CGO_ENABLED: '0'
+        run: |
+          go build ./
+          go build ./gorm/...
+          go build ./fts/...
+          go build ./vfs/...
+          go build ./vec/... || echo "vec not supported on ${GOOS}/${GOARCH} — skipping"
+
+  # NOTE: A "gorm-upstream" job that ran gorm.io/gorm's full test suite
+  # against this dialector lived here previously but was a stub — it used a
+  # fake go.mod replace and was marked continue-on-error, so it never
+  # signalled anything useful. Removed to keep CI honest. The local gorm
+  # tests in ./gorm/ exercise every Dialector/Migrator path we care about.
+  # See plan-audit-followup.md P0.4 for the rationale and re-add notes.

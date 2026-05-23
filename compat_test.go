@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // withMattnConn opens an in-memory DB through the mattn-style driver name and
@@ -432,6 +433,50 @@ func TestSetTrace_StmtEventReceived(t *testing.T) {
 	}
 }
 
+// TestSetTrace_ProfileEventReceived asserts the TraceProfile mask delivers a
+// profile event with a non-zero Duration. Profile events fire AFTER the
+// statement finishes (so timing is captured), unlike TraceStmt which fires
+// at start.
+func TestSetTrace_ProfileEventReceived(t *testing.T) {
+	_, sc, c := withMattnConn(t, ":memory:")
+
+	type profile struct {
+		stmt string
+		dur  time.Duration
+	}
+	var got []profile
+	if err := c.SetTrace(&TraceConfig{
+		EventMask: TraceProfile,
+		Callback: func(info TraceInfo) int {
+			got = append(got, profile{stmt: info.Statement, dur: info.Duration})
+			return 0
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer c.SetTrace(nil)
+
+	// Force some work the profile event can time. CREATE-1k-rows is small
+	// enough to be fast but large enough that nanosecond timers see > 0.
+	if _, err := sc.ExecContext(context.Background(),
+		`WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM c WHERE n<1000) SELECT count(*) FROM c`); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) == 0 {
+		t.Fatal("profile callback never fired")
+	}
+	// Each event has a Duration > 0. (Some SQLite builds report >= 0 for
+	// extremely short queries; we expect > 0 because our CTE does real work.)
+	for i, p := range got {
+		if p.dur <= 0 {
+			t.Errorf("profile[%d] Duration=%v, want > 0", i, p.dur)
+		}
+		if p.stmt == "" {
+			t.Errorf("profile[%d] Statement empty, want non-empty SQL", i)
+		}
+	}
+}
+
 // TestError_CodeAndExtendedCode_OnUniqueViolation ensures the inserted UNIQUE
 // constraint surfaces both the primary and extended SQLite codes.
 func TestError_CodeAndExtendedCode_OnUniqueViolation(t *testing.T) {
@@ -469,22 +514,106 @@ func TestError_CodeAndExtendedCode_OnUniqueViolation(t *testing.T) {
 	}
 }
 
-// TestGetLimit_RoundTrip cycles SetLimit/GetLimit through a known limit id and
-// confirms the value reads back identically.
+// TestGetLimit_RoundTrip cycles SetLimit/GetLimit through every documented
+// SQLITE_LIMIT_* identifier. For each one:
+//   - GetLimit returns a sensible default (≥ 0).
+//   - SetLimit halves it and returns the prior value.
+//   - GetLimit afterwards reflects the new value.
+//   - Restore the original so later tests aren't tripped up.
+//
+// SQLite caps each limit at a per-id hard maximum; setting beyond it clamps,
+// so we deliberately reduce rather than increase to avoid clamp surprises.
 func TestGetLimit_RoundTrip(t *testing.T) {
-	_, _, c := withMattnConn(t, ":memory:")
+	limits := []struct {
+		id   int
+		name string
+	}{
+		{SQLITE_LIMIT_LENGTH, "LENGTH"},
+		{SQLITE_LIMIT_SQL_LENGTH, "SQL_LENGTH"},
+		{SQLITE_LIMIT_COLUMN, "COLUMN"},
+		{SQLITE_LIMIT_EXPR_DEPTH, "EXPR_DEPTH"},
+		{SQLITE_LIMIT_COMPOUND_SELECT, "COMPOUND_SELECT"},
+		{SQLITE_LIMIT_VDBE_OP, "VDBE_OP"},
+		{SQLITE_LIMIT_FUNCTION_ARG, "FUNCTION_ARG"},
+		{SQLITE_LIMIT_ATTACHED, "ATTACHED"},
+		{SQLITE_LIMIT_LIKE_PATTERN_LENGTH, "LIKE_PATTERN_LENGTH"},
+		{SQLITE_LIMIT_VARIABLE_NUMBER, "VARIABLE_NUMBER"},
+		{SQLITE_LIMIT_TRIGGER_DEPTH, "TRIGGER_DEPTH"},
+		{SQLITE_LIMIT_WORKER_THREADS, "WORKER_THREADS"},
+	}
+	for _, lim := range limits {
+		t.Run(lim.name, func(t *testing.T) {
+			_, _, c := withMattnConn(t, ":memory:")
+			orig := c.GetLimit(lim.id)
+			if orig < 0 {
+				t.Fatalf("GetLimit(%s) returned %d, want >= 0", lim.name, orig)
+			}
+			// Halve the limit (avoid <2 since some ids cap there).
+			target := orig / 2
+			if target < 1 {
+				target = 1
+			}
+			prev := c.SetLimit(lim.id, target)
+			if prev != orig {
+				t.Errorf("SetLimit(%s, %d) returned %d, want %d", lim.name, target, prev, orig)
+			}
+			if cur := c.GetLimit(lim.id); cur != target {
+				t.Errorf("GetLimit(%s) after set = %d, want %d", lim.name, cur, target)
+			}
+			// Restore.
+			c.SetLimit(lim.id, orig)
+		})
+	}
+}
 
-	const id = SQLITE_LIMIT_LENGTH
-	orig := c.GetLimit(id)
-	prev := c.SetLimit(id, orig/2)
-	if prev != orig {
-		t.Errorf("SetLimit returned %d, want %d", prev, orig)
+// TestCoexistence_CustomNameAlongsideMattn demonstrates how to share a
+// binary with mattn/go-sqlite3 by registering this driver under a separate
+// name. Both drivers respond to sql.Open with their respective names; no
+// conflict because we don't try to take "sqlite3" away when this pattern is
+// used.
+//
+// The README's "Coexistence with mattn/go-sqlite3" section points readers
+// at this test for a working example.
+func TestCoexistence_CustomNameAlongsideMattn(t *testing.T) {
+	const customName = "go-again-sqlite-coexist"
+
+	// Pretend mattn is also linked in and has registered "sqlite3". We
+	// can't actually import mattn here (would re-register and panic), but
+	// the relevant property is that **a different name** routes to our
+	// driver while "sqlite3" remains free to be claimed by mattn in the
+	// real coexistence scenario.
+	sql.Register(customName, &SQLiteDriver{})
+
+	db, err := sql.Open(customName, ":memory:")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if cur := c.GetLimit(id); cur != orig/2 {
-		t.Errorf("GetLimit after set = %d, want %d", cur, orig/2)
+	defer db.Close()
+
+	var got int
+	if err := db.QueryRow("SELECT 1").Scan(&got); err != nil {
+		t.Fatal(err)
 	}
-	// Restore.
-	c.SetLimit(id, orig)
+	if got != 1 {
+		t.Errorf("custom-named driver got %d, want 1", got)
+	}
+
+	// The default "sqlite3" name still works too — both routes hit our
+	// driver in this test, but in production a sibling mattn import would
+	// have grabbed "sqlite3" first and our init() would have panicked.
+	// (See README for the recommended pattern: link only one side under
+	// "sqlite3" or use mattn's `tag` build flag to suppress its init.)
+	db2, err := sql.Open(DriverNameMattn, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db2.Close()
+	if err := db2.QueryRow("SELECT 2").Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != 2 {
+		t.Errorf("default name got %d, want 2", got)
+	}
 }
 
 // TestMattnDriverLiteral exercises the mattn idiom of registering a custom
