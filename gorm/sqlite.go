@@ -164,7 +164,7 @@ func (dialector Dialector) Migrator(db *gorm.DB) gorm.Migrator {
 	}}}
 }
 
-func (dialector Dialector) BindVarTo(writer clause.Writer, stmt *gorm.Statement, v interface{}) {
+func (dialector Dialector) BindVarTo(writer clause.Writer, stmt *gorm.Statement, v any) {
 	writer.WriteByte('?')
 }
 
@@ -216,7 +216,7 @@ func (dialector Dialector) QuoteTo(writer clause.Writer, str string) {
 	writer.WriteString("`")
 }
 
-func (dialector Dialector) Explain(sql string, vars ...interface{}) string {
+func (dialector Dialector) Explain(sql string, vars ...any) string {
 	return logger.ExplainSQL(sql, nil, `"`, vars...)
 }
 
@@ -250,12 +250,12 @@ func (dialector Dialector) DataTypeOf(field *schema.Field) string {
 	return string(field.DataType)
 }
 
-func (dialectopr Dialector) SavePoint(tx *gorm.DB, name string) error {
+func (dialector Dialector) SavePoint(tx *gorm.DB, name string) error {
 	tx.Exec("SAVEPOINT " + name)
 	return nil
 }
 
-func (dialectopr Dialector) RollbackTo(tx *gorm.DB, name string) error {
+func (dialector Dialector) RollbackTo(tx *gorm.DB, name string) error {
 	tx.Exec("ROLLBACK TO SAVEPOINT " + name)
 	return nil
 }

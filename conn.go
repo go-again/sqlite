@@ -108,7 +108,7 @@ func newConn(dsn string) (*conn, error) {
 
 // Attempt to parse s as a time. Return (s, false) if s is not
 // recognized as a valid time encoding.
-func (c *conn) parseTime(s string) (interface{}, bool) {
+func (c *conn) parseTime(s string) (any, bool) {
 	if v, ok := c.parseTimeString(s, strings.Index(s, "m=")); ok {
 		return v, true
 	}
@@ -136,7 +136,7 @@ func (c *conn) parseTime(s string) (interface{}, bool) {
 // not recognized as a valid time encoding.
 // This intentionally uses time.Parse, not time.ParseInLocation,
 // because the format already contains timezone information (-0700 MST).
-func (c *conn) parseTimeString(s0 string, x int) (interface{}, bool) {
+func (c *conn) parseTimeString(s0 string, x int) (any, bool) {
 	s := s0
 	if x > 0 {
 		s = s[:x] // "2006-01-02 15:04:05.999999999 -0700 MST m=+9999" -> "2006-01-02 15:04:05.999999999 -0700 MST "
@@ -385,8 +385,14 @@ func (c *conn) retry(pstmt uintptr) error {
 		return c.errstr(rc)
 	}
 
+	// Lock+Unlock with an empty section is the sqlite3_unlock_notify
+	// handshake: SQLite holds the mutex until the notification fires, so
+	// re-acquiring it here blocks until the underlying lock is released and
+	// then releasing it immediately is the documented contract — see
+	// https://www.sqlite.org/c3ref/unlock_notify.html.
 	(*mutex)(unsafe.Pointer(mu)).Lock()
-	(*mutex)(unsafe.Pointer(mu)).Unlock()
+	//lint:ignore SA2001 unlock_notify handshake — see the comment block above (staticcheck CLI directive)
+	(*mutex)(unsafe.Pointer(mu)).Unlock() //nolint:staticcheck // golangci-lint directive for the same suppression
 	mutexFree(c.tls, mu)
 	if pstmt != 0 {
 		sqlite3.Xsqlite3_reset(c.tls, pstmt)
@@ -863,8 +869,7 @@ type userDefinedFunction struct {
 	eTextRep  int32
 	pApp      uintptr
 
-	scalar   bool
-	freeOnce sync.Once
+	scalar bool
 }
 
 func (c *conn) createFunctionInternal(fun *userDefinedFunction) error {

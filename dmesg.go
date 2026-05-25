@@ -3,7 +3,6 @@
 // license that can be found in the LICENSE file.
 
 //go:build sqlite.dmesg
-// +build sqlite.dmesg
 
 package sqlite // import "github.com/go-again/sqlite"
 
@@ -41,7 +40,7 @@ func init() {
 	fmt.Fprintf(os.Stderr, "debug messages in %s\n", fn)
 }
 
-func dmesg(s string, args ...interface{}) {
+func dmesg(s string, args ...any) {
 	if s == "" {
 		s = strings.Repeat("%v ", len(args))
 	}

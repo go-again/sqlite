@@ -1,0 +1,128 @@
+# golangci-lint config for go-again/sqlite.
+#
+# Goals:
+#   - Catch real bugs without flagging the unsafe.Pointer-heavy patterns we
+#     inherit from modernc.org/sqlite's hand-written wrapper, the unavoidable
+#     defer-Close idiom, or staticcheck's stylistic QF (quickfix) family.
+#   - Keep the default linter set enabled — errcheck/govet/staticcheck/
+#     ineffassign/unused — but with the surgical exclusions documented below.
+#   - Skip the dot-prefixed reference repositories (.sqlite/, .go-sqlite3/,
+#     .gorm-sqlite*, .fts/) — they're vendored for reference only.
+
+version: "2"
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+  settings:
+    govet:
+      disable:
+        # The forked modernc wrapper does uintptr↔unsafe.Pointer arithmetic
+        # by design (that's how it talks to lib/). Suppressing here matches
+        # the `-unsafeptr=false` we already pass to `go vet` in justfile/CI.
+        - unsafeptr
+        # `inline` is govet's stylistic suggestion to replace named
+        # constants (reflect.Ptr, etc.) with their numeric value. We keep
+        # the named forms for readability.
+        - inline
+
+    staticcheck:
+      checks:
+        - all
+        # QF* "quickfix" family suppressions: only the ones that fire on
+        # modernc-inherited code we don't want to diverge from upstream.
+        # The rest (notably QF1012 — fmt.Fprintf instead of
+        # b.WriteString(fmt.Sprintf(…))) are real improvements and stay on.
+        # QF1001 (De Morgan rewrite), QF1002/QF1003 (tagged switch),
+        # QF1008 (embedded-field access), QF1011 (omit explicit type) —
+        # all stylistic and fire on inherited code.
+        - -QF1001
+        - -QF1002
+        - -QF1003
+        - -QF1008
+        - -QF1011
+        # ST1000: "at least one file in a package should have a package
+        # comment" — fires on gorm/ because the ported glebarez files don't
+        # carry one. We don't want to invent doc text just to silence it.
+        - -ST1000
+        # ST1003: naming conventions (zDb → zDB, constraintSql → constraintSQL,
+        # type Ascii → ASCII). The lowercase forms match the modernc/SQLite/
+        # glebarez upstream code we ported and the C symbol names we mirror;
+        # changing them invites drift on every re-sync.
+        - -ST1003
+        # ST1021: "comment on exported type should be of the form X..." —
+        # heading-style comments (`// Access to sqlite3_file_control`) are
+        # idiomatic in the modernc-derived files.
+        - -ST1021
+
+    errcheck:
+      # The vast majority of unchecked-error warnings are deferred Close /
+      # Remove calls on file-or-conn cleanup paths where the caller has
+      # already failed or is about to. Excluding the specific functions
+      # rather than disabling the whole linter keeps the bug-finding
+      # value of errcheck (unchecked *Tx.Commit, *DB.Exec, etc.).
+      exclude-functions:
+        # Stdlib closers.
+        - (*database/sql.DB).Close
+        - (*database/sql.Conn).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
+        - (*database/sql.Tx).Rollback
+        - (io.Closer).Close
+        - (net.Conn).Close
+        - os.Remove
+        # Our internal driver types — *conn, *stmt, *rows, *Backup all
+        # implement Close. database/sql's pool semantics mean we close on
+        # cleanup paths where the prior error already short-circuits.
+        - (*github.com/go-again/sqlite.conn).Close
+        - (*github.com/go-again/sqlite.stmt).Close
+        - (*github.com/go-again/sqlite.rows).Close
+        - (*github.com/go-again/sqlite.Backup).Close
+
+  exclusions:
+    rules:
+      # ST1019 (duplicate import) fires on the modernc-derived files'
+      # `// import "github.com/go-again/sqlite"` comments — those are not
+      # imports, they're idiomatic Go canonical-import-path declarations.
+      - linters: [staticcheck]
+        text: "ST1019"
+        path: "(conn|driver|sqlite|stmt|rows|tx|backup|error|result|convert|vtab|pre_update_hook|fcntl|mutex|dmesg|nodmesg)\\.go"
+
+      # Tests occasionally ignore errors on cleanup deliberately (closing
+      # a row whose query already errored, etc.).
+      - linters: [errcheck]
+        path: "_test\\.go"
+
+      # Examples are illustrative; brevity outweighs error-checking
+      # ceremony around `defer db.Close()` and the like.
+      - linters: [errcheck]
+        path: "examples/"
+
+      # The modernc-derived wrapper files use `defer x.Close()` without an
+      # error-handler everywhere — that's the upstream idiom and changing it
+      # invites re-sync drift. errcheck's exclude-functions doesn't match
+      # unexported receiver types like *conn / *rows reliably, so we scope
+      # the suppression by file path here. New code in new files still gets
+      # full errcheck coverage.
+      - linters: [errcheck]
+        path: "^(conn|driver|stmt|rows|tx|backup|backup_factory|sqlite|vtab|pre_update_hook|fcntl)\\.go$"
+
+      # The gorm/ sub-package is a verbatim port from glebarez; the
+      # clause.Writer interface returns errors that the upstream callers
+      # never check (and won't in practice — they're in-memory string
+      # builders). Same re-sync drift rationale as the modernc files.
+      - linters: [errcheck]
+        path: "gorm/"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

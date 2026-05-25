@@ -51,7 +51,10 @@ jobs:
         with:
           go-version: '1.25.x'
       - name: go vet
-        run: go vet ./...
+        # unsafeptr=false silences the uintptr↔unsafe.Pointer false positives
+        # in the modernc-derived wrapper (see .golangci.yml + justfile vet
+        # recipe for the same suppression).
+        run: go vet -unsafeptr=false ./...
       - name: gofmt -d
         run: |
           out=$(gofmt -d $(find . -name '*.go' -not -path './.sqlite/*' -not -path './.go-sqlite3/*' -not -path './.gorm-sqlite*/*' -not -path './.fts/*'))
@@ -122,4 +125,5 @@ jobs:
   # fake go.mod replace and was marked continue-on-error, so it never
   # signalled anything useful. Removed to keep CI honest. The local gorm
   # tests in ./gorm/ exercise every Dialector/Migrator path we care about.
-  # See plan-audit-followup.md P0.4 for the rationale and re-add notes.
+  # Re-add this job only with a real go.mod replace and without
+  # continue-on-error, otherwise it goes back to lying.

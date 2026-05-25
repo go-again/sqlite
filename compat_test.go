@@ -176,8 +176,9 @@ func TestRegisterAggregator(t *testing.T) {
 //
 // Asserting the behavior here so a future "optimization" that decides to
 // short-circuit and error out instead doesn't regress users that already
-// rely on this fallback. True linear-time window support is the deferred
-// upgrade in plan-audit-followup.
+// rely on this fallback. True linear-time window support would require
+// callers to use the lower-level RegisterFunction(name, &FunctionImpl{...})
+// path with an AggregateFunction that implements WindowInverse.
 func TestRegisterAggregator_WindowRecomputes(t *testing.T) {
 	_, sc, c := withMattnConn(t, ":memory:")
 	ctx := context.Background()
@@ -456,10 +457,11 @@ func TestSetTrace_ProfileEventReceived(t *testing.T) {
 	}
 	defer c.SetTrace(nil)
 
-	// Force some work the profile event can time. CREATE-1k-rows is small
-	// enough to be fast but large enough that nanosecond timers see > 0.
+	// Force enough work that even fast hardware reports Duration > 0.
+	// 1k rows can complete inside the trace timer's resolution and report
+	// 0; 100k is ~5ms on Apple M4.
 	if _, err := sc.ExecContext(context.Background(),
-		`WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM c WHERE n<1000) SELECT count(*) FROM c`); err != nil {
+		`WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM c WHERE n<100000) SELECT count(*) FROM c`); err != nil {
 		t.Fatal(err)
 	}
 	if len(got) == 0 {

@@ -303,9 +303,34 @@ same `modernc.org/libc` version pinned by this module**, otherwise the
 generated C-side ABI drifts and SQLite behaves erratically. The pin is
 maintained automatically when you `go mod tidy` against this module.
 
+To inspect what we pin: `just libc-pin` (or `go list -m modernc.org/libc`).
+
+## Development
+
+A `justfile` ships at the repo root with recipes for the common operations.
+[Install `just`](https://just.systems/man/en/) (e.g. `brew install just`)
+and then:
+
+```sh
+just                  # default: build + test + lint (fast pre-commit gate)
+just test             # full suite across every package
+just test-one PATTERN # focus on a single test/regex
+just test-race        # -race detector
+just bench            # all benchmarks
+just lint             # vet + staticcheck + golangci-lint
+just examples         # smoke-test every example
+just cross-build      # compile-only matrix across every CI target
+just ci               # full CI sequence locally
+just --list           # everything else
+```
+
+If you don't want to install `just`, the underlying commands are vanilla
+Go tooling — `go test ./...`, `go vet ./...`, `go build ./...`. The
+justfile is convenience, not a build dependency.
+
 ## Testing
 
-84 tests across the five packages cover:
+130 tests across the five packages cover:
 
 - driver registration under both names, DSN flag translation matrix
   (including the `_mutex`-honesty path that refuses NOMUTEX rather than
@@ -327,12 +352,10 @@ maintained automatically when you `go mod tidy` against this module.
 - vfs: round-trip from a real on-disk SQLite file into a fstest.MapFS
 
 This is what we run. We do **not** claim to run gorm.io/gorm's full
-upstream test suite — see plan-audit-followup.md P0.4. The local gorm
-tests exercise every Dialector / Migrator path we care about for our
-dialector.
+upstream test suite. The local gorm tests exercise every Dialector /
+Migrator path we care about for our dialector.
 
-Run them with `go test ./...`. Known gaps tracked in
-plan-audit-followup.md.
+Run them with `just test` (or `go test ./...`).
 
 ## License
 

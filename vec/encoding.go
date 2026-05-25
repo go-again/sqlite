@@ -6,7 +6,6 @@ package vec
 
 import (
 	"encoding/binary"
-	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -66,25 +65,3 @@ func matchPlaceholder(enc Encoding) string {
 	return "?"
 }
 
-// decodeJSON parses a sqlite-vec JSON-encoded vector back into []float32.
-// Used in tests to spot-check what's actually stored.
-func decodeJSON(s string) ([]float32, error) {
-	s = strings.TrimSpace(s)
-	if !strings.HasPrefix(s, "[") || !strings.HasSuffix(s, "]") {
-		return nil, fmt.Errorf("decodeJSON: expected [..], got %q", s)
-	}
-	inner := strings.TrimSpace(s[1 : len(s)-1])
-	if inner == "" {
-		return nil, nil
-	}
-	parts := strings.Split(inner, ",")
-	out := make([]float32, len(parts))
-	for i, p := range parts {
-		f, err := strconv.ParseFloat(strings.TrimSpace(p), 32)
-		if err != nil {
-			return nil, fmt.Errorf("decodeJSON: element %d: %w", i, err)
-		}
-		out[i] = float32(f)
-	}
-	return out, nil
-}

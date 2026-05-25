@@ -31,10 +31,10 @@ import (
 var (
 	_ driver.Conn   = (*conn)(nil)
 	_ driver.Driver = (*Driver)(nil)
-	//lint:ignore SA1019 TODO implement ExecerContext
-	_ driver.Execer = (*conn)(nil)
-	//lint:ignore SA1019 TODO implement QueryerContext
-	_ driver.Queryer                        = (*conn)(nil)
+	//lint:ignore SA1019 kept alongside ExecerContext for database/sql back-compat (staticcheck CLI)
+	_ driver.Execer = (*conn)(nil) //nolint:staticcheck // golangci-lint
+	//lint:ignore SA1019 kept alongside QueryerContext for database/sql back-compat (staticcheck CLI)
+	_ driver.Queryer                        = (*conn)(nil) //nolint:staticcheck // golangci-lint
 	_ driver.Result                         = (*result)(nil)
 	_ driver.Rows                           = (*rows)(nil)
 	_ driver.RowsColumnTypeDatabaseTypeName = (*rows)(nil)
@@ -150,10 +150,7 @@ func applyQueryParams(c *conn, query string) error {
 		return err
 	}
 
-	var a []string
-	for _, v := range q["_pragma"] {
-		a = append(a, v)
-	}
+	a := append([]string(nil), q["_pragma"]...)
 	// Push 'busy_timeout' first, the rest in lexicographic order, case insenstive.
 	// See https://gitlab.com/cznic/sqlite/-/issues/198#note_2233423463 for
 	// discussion.
@@ -566,6 +563,12 @@ func RegisterConnectionHook(fn ConnectionHookFn) {
 	d.RegisterConnectionHook(fn)
 }
 
+// origin formats a stack frame as file:line:func, used by the dmesg.go
+// trace logger. dmesg.go is gated by the `sqlite.dmesg` build tag, so when
+// that tag isn't set staticcheck sees origin as unused — the lint:ignore
+// keeps it findable for debug builds.
+//
+//lint:ignore U1000 used by dmesg.go under -tags=sqlite.dmesg.
 func origin(skip int) string {
 	pc, fn, fl, _ := runtime.Caller(skip)
 	f := runtime.FuncForPC(pc)

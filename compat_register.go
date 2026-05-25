@@ -286,14 +286,14 @@ func reflectAggregator(impl any) (func(FunctionContext) (AggregateFunction, erro
 	// Done: must return (T) or (T, error).
 	doneT := doneM.Type
 	if doneT.NumIn() != 1 { // receiver only
-		return nil, 0, fmt.Errorf("Done method must take no arguments")
+		return nil, 0, fmt.Errorf("aggregate Done method must take no arguments")
 	}
 	doneOut := doneT.NumOut()
 	if doneOut < 1 || doneOut > 2 {
-		return nil, 0, fmt.Errorf("Done must return (value) or (value, error)")
+		return nil, 0, fmt.Errorf("aggregate Done must return (value) or (value, error)")
 	}
 	if doneOut == 2 && !doneT.Out(1).Implements(errType) {
-		return nil, 0, fmt.Errorf("Done second return must be error")
+		return nil, 0, fmt.Errorf("aggregate Done second return must be error")
 	}
 
 	factory := func(_ FunctionContext) (AggregateFunction, error) {

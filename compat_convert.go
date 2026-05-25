@@ -12,12 +12,10 @@ import (
 )
 
 var (
-	errType      = reflect.TypeOf((*error)(nil)).Elem()
-	timeType     = reflect.TypeOf(time.Time{})
-	byteSliceTy  = reflect.TypeOf([]byte(nil))
-	anyType      = reflect.TypeOf((*any)(nil)).Elem()
-	driverValTy  = reflect.TypeOf((*driver.Value)(nil)).Elem()
-	stringRuneTy = reflect.TypeOf([]rune(nil))
+	errType     = reflect.TypeOf((*error)(nil)).Elem()
+	timeType    = reflect.TypeOf(time.Time{})
+	anyType     = reflect.TypeOf((*any)(nil)).Elem()
+	driverValTy = reflect.TypeOf((*driver.Value)(nil)).Elem()
 )
 
 // valueConverter returns a function that coerces a SQLite-side driver.Value

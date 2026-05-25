@@ -105,8 +105,8 @@ func (b *Backup) Close() error {
 	return b.srcConn.errstr(rc)
 }
 
-// Serialize returns a serialization of the schema named on this connection.
-// Pass schema = "main" or empty for the main database.
+// SerializeSchema returns a serialization of the schema named on this
+// connection. Pass schema = "main" or empty for the main database.
 //
 // Convenience wrapper around the existing *conn.Serialize method that hides
 // the schema argument from callers who only need the default.

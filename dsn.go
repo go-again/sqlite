@@ -126,7 +126,10 @@ func translateMattnDSN(query string) (string, error) {
 		q.Del("_loc")
 	}
 
-	// Reject userauth flags loudly — see plan-initial.md for rationale.
+	// Reject userauth flags loudly. The sqlite_userauth extension was
+	// deprecated by SQLite upstream and removed from modernc.org/sqlite;
+	// pretending to accept the flag would silently produce an unauthenticated
+	// connection, which is worse than a clear error.
 	for _, name := range []string{"_auth", "_auth_user", "_auth_pass", "_auth_crypt", "_auth_salt"} {
 		if _, ok := q[name]; ok {
 			return "", fmt.Errorf("userauth flag %q is not supported (deprecated and removed from modernc.org/sqlite)", name)
@@ -186,11 +189,8 @@ func parseBoolish(s string) (bool, error) {
 }
 
 // knownDSNFlags lists DSN flag names that pass strict-mode validation.
-//
-// Note: _stmt_cache_size is accepted but currently a no-op — this driver does
-// not yet have a prepared-statement cache. The flag is listed here so
-// _strict=1 mode doesn't reject mattn DSNs verbatim. See
-// plan-audit-followup.md P1.1.
+// _stmt_cache_size configures the per-connection prepared-statement LRU
+// (see stmt_cache.go); applyQueryParams reads it.
 var knownDSNFlags = map[string]bool{
 	"_pragma":              true,
 	"_time_format":         true,

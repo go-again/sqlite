@@ -420,7 +420,7 @@ func (i *Index[K, V]) buildSearchSQL(q Query, cfg *searchConfig) (string, []any,
 		}
 		b.WriteString(", snippet(")
 		b.WriteString(quote(i.name))
-		b.WriteString(fmt.Sprintf(", %d, ?, ?, ?, ?", idx))
+		fmt.Fprintf(&b, ", %d, ?, ?, ?, ?", idx)
 		b.WriteString(") AS __snippet")
 		args = append(args, cfg.snippetBefore, cfg.snippetAfter, cfg.snippetEllipsis, cfg.snippetTokens)
 	}
@@ -435,7 +435,7 @@ func (i *Index[K, V]) buildSearchSQL(q Query, cfg *searchConfig) (string, []any,
 		}
 		b.WriteString(", highlight(")
 		b.WriteString(quote(i.name))
-		b.WriteString(fmt.Sprintf(", %d, ?, ?", idx))
+		fmt.Fprintf(&b, ", %d, ?, ?", idx)
 		b.WriteString(") AS __highlight")
 		args = append(args, cfg.highlightBefore, cfg.highlightAfter)
 	}
@@ -455,10 +455,10 @@ func (i *Index[K, V]) buildSearchSQL(q Query, cfg *searchConfig) (string, []any,
 		b.WriteString(" ORDER BY rank")
 	}
 	if cfg.limit > 0 {
-		b.WriteString(fmt.Sprintf(" LIMIT %d", cfg.limit))
+		fmt.Fprintf(&b, " LIMIT %d", cfg.limit)
 	}
 	if cfg.offset > 0 {
-		b.WriteString(fmt.Sprintf(" OFFSET %d", cfg.offset))
+		fmt.Fprintf(&b, " OFFSET %d", cfg.offset)
 	}
 	return b.String(), args, nil
 }
