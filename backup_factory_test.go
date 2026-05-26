@@ -171,7 +171,16 @@ INSERT INTO m (k, v) VALUES (1, 'one'), (2, 'two');`); err != nil {
 
 // TestLoadExtension_Disabled returns a descriptive error when EnableLoadExtension
 // hasn't been called, since SQLite refuses load_extension by default.
+//
+// Skipped under -race: modernc's _sqlite3LoadExtension does pointer arithmetic
+// that trips Go's checkptr analyzer (enabled by -race), aborting the test
+// binary with "fatal error: checkptr: pointer arithmetic result points to
+// invalid allocation". The underlying C code is correct; this is a known
+// modernc / Go-checkptr interaction.
 func TestLoadExtension_Disabled(t *testing.T) {
+	if raceEnabled {
+		t.Skip("modernc.org/sqlite's _sqlite3LoadExtension trips Go's checkptr under -race")
+	}
 	_, _, c := withMattnConn(t, ":memory:")
 	err := c.LoadExtension("/nonexistent/path/foo", "")
 	if err == nil {
@@ -189,12 +198,15 @@ func TestLoadExtension_Disabled(t *testing.T) {
 // surfaces as an error rather than crashing.
 //
 // Skipped on platforms where modernc.org/libc's dlopen shim is incomplete
-// (e.g. darwin currently prints "Xdlopen: TODOTODO" and aborts). The earlier
-// TestLoadExtension_Disabled still covers the "extensions disabled" error
-// path on every platform.
+// (e.g. darwin currently prints "Xdlopen: TODOTODO" and aborts). Also
+// skipped under -race for the same checkptr reason TestLoadExtension_Disabled
+// is skipped.
 func TestLoadExtension_EnabledBadPath(t *testing.T) {
 	if isDarwin {
 		t.Skip("modernc.org/libc Xdlopen unimplemented on darwin")
+	}
+	if raceEnabled {
+		t.Skip("modernc.org/sqlite's _sqlite3LoadExtension trips Go's checkptr under -race")
 	}
 	_, _, c := withMattnConn(t, ":memory:")
 	if err := c.EnableLoadExtension(true); err != nil {
