@@ -1,0 +1,158 @@
+# Coverage: gorm
+
+Last reviewed against `gorm.io/gorm v1.31.1` on 2026-05-26.
+
+The version is pinned in this module's `go.mod`. When you bump it, walk
+this file top to bottom; the public interfaces are stable but methods do
+get added across minor releases. Compile-time satisfaction is enforced by
+`gorm/interfaces_test.go`; if gorm grows a method we haven't implemented,
+that test fails to build with the method name in the error.
+
+## Status legend
+
+- **✓ typed** — implemented in this module's `gorm/` package and exercised
+  by a test in `gorm/*_test.go`.
+- **⚠ inherited** — implemented upstream in `gorm.io/gorm/migrator`, used
+  unchanged by the embedded `migrator.Migrator` field in our `Migrator`.
+  Works because the upstream code works. Not exercised by a test we own.
+- **✗** — not implemented; calling it returns whatever the embedded
+  upstream default returns (typically an error).
+
+## gorm.Dialector
+
+The primary contract. Every method below is implemented on our `Dialector`
+type in `gorm/sqlite.go`.
+
+| Method | Status | Test | Notes |
+|---|---|---|---|
+| `Name() string` | ✓ typed | `TestDialector` | Returns `"sqlite"`. |
+| `Initialize(*DB) error` | ✓ typed | `TestDialector`, `TestGorm_AutoMigrate_CreatesTable` | Registers default callbacks; gates `RETURNING`-aware clauses on SQLite >= 3.35.0. |
+| `Migrator(*DB) Migrator` | ✓ typed | `TestGorm_AutoMigrate_CreatesTable` | Returns our `Migrator{migrator.Migrator{...}}` wrapper. |
+| `DataTypeOf(*schema.Field) string` | ✓ typed | `TestGorm_AutoMigrate_CreatesTable` | bool→numeric, int/uint→integer (auto-increment becomes `integer PRIMARY KEY AUTOINCREMENT`), float→real, string→text, time→datetime, bytes→blob. |
+| `DefaultValueOf(*schema.Field) clause.Expression` | ✓ typed | covered transitively via AutoMigrate | `NULL` for auto-increment, `DEFAULT` otherwise. |
+| `BindVarTo(clause.Writer, *Statement, any)` | ✓ typed | covered transitively | Always emits `?`. |
+| `QuoteTo(clause.Writer, string)` | ✓ typed | covered transitively | Backtick-quoted identifiers with `.`-aware delimiting. |
+| `Explain(string, ...any) string` | ✓ typed | covered transitively | Delegates to `logger.ExplainSQL` with `"` quote char. |
+
+## gorm.Migrator
+
+Returned by `Dialector.Migrator(db)`. We embed `gorm.io/gorm/migrator.Migrator`
+to inherit the long tail of methods and override the SQLite-specific ones.
+Tests live in `gorm/integration_test.go`.
+
+### Schema
+
+| Method | Status | Test |
+|---|---|---|
+| `AutoMigrate(dst ...any) error` | ⚠ inherited | `TestGorm_AutoMigrate_CreatesTable`, `TestGorm_NewWithConfig`, `TestGorm_Mattn3DriverName` |
+| `CurrentDatabase() string` | ✓ typed | covered transitively | Overridden to use `PRAGMA database_list`. |
+| `FullDataTypeOf(*schema.Field) clause.Expr` | ⚠ inherited | — |
+| `GetTypeAliases(string) []string` | ⚠ inherited | — |
+
+### Tables
+
+| Method | Status | Test |
+|---|---|---|
+| `CreateTable(dst ...any) error` | ⚠ inherited | covered transitively via AutoMigrate |
+| `DropTable(dst ...any) error` | ✓ typed | — | Overridden to drop in dependency order with foreign keys off. |
+| `HasTable(dst any) bool` | ✓ typed | `TestGorm_AutoMigrate_CreatesTable` | Reads `sqlite_master`. |
+| `RenameTable(oldName, newName any) error` | ⚠ inherited | — |
+| `GetTables() ([]string, error)` | ✓ typed | — | Reads `sqlite_master WHERE type='table'`. |
+| `TableType(dst any) (TableType, error)` | ⚠ inherited | — |
+
+### Columns
+
+| Method | Status | Test |
+|---|---|---|
+| `AddColumn(dst any, field string) error` | ⚠ inherited | — |
+| `DropColumn(dst any, field string) error` | ✓ typed | — | Overridden; uses recreate-table approach (SQLite < 3.35 lacks DROP COLUMN). |
+| `AlterColumn(dst any, field string) error` | ✓ typed | — | Recreate-table with new column definition. |
+| `MigrateColumn(dst any, *schema.Field, ColumnType) error` | ⚠ inherited | — |
+| `MigrateColumnUnique(dst any, *schema.Field, ColumnType) error` | ⚠ inherited | — |
+| `HasColumn(dst any, field string) bool` | ✓ typed | — | Reads `sqlite_master.sql`. |
+| `RenameColumn(dst any, oldName, field string) error` | ⚠ inherited | — |
+| `ColumnTypes(dst any) ([]ColumnType, error)` | ✓ typed | — | Parses DDL via `ddlmod.go`. |
+
+### Views
+
+| Method | Status | Test |
+|---|---|---|
+| `CreateView(name string, ViewOption) error` | ⚠ inherited | — |
+| `DropView(name string) error` | ⚠ inherited | — |
+
+### Constraints
+
+| Method | Status | Test |
+|---|---|---|
+| `CreateConstraint(dst any, name string) error` | ✓ typed | — | Recreate-table approach. |
+| `DropConstraint(dst any, name string) error` | ✓ typed | — | Recreate-table approach. |
+| `HasConstraint(dst any, name string) bool` | ✓ typed | — | Regex against `sqlite_master.sql`. |
+
+### Indexes
+
+| Method | Status | Test |
+|---|---|---|
+| `CreateIndex(dst any, name string) error` | ✓ typed | `TestGorm_AutoMigrate_CreatesTable` (via uniqueIndex tag) |
+| `DropIndex(dst any, name string) error` | ✓ typed | — |
+| `HasIndex(dst any, name string) bool` | ✓ typed | `TestGorm_AutoMigrate_CreatesTable` |
+| `RenameIndex(dst any, oldName, newName string) error` | ✓ typed | — | DROP + recreate with renamed-in-source SQL. |
+| `GetIndexes(dst any) ([]Index, error)` | ✓ typed | — | Uses `PRAGMA index_list` + `PRAGMA index_info`. |
+
+## gorm.ErrorTranslator
+
+Optional interface. Activated by `gorm.Config{TranslateError: true}`.
+
+| Method | Status | Test |
+|---|---|---|
+| `Translate(err error) error` | ✓ typed | `TestErrorTranslator`, `TestGorm_UniqueViolation_TranslatedToErrDuplicatedKey` |
+
+Translation table:
+
+| `*Error.ExtendedCode()` | maps to |
+|---|---|
+| `SQLITE_CONSTRAINT_UNIQUE` (2067) | `gorm.ErrDuplicatedKey` |
+| `SQLITE_CONSTRAINT_PRIMARYKEY` (1555) | `gorm.ErrDuplicatedKey` |
+| `SQLITE_CONSTRAINT_FOREIGNKEY` (787) | `gorm.ErrForeignKeyViolated` |
+| Everything else | passes through unchanged |
+
+Other `SQLITE_CONSTRAINT_*` codes (CHECK, NOTNULL, TRIGGER, ROWID) intentionally
+do not map because gorm has no equivalent sentinel. Surface as the original
+`*sqlite.Error`.
+
+## gorm.SavePointerDialectorInterface
+
+Optional interface. Activated when gorm needs nested transactions.
+
+| Method | Status | Test |
+|---|---|---|
+| `SavePoint(*DB, name string) error` | ✓ typed | covered transitively via `db.Transaction` |
+| `RollbackTo(*DB, name string) error` | ✓ typed | covered transitively via `db.Transaction` |
+
+## Optional interfaces we don't currently implement
+
+- `gorm.ParamsFilter` — for filtering query parameters; rare, not needed.
+- `gorm.MigratorIndexInterface` — doesn't exist in v1.31.1 as a separate
+  interface; index methods are part of `gorm.Migrator`.
+
+## Known behaviour differences from glebarez
+
+- `gorm.ErrorTranslator.Translate` prefers `interface{ ExtendedCode() int }`
+  (this module) over `interface{ Code() int }` (glebarez). Both produce
+  `gorm.ErrDuplicatedKey` for unique violations; glebarez does it via the
+  full extended code, we do it via the same code. End-state is identical.
+- Receiver name typo fix: `SavePoint` and `RollbackTo` had a `dialectopr`
+  receiver in glebarez; we corrected to `dialector` per `ST1016`.
+
+## Verification recipe
+
+```sh
+# Compile-time interface drift catcher.
+go test -c -o /dev/null ./gorm/
+
+# Local-tests pass.
+just test
+```
+
+If gorm bumps and the first command fails, the error message names the
+method that was added; decide whether to implement, stub, or document the
+gap.

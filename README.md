@@ -328,6 +328,23 @@ If you don't want to install `just`, the underlying commands are vanilla
 Go tooling — `go test ./...`, `go vet ./...`, `go build ./...`. The
 justfile is convenience, not a build dependency.
 
+## Coverage
+
+Per-surface coverage matrices live in [`docs/`](docs/):
+
+- [`docs/coverage-gorm.md`](docs/coverage-gorm.md) — every method on
+  `gorm.Dialector`, `gorm.Migrator`, `gorm.ErrorTranslator`, and
+  `gorm.SavePointerDialectorInterface` with status (typed / inherited /
+  unsupported) and link to the test that exercises it.
+- [`docs/coverage-vec.md`](docs/coverage-vec.md) — every documented
+  sqlite-vec column option, SQL helper function, and KNN form.
+- [`docs/coverage-fts.md`](docs/coverage-fts.md) — every FTS5 index
+  option, query operator, search option, auxiliary function, and
+  maintenance command.
+
+Read these before filing "does this package support X?" — answer is
+in the matrices.
+
 ## Testing
 
 130 tests across the five packages cover:
