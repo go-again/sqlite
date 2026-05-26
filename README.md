@@ -447,6 +447,26 @@ Migrator path we care about for our dialector.
 
 Run them with `just test` (or `go test ./...`).
 
+## Sponsors
+
+This project is supported by:
+
+- **[ssh2incus](https://ssh2incus.com)** — an open-source SSH server
+  that connects directly to [Incus](https://linuxcontainers.org/incus/)
+  containers and virtual machines. Runs on the Incus host and routes
+  incoming SSH connections to the right instance via the Incus API,
+  so individual instances don't need their own SSH server.
+
+- **[MobyDeck](https://github.com/mobydeck)** — a GitHub organization
+  publishing open-source developer tools and infrastructure
+  utilities across Go, C, TypeScript, shell, and Ruby. Projects
+  include the SSH-for-Incus gateway above, container credential
+  management, privilege-management system utilities, and status-page
+  automation.
+
+If your company benefits from this driver and you'd like to be listed
+here, open an issue.
+
 ## License
 
 Apache 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

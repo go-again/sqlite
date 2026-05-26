@@ -193,7 +193,7 @@ func (p *plugin) afterDelete(db *gorm.DB) {
 // struct or a slice of structs depending on the call form) into a flat
 // []reflect.Value addressing each row.
 func iterateRows(v reflect.Value) []reflect.Value {
-	for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
+	for v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface {
 		v = v.Elem()
 	}
 	switch v.Kind() {
@@ -203,7 +203,7 @@ func iterateRows(v reflect.Value) []reflect.Value {
 		out := make([]reflect.Value, 0, v.Len())
 		for i := 0; i < v.Len(); i++ {
 			elem := v.Index(i)
-			for elem.Kind() == reflect.Ptr {
+			for elem.Kind() == reflect.Pointer {
 				elem = elem.Elem()
 			}
 			if elem.Kind() == reflect.Struct {
@@ -220,7 +220,7 @@ func iterateRows(v reflect.Value) []reflect.Value {
 // because we already error in registerSchema on non-single PK setups).
 func pkAsInt64(f *schema.Field, row reflect.Value) (int64, bool) {
 	v := row.FieldByIndex(f.StructField.Index)
-	for v.Kind() == reflect.Ptr {
+	for v.Kind() == reflect.Pointer {
 		if v.IsNil() {
 			return 0, false
 		}
@@ -238,7 +238,7 @@ func pkAsInt64(f *schema.Field, row reflect.Value) (int64, bool) {
 // embeddingFrom reads a []float32 (or compatible) field off a row.
 func embeddingFrom(row reflect.Value, index []int) ([]float32, bool) {
 	v := row.FieldByIndex(index)
-	for v.Kind() == reflect.Ptr {
+	for v.Kind() == reflect.Pointer {
 		if v.IsNil() {
 			return nil, false
 		}
@@ -252,14 +252,4 @@ func embeddingFrom(row reflect.Value, index []int) ([]float32, bool) {
 		out[i] = float32(v.Index(i).Float())
 	}
 	return out, true
-}
-
-// rowids extracts the rowid column from a slice of vec.Item; used as the
-// IN-clause for the post-BatchInsert UPDATE that sets deleted=0.
-func rowids(items []vec.Item) []int64 {
-	out := make([]int64, len(items))
-	for i, it := range items {
-		out[i] = it.Rowid
-	}
-	return out
 }

@@ -96,7 +96,7 @@ func Search[T any](ctx context.Context, db *gorm.DB, q fts.Query, opts ...Option
 		return nil, err
 	}
 	if len(mm.Fields) == 0 {
-		return nil, fmt.Errorf("ftsgorm: Search: %T has no fields tagged with fts5:", zero)
+		return nil, fmt.Errorf("ftsgorm: Search: %T has no fields tagged with fts5", zero)
 	}
 
 	var o options
@@ -106,8 +106,8 @@ func Search[T any](ctx context.Context, db *gorm.DB, q fts.Query, opts ...Option
 
 	if mm.Mode == ModeContentless && (o.snippet != nil || o.hilite != nil) {
 		return nil, fmt.Errorf(
-			"ftsgorm: %s uses contentless mode; snippet() and highlight() are unavailable. "+
-				"Remove WithSnippet/WithHighlight or switch the model to external (default) or in-table mode.",
+			"ftsgorm: %s uses contentless mode; snippet() and highlight() are unavailable — "+
+				"remove WithSnippet/WithHighlight or switch the model to external (default) or in-table mode",
 			mm.Table)
 	}
 
@@ -258,7 +258,7 @@ func columnIndex(mm *modelMeta, name string) int {
 // helper of the same name.
 func pkAsInt64(f *schema.Field, row reflect.Value) (int64, bool) {
 	v := row.FieldByIndex(f.StructField.Index)
-	for v.Kind() == reflect.Ptr {
+	for v.Kind() == reflect.Pointer {
 		if v.IsNil() {
 			return 0, false
 		}

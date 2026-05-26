@@ -180,7 +180,7 @@ func pluginFrom(db *gorm.DB) (*plugin, error) {
 func indirectType(t reflect.Type) reflect.Type {
 	for {
 		switch t.Kind() {
-		case reflect.Ptr, reflect.Slice, reflect.Array:
+		case reflect.Pointer, reflect.Slice, reflect.Array:
 			t = t.Elem()
 		default:
 			return t

@@ -77,7 +77,7 @@ func KNN[T any](
 	}
 	if len(mm.Fields) == 0 {
 		return nil, fmt.Errorf(
-			"vecgorm: KNN: %T has no fields tagged with vec:",
+			"vecgorm: KNN: %T has no fields tagged with vec",
 			zero)
 	}
 	if len(mm.Fields) > 1 {

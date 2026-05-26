@@ -167,9 +167,9 @@ func preflightTags(rt reflect.Type) error {
 		if !hasGormIgnore(gormTag) {
 			return fmt.Errorf(
 				"vecgorm: %s.%s has a vec:\"...\" tag but is missing gorm:\"-\" "+
-					"and is not declared as vecgorm.Embedding. Either change the "+
+					"and is not declared as vecgorm.Embedding — either change the "+
 					"field type to vecgorm.Embedding (preferred) or add gorm:\"-\" "+
-					"so gorm's schema parser doesn't reject the unknown []float32 type.",
+					"so gorm's schema parser doesn't reject the unknown []float32 type",
 				rt.Name(), f.Name)
 		}
 	}
@@ -181,12 +181,10 @@ func preflightTags(rt reflect.Type) error {
 // schema parsing.
 func hasGormDataType(t reflect.Type) bool {
 	type dataTyper interface{ GormDataType() string }
-	if reflect.Zero(t).Interface().(any) != nil {
-		if _, ok := reflect.Zero(t).Interface().(dataTyper); ok {
-			return true
-		}
+	if _, ok := reflect.Zero(t).Interface().(dataTyper); ok {
+		return true
 	}
-	if t.Kind() != reflect.Ptr {
+	if t.Kind() != reflect.Pointer {
 		pt := reflect.PointerTo(t)
 		if _, ok := reflect.Zero(pt).Interface().(dataTyper); ok {
 			return true

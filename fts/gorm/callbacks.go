@@ -185,7 +185,7 @@ func columnValues(mm *modelMeta, row reflect.Value) ([]any, error) {
 	out := make([]any, len(mm.Fields))
 	for i, f := range mm.Fields {
 		v := row.FieldByIndex(f.FieldIndex)
-		for v.Kind() == reflect.Ptr {
+		for v.Kind() == reflect.Pointer {
 			if v.IsNil() {
 				return nil, fmt.Errorf("ftsgorm: %s field is nil pointer", f.FieldName)
 			}
@@ -217,7 +217,7 @@ func isSoftDeleted(_ *modelMeta, row reflect.Value) bool {
 
 // iterateRows normalizes db.Statement.ReflectValue into a flat list.
 func iterateRows(v reflect.Value) []reflect.Value {
-	for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
+	for v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface {
 		v = v.Elem()
 	}
 	switch v.Kind() {
@@ -227,7 +227,7 @@ func iterateRows(v reflect.Value) []reflect.Value {
 		out := make([]reflect.Value, 0, v.Len())
 		for i := 0; i < v.Len(); i++ {
 			elem := v.Index(i)
-			for elem.Kind() == reflect.Ptr {
+			for elem.Kind() == reflect.Pointer {
 				elem = elem.Elem()
 			}
 			if elem.Kind() == reflect.Struct {

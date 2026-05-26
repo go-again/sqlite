@@ -272,20 +272,39 @@ jobs:
       - name: Run gorm upstream test suite
         run: |
           cd "$WORK_DIR/gorm/tests"
+          # tee duplicates output to a file we parse for PASS/FAIL counts
+          # below. Two pitfalls we work around here:
+          #   1. GitHub Actions prefixes every line with a UTC timestamp,
+          #      even in the file written by tee — so we cannot anchor our
+          #      grep with `^--- PASS:`. We use an unanchored match.
+          #   2. `go test`'s exit code is masked by tee's (always 0). We
+          #      capture it via PIPESTATUS before the next command resets
+          #      $?, and disable errexit around the pipeline so a
+          #      legitimate test-fail doesn't abort our reporter.
+          set +e
           go test -count=1 -timeout 5m -v ./... 2>&1 | tee /tmp/gorm-upstream.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          # `grep -c` exits 1 on zero matches; `|| true` keeps the
+          # outer script alive so we can report the actual counts.
+          PASS=$(grep -c -- '--- PASS:' /tmp/gorm-upstream.log || true)
+          FAIL=$(grep -c -- '--- FAIL:' /tmp/gorm-upstream.log || true)
+          SKIP=$(grep -c -- '--- SKIP:' /tmp/gorm-upstream.log || true)
           echo "--- summary ---"
-          PASS=$(grep -cE '^--- PASS:' /tmp/gorm-upstream.log)
-          FAIL=$(grep -cE '^--- FAIL:' /tmp/gorm-upstream.log)
-          SKIP=$(grep -cE '^--- SKIP:' /tmp/gorm-upstream.log)
-          echo "PASS=$PASS FAIL=$FAIL SKIP=$SKIP"
-          # Floor matches docs/gorm-upstream.md (386 PASS / 0 FAIL on
-          # 2026-05-26). If gorm adds tests, bump the floor; if it removes
-          # tests, this catches a silent regression.
+          echo "PASS=$PASS FAIL=$FAIL SKIP=$SKIP go-test-exit=$rc"
+          if [ "$rc" -ne 0 ]; then
+              echo "::error::go test exited with $rc"
+              exit "$rc"
+          fi
           if [ "$FAIL" -ne 0 ]; then
               echo "::error::gorm upstream suite reports $FAIL failures"
               exit 1
           fi
-          if [ "$PASS" -lt 380 ]; then
-              echo "::error::gorm upstream PASS count regressed: got $PASS, expected >= 380"
+          # PASS count includes sub-test lines (which are indented in the
+          # file too) — for gorm v1.31.1 the total is ~15000. Floor at
+          # 10000 to catch a "no tests ran at all" regression without
+          # being brittle on minor gorm bumps.
+          if [ "$PASS" -lt 10000 ]; then
+              echo "::error::gorm upstream PASS count regressed: got $PASS, expected >= 10000"
               exit 1
           fi
