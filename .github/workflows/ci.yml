@@ -65,11 +65,17 @@ jobs:
           version: latest
           install-go: false
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        # v8 of the action defaults to golangci-lint v2.x, which is the
+        # major version `.golangci.yml` is written against (`version: "2"`).
+        # We also pin the binary to a v2 release explicitly so a future
+        # action revision that flips the default cannot silently downgrade
+        # us back into the v1 series. v2.x is built with Go 1.25, which
+        # matches go.mod and avoids the "Go language version used to build
+        # golangci-lint is lower than the targeted Go version" error that
+        # v1.x throws on Go 1.25 modules.
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
-          # .golangci.yml at the repo root configures the linter set and
-          # skips the dot-prefixed reference repositories.
+          version: v2.4.0
           args: --timeout 5m
 
   # Cross-build every modernc-supported GOOS/GOARCH so we catch
