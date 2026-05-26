@@ -29,11 +29,13 @@ linters:
         # The forked modernc wrapper does uintptr↔unsafe.Pointer arithmetic
         # by design (that's how it talks to lib/). Suppressing here matches
         # the `-unsafeptr=false` we already pass to `go vet` in justfile/CI.
+        #
+        # Note: only analyzer names present in golangci-lint v2's govet
+        # enum may appear here. `inline` was a v1.x label that is not in
+        # the v2 set; if a "Constant should be inlined" suggestion ever
+        # comes back from v2 govet, address it inline rather than adding
+        # an unrecognised disable entry that fails `config verify`.
         - unsafeptr
-        # `inline` is govet's stylistic suggestion to replace named
-        # constants (reflect.Ptr, etc.) with their numeric value. We keep
-        # the named forms for readability.
-        - inline
 
     staticcheck:
       checks:
