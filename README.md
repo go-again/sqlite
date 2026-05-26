@@ -376,7 +376,22 @@ Run them with `just test` (or `go test ./...`).
 
 ## License
 
-BSD-style, matching modernc.org/sqlite. See LICENSE.
+Apache 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+This project incorporates work from several upstream projects, each
+preserved under its original license:
+
+- [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) — BSD-style;
+  see [LICENSE.modernc](LICENSE.modernc). We fork the hand-written Go
+  wrapper to add per-connection APIs; the transpiled SQLite C code
+  remains an external dependency.
+- [github.com/mattn/go-sqlite3](https://github.com/mattn/go-sqlite3) —
+  MIT; see [LICENSE.mattn](LICENSE.mattn). A subset of mattn's tests is
+  vendored under the `mattn_upstream` build tag to validate drop-in
+  compatibility.
+- [github.com/glebarez/sqlite](https://github.com/glebarez/sqlite) —
+  MIT; see [LICENSE.glebarez](LICENSE.glebarez). The `gorm/` sub-package
+  is ported from glebarez.
 
 ## Acknowledgements
 

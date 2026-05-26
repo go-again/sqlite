@@ -156,3 +156,13 @@ just test
 If gorm bumps and the first command fails, the error message names the
 method that was added; decide whether to implement, stub, or document the
 gap.
+
+## Upstream suite
+
+Beyond the per-method matrix above, the full `gorm.io/gorm/tests`
+integration suite (the "12k tests" colloquially) runs against this
+dialector via a thin shim. As of 2026-05-26 against gorm v1.31.1 the
+result is **386 PASS / 0 FAIL / 22 SKIP**. The setup, reproduction
+recipe, and reasoning for each shim flag live in
+[gorm-upstream.md](gorm-upstream.md). The same recipe is enforced by
+the `gorm-upstream` CI job.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"strconv"
+	"strings"
 
 	"gorm.io/gorm/callbacks"
 
@@ -16,6 +17,23 @@ import (
 	"gorm.io/gorm/migrator"
 	"gorm.io/gorm/schema"
 )
+
+// applyGormDefaults injects DSN flags that match gorm's expectations of the
+// SQLite driver. mattn/go-sqlite3 advertises time.Time as the ScanType for
+// DATETIME columns; modernc's wrapper returns string unless _texttotime is
+// set. Without the flag, gorm's map-mode reads (`DB.Table(...).Find(&m)`)
+// hand callers an RFC3339 string instead of a time.Time, which breaks
+// equality checks in the upstream gorm/tests suite.
+func applyGormDefaults(dsn string) string {
+	if dsn == "" || strings.Contains(dsn, "_texttotime") {
+		return dsn
+	}
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	return dsn + sep + "_texttotime=1"
+}
 
 // DriverName is the default driver name for SQLite. Since
 // github.com/go-again/sqlite registers under both "sqlite" (modernc-style)
@@ -67,7 +85,7 @@ func (dialector Dialector) Initialize(db *gorm.DB) (err error) {
 	if dialector.Conn != nil {
 		db.ConnPool = dialector.Conn
 	} else {
-		conn, err := sql.Open(dialector.DriverName, dialector.DSN)
+		conn, err := sql.Open(dialector.DriverName, applyGormDefaults(dialector.DSN))
 		if err != nil {
 			return err
 		}

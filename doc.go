@@ -1,6 +1,6 @@
 // Copyright 2017 The Sqlite Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+// Use of this source code is governed by the Apache 2.0 license that can be
+// found in the LICENSE file.
 
 // Package sqlite is a sql/database driver using a CGo-free port of the C
 // SQLite3 library.

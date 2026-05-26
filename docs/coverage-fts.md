@@ -25,7 +25,7 @@ Underlying FTS5 docs: https://www.sqlite.org/fts5.html
 |---|---|---|---|
 | Single visible column (default `value`) | ✓ typed | `TestNew_DefaultOptions` | `fts.New[K, V](ctx, db, name, fts.Options{})`. |
 | Multiple visible columns via `Options.Columns` | ✓ typed | `TestIndex_MultiColumn`, `TestSearch_RankingWithColumnWeights` | `Match.Value` holds the first column; `Match.Extras[name]` holds the rest. |
-| `UNINDEXED` columns | ⚠ inherited | — | FTS5 supports `col UNINDEXED` to skip a column from the index. Not in our `Options`. |
+| `UNINDEXED` columns | ✓ raw | `TestRaw_UnindexedColumn` | FTS5 supports `col UNINDEXED` to skip a column from the index. Not in our typed `Options`. |
 
 ### Index options
 
@@ -44,7 +44,7 @@ Underlying FTS5 docs: https://www.sqlite.org/fts5.html
 | `detail=full` (default) | ✓ typed | — | `Options.Detail = fts.DetailFull` or zero. |
 | `detail=column` | ✓ typed | — | `Options.Detail = fts.DetailColumn`. |
 | `detail=none` | ✓ typed | — | `Options.Detail = fts.DetailNone`. |
-| `columnsize=0` | ⚠ inherited | — | Disables per-column-size tracking; tradeoff for ranking quality. Not in `Options`. |
+| `columnsize=0` | ✓ raw | `TestRaw_ColumnsizeZero` | Disables per-column-size tracking; tradeoff for ranking quality. Not in typed `Options`. |
 
 ## Query operators
 
@@ -89,8 +89,8 @@ through raw SQL.
 | `bm25(fts, w1, w2, ...)` | ✓ typed | exposed as `WithRanking(weights...)`; tested in `TestSearch_RankingWithColumnWeights` |
 | `snippet(fts, col, before, after, ellipsis, tokens)` | ✓ typed | exposed as `WithSnippet`; tested |
 | `highlight(fts, col, before, after)` | ✓ typed | exposed as `WithHighlight`; tested |
-| `matchinfo(fts[, flags])` | ⚠ inherited | — | Lower-level than bm25; useful for custom ranking. Raw SQL only. |
-| `rank` column on the FTS5 table | ⚠ inherited | — | Equivalent to `bm25()` with default weights; usable in raw SELECT. |
+| `matchinfo(fts[, flags])` | ✗ | — | FTS3/FTS4 only — not exported by FTS5. Probe confirmed `no such function: matchinfo`. Use `bm25()` or a custom rank function instead. |
+| `rank` column on the FTS5 table | ✓ raw | `TestRaw_RankColumn` | Equivalent to `bm25()` with default weights; asserted monotonic in ORDER BY rank. |
 
 ## Maintenance commands
 
@@ -101,10 +101,10 @@ Idiomatic FTS5 invocation: `INSERT INTO fts(fts) VALUES('command')`.
 | `'rebuild'` | ✓ typed | `TestExternal_ContentTable`, `TestContentless_*` (rebuild populates external/contentless indexes) |
 | `'optimize'` | ✓ typed | `TestIndex_OptimizeAndMerge` |
 | `'merge'`, with `rank` set to page count | ✓ typed | `TestIndex_OptimizeAndMerge` |
-| `'delete-all'` | ⚠ inherited | — | Clears contentless table; not in typed API. |
-| `'integrity-check'` | ⚠ inherited | — | Validates internal FTS5 invariants. Useful for diagnosing corruption. |
-| `'integrity-check', 1` (full check) | ⚠ inherited | — |
-| `'pgsz'`, `'crisismerge'`, `'usermerge'`, `'automerge'` (tuning knobs) | ⚠ inherited | — | Performance tuning. Raw SQL only. |
+| `'delete-all'` | ✓ raw | `TestRaw_ContentlessDeleteAll` | Clears contentless table; not in typed API. |
+| `'integrity-check'` | ✓ raw | `TestRaw_IntegrityCheck` | Validates internal FTS5 invariants. Useful for diagnosing corruption. |
+| `'integrity-check', 1` (full check) | ✓ raw | `TestRaw_IntegrityCheck` | Same test covers both the default and rank-coded forms. |
+| `'pgsz'`, `'crisismerge'`, `'automerge'` (tuning knobs) | ✓ raw | `TestRaw_PgszTuning`, `TestRaw_AutomergeAndCrisismerge` | Performance tuning. Raw SQL only. `usermerge` is accepted but not exercised here. |
 
 ## Insert / delete
 
@@ -113,7 +113,7 @@ Idiomatic FTS5 invocation: `INSERT INTO fts(fts) VALUES('command')`.
 | `INSERT INTO fts (rowid, col, ...) VALUES (...)` (single tx) | ✓ typed | `TestNew_DefaultOptions` |
 | Batch insert in a single transaction | ✓ typed | covered transitively (Insert wraps in `BeginTx`) |
 | `DELETE FROM fts WHERE rowid = ?` | ✓ typed | `TestIndex_Delete`, `TestContentless_DeleteSupported` |
-| `UPDATE fts SET col = ? WHERE rowid = ?` | ⚠ inherited | — | Works via raw SQL; no typed `Update`. |
+| `UPDATE fts SET col = ? WHERE rowid = ?` | ✓ raw | `TestRaw_UpdateRow` | Works via raw SQL; no typed `Update`. |
 
 ## Observability
 
@@ -129,15 +129,18 @@ Idiomatic FTS5 invocation: `INSERT INTO fts(fts) VALUES('command')`.
 - **No custom Go tokenizers.** FTS5's `fts5_tokenizer_v2` C API allows
   user-supplied tokenizers. We don't expose a Go binding. The four
   built-in tokenizers (Unicode61, Ascii, Porter, Trigram) are typed.
-- **No `matchinfo()` typed wrapper.** Power-user ranking needs the raw
-  binary blob FTS5 returns; unwrapping it client-side is non-trivial.
-  Reachable via raw SQL.
-- **No `integrity-check` typed wrapper.** Add when there's a real use
-  case; today, raw `INSERT INTO fts(fts) VALUES('integrity-check')`
-  works.
-- **No `delete-all` typed wrapper for contentless tables.** Same.
-- **No typed Update.** FTS5 supports `UPDATE` on rowid; we don't surface
-  it. Delete+Insert in a transaction is the supported pattern today.
+- **`matchinfo()` is not an FTS5 function.** It existed in FTS3/FTS4 and
+  is intentionally not carried over; `bm25()` (or a custom rank
+  function) replaces it. Confirmed via probe: SQLite returns
+  `no such function: matchinfo`.
+- **No `integrity-check` typed wrapper.** Reachable via raw SQL
+  (`TestRaw_IntegrityCheck`); add a typed wrapper when there's a real
+  use case.
+- **No `delete-all` typed wrapper for contentless tables.** Reachable
+  via raw SQL (`TestRaw_ContentlessDeleteAll`).
+- **No typed Update.** FTS5 supports `UPDATE` on rowid
+  (`TestRaw_UpdateRow`); we don't surface it. Delete+Insert in a
+  transaction is the supported typed pattern today.
 
 ## SQLType constraint
 

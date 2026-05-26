@@ -1,0 +1,54 @@
+github.com/go-again/sqlite
+Copyright 2026 The go-again/sqlite Authors
+
+This product includes software developed at the following projects:
+
+============================================================================
+modernc.org/sqlite
+Copyright (c) 2017 The Sqlite Authors
+Licensed under a BSD-style license; see LICENSE.modernc for the full text.
+============================================================================
+
+This product forks the hand-written Go wrapper of modernc.org/sqlite — the
+pure-Go SQLite driver — to add per-connection methods and mattn-compatible
+constructors. The transpiled SQLite C code in modernc.org/sqlite/lib and the
+sqlite-vec extension in modernc.org/sqlite/vec remain external dependencies
+under their original licenses.
+
+============================================================================
+github.com/mattn/go-sqlite3
+Copyright (c) 2014 Yasuhiro Matsumoto
+Licensed under the MIT License; see LICENSE.mattn for the full text.
+============================================================================
+
+This product reproduces a subset of mattn/go-sqlite3's tests
+(`mattn_*_upstream_test.go` files, behind the `mattn_upstream` build tag)
+verbatim to validate drop-in compatibility. The wrapper compatibility shim
+(`compat_*.go`) does not contain mattn source; it implements the same
+exported surface against modernc's runtime.
+
+============================================================================
+github.com/glebarez/sqlite
+Copyright (c) 2013-NOW Jinzhu <wosmvp@gmail.com>
+Licensed under the MIT License; see LICENSE.glebarez for the full text.
+============================================================================
+
+The `gorm/` sub-package ports the gorm.io/driver/sqlite (glebarez) dialector
+to use the go-again driver. The ported files retain glebarez's MIT
+attribution alongside this project's notice.
+
+============================================================================
+SQLite
+Public domain
+============================================================================
+
+SQLite itself is in the public domain. https://www.sqlite.org/copyright.html
+
+============================================================================
+asg017/sqlite-vec
+Copyright (c) 2024 Alex Garcia
+Licensed under either Apache License 2.0 or MIT License.
+============================================================================
+
+The vec/ sub-package wraps Alex Garcia's sqlite-vec extension as
+auto-registered via modernc.org/sqlite/vec.

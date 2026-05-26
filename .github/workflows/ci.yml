@@ -126,10 +126,148 @@ jobs:
           go build ./vfs/...
           go build ./vec/... || echo "vec not supported on ${GOOS}/${GOARCH} — skipping"
 
-  # NOTE: A "gorm-upstream" job that ran gorm.io/gorm's full test suite
-  # against this dialector lived here previously but was a stub — it used a
-  # fake go.mod replace and was marked continue-on-error, so it never
-  # signalled anything useful. Removed to keep CI honest. The local gorm
-  # tests in ./gorm/ exercise every Dialector/Migrator path we care about.
-  # Re-add this job only with a real go.mod replace and without
-  # continue-on-error, otherwise it goes back to lying.
+  # Run the vendored subset of modernc.org/sqlite's own test suite against
+  # this fork. See docs/modernc-upstream.md for what's in/out and why.
+  # The `modernc_upstream` build tag gates this so the default `go test`
+  # path stays fast.
+  modernc_upstream:
+    name: modernc-upstream
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+      - name: go test -tags=modernc_upstream
+        run: go test -tags=modernc_upstream -count=1 -timeout 5m -v .
+
+  # Run the vendored subset of mattn/go-sqlite3's test suite against this
+  # fork. See docs/mattn-upstream.md for what's in/out and why — the
+  # subset is small because mattn's tests probe mattn-internal types
+  # heavily, not the database/sql contract. This lane is a canary for
+  # the mattn-compat surface (math UDFs, unlock-notify semantics, DSN
+  # flag handling), not a parity proof.
+  mattn_upstream:
+    name: mattn-upstream
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+      - name: go test -tags=mattn_upstream
+        run: go test -tags=mattn_upstream -count=1 -timeout 5m -v -run 'TestMath|TestUnlock' .
+
+  # Run gorm.io/gorm's own integration test suite against our dialector.
+  # The setup, reasoning, and current pass/fail counts live in
+  # docs/gorm-upstream.md; this job is the CI-enforced version of the
+  # recipe documented there. We pin gorm to the same version go.mod
+  # depends on, so the suite stays in lockstep with our `gorm/` package.
+  gorm_upstream:
+    name: gorm-upstream (v1.31.1)
+    runs-on: ubuntu-latest
+    env:
+      GORM_VERSION: v1.31.1
+      WORK_DIR: ${{ github.workspace }}/.gorm-upstream
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: sqlite
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+
+      - name: Clone gorm at pinned version
+        run: |
+          mkdir -p "$WORK_DIR"
+          git clone --depth 1 --branch "$GORM_VERSION" \
+            https://github.com/go-gorm/gorm.git "$WORK_DIR/gorm"
+
+      - name: Write shim module re-exporting our dialector
+        # The upstream tests import gorm.io/driver/sqlite. We expose
+        # github.com/go-again/sqlite/gorm under that path via a tiny shim,
+        # then append WAL + busy_timeout DSN flags so modernc's pure-Go
+        # file locks don't return SQLITE_BUSY on concurrent goroutines —
+        # mattn/go-sqlite3 (which gorm's tests were written against)
+        # serializes via libc-level locks instead.
+        run: |
+          mkdir -p "$WORK_DIR/shim"
+          cat > "$WORK_DIR/shim/go.mod" <<EOF
+          module gorm.io/driver/sqlite
+
+          go 1.25.0
+
+          require (
+              github.com/go-again/sqlite v0.0.0
+              gorm.io/gorm $GORM_VERSION
+          )
+
+          replace github.com/go-again/sqlite => ${{ github.workspace }}/sqlite
+          EOF
+          cat > "$WORK_DIR/shim/sqlite.go" <<'EOF'
+          package sqlite
+
+          import (
+              "strings"
+
+              gagorm "github.com/go-again/sqlite/gorm"
+              "gorm.io/gorm"
+          )
+
+          const DriverName = gagorm.DriverName
+
+          type (
+              Dialector = gagorm.Dialector
+              Config    = gagorm.Config
+          )
+
+          const extraFlags = "_busy_timeout=5000&_journal=WAL&_sync=NORMAL"
+
+          func withFlags(dsn string) string {
+              if dsn == "" || strings.HasPrefix(dsn, ":memory:") || strings.Contains(dsn, "busy_timeout") {
+                  return dsn
+              }
+              sep := "?"
+              if strings.Contains(dsn, "?") {
+                  sep = "&"
+              }
+              return dsn + sep + extraFlags
+          }
+
+          func Open(dsn string) gorm.Dialector { return gagorm.Open(withFlags(dsn)) }
+          func New(cfg Config) gorm.Dialector {
+              cfg.DSN = withFlags(cfg.DSN)
+              return gagorm.New(cfg)
+          }
+          EOF
+          (cd "$WORK_DIR/shim" && go mod tidy)
+
+      - name: Wire shim into gorm/tests module
+        run: |
+          cat >> "$WORK_DIR/gorm/tests/go.mod" <<EOF
+
+          replace gorm.io/driver/sqlite => $WORK_DIR/shim
+          replace github.com/go-again/sqlite => ${{ github.workspace }}/sqlite
+          EOF
+          (cd "$WORK_DIR/gorm/tests" && go mod tidy)
+
+      - name: Run gorm upstream test suite
+        run: |
+          cd "$WORK_DIR/gorm/tests"
+          go test -count=1 -timeout 5m -v ./... 2>&1 | tee /tmp/gorm-upstream.log
+          echo "--- summary ---"
+          PASS=$(grep -cE '^--- PASS:' /tmp/gorm-upstream.log)
+          FAIL=$(grep -cE '^--- FAIL:' /tmp/gorm-upstream.log)
+          SKIP=$(grep -cE '^--- SKIP:' /tmp/gorm-upstream.log)
+          echo "PASS=$PASS FAIL=$FAIL SKIP=$SKIP"
+          # Floor matches docs/gorm-upstream.md (386 PASS / 0 FAIL on
+          # 2026-05-26). If gorm adds tests, bump the floor; if it removes
+          # tests, this catches a silent regression.
+          if [ "$FAIL" -ne 0 ]; then
+              echo "::error::gorm upstream suite reports $FAIL failures"
+              exit 1
+          fi
+          if [ "$PASS" -lt 380 ]; then
+              echo "::error::gorm upstream PASS count regressed: got $PASS, expected >= 380"
+              exit 1
+          fi
