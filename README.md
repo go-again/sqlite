@@ -341,6 +341,11 @@ Per-surface coverage matrices live in [`docs/`](docs/):
 - [`docs/coverage-fts.md`](docs/coverage-fts.md) — every FTS5 index
   option, query operator, search option, auxiliary function, and
   maintenance command.
+- [`docs/coverage-sql.md`](docs/coverage-sql.md) — methodical
+  feature-by-feature matrix of the raw SQL surface (SELECT clauses,
+  joins, CTEs, window functions, JSON1, datetime, constraints,
+  triggers, UPSERT, RETURNING, PRAGMA, etc.) exercised by 182 tests
+  in [`tests/sql/`](tests/sql/).
 
 Read these before filing "does this package support X?" — answer is
 in the matrices.

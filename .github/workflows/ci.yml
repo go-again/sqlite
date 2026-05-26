@@ -126,6 +126,24 @@ jobs:
           go build ./vfs/...
           go build ./vec/... || echo "vec not supported on ${GOOS}/${GOARCH} — skipping"
 
+  # Run the SQL conformance suite under tests/sql/. This is our methodical
+  # feature-by-feature proof that every documented SQLite SQL surface the
+  # driver exposes actually works. See docs/coverage-sql.md for the matrix.
+  sql_conformance:
+    name: sql-conformance
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+      - name: go test ./tests/sql/...
+        run: go test -count=1 -timeout 2m -v ./tests/sql/...
+
   # Run the vendored subset of modernc.org/sqlite's own test suite against
   # this fork. See docs/modernc-upstream.md for what's in/out and why.
   # The `modernc_upstream` build tag gates this so the default `go test`
