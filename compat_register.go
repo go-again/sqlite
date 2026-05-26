@@ -249,7 +249,7 @@ func reflectAggregator(impl any) (func(FunctionContext) (AggregateFunction, erro
 	}
 	stateT := t.Out(0)
 	stateForCall := stateT
-	if stateT.Kind() == reflect.Ptr {
+	if stateT.Kind() == reflect.Ptr { //nolint:govet // inline: reflect.Ptr alias kept for readability over the numeric constant
 		stateForCall = stateT
 	}
 

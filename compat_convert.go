@@ -138,7 +138,7 @@ func goToDriverValue(v reflect.Value) driver.Value {
 			}
 			return v.Bytes()
 		}
-	case reflect.Interface, reflect.Ptr:
+	case reflect.Interface, reflect.Ptr: //nolint:govet // inline: reflect.Ptr alias kept for readability over the numeric constant
 		if v.IsNil() {
 			return nil
 		}
