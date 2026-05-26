@@ -34,10 +34,37 @@ func (m Migrator) HasTable(value any) bool {
 	return count > 0
 }
 
+// DropTableHook is implemented by gorm plugins that own a sidecar
+// table or set of triggers tied to a gorm-managed source table. Our
+// Migrator's DropTable iterates db.Config.Plugins and calls
+// DropTableHook on each implementer BEFORE issuing the source DROP,
+// so the cascade is transparent to the user.
+//
+// vec/gorm and fts/gorm both implement this so
+// `db.Migrator().DropTable(&Model{})` cleans up sidecars + triggers.
+type DropTableHook interface {
+	DropTableHook(db *gorm.DB, model any) error
+}
+
 func (m Migrator) DropTable(values ...any) error {
 	return m.RunWithoutForeignKey(func() error {
 		values = m.ReorderModels(values, false)
 		tx := m.DB.Session(&gorm.Session{})
+
+		// Invoke per-plugin DropTableHook implementations FIRST so
+		// sidecars / triggers are torn down before the source table.
+		// Order: same as values; hooks run for each model in turn so
+		// each plugin can read schema metadata while the source still
+		// exists.
+		for _, v := range values {
+			for _, plugin := range m.DB.Config.Plugins {
+				if hook, ok := plugin.(DropTableHook); ok {
+					if err := hook.DropTableHook(tx, v); err != nil {
+						return err
+					}
+				}
+			}
+		}
 
 		for i := len(values) - 1; i >= 0; i-- {
 			if err := m.RunWithValue(values[i], func(stmt *gorm.Statement) error {

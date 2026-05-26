@@ -28,7 +28,7 @@ func TestStr_SubstrOffsets(t *testing.T) {
 		{`select substr('abcdef', 1, 3)`, "abc"},
 		{`select substr('abcdef', 2, 3)`, "bcd"},
 		{`select substr('abcdef', 4)`, "def"},
-		{`select substr('abcdef', -2)`, "ef"},      // negative offset from end
+		{`select substr('abcdef', -2)`, "ef"}, // negative offset from end
 		{`select substr('abcdef', -3, 2)`, "de"},
 		{`select substring('abcdef', 1, 2)`, "ab"}, // SQL standard alias
 	}

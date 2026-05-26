@@ -224,7 +224,7 @@ func TestType_NullSortOrder(t *testing.T) {
 	}
 }
 
-// TestType_EmptyVsNull asserts SQLite distinguishes '' from NULL and that
+// TestType_EmptyVsNull asserts SQLite distinguishes ” from NULL and that
 // the != operator returns NULL (not true) when one side is NULL.
 func TestType_EmptyVsNull(t *testing.T) {
 	db := openDB(t)

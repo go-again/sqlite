@@ -441,7 +441,7 @@ func (i *Index[K, V]) buildSearchSQL(q Query, cfg *searchConfig) (string, []any,
 	b.WriteString(" WHERE ")
 	b.WriteString(quote(i.name))
 	b.WriteString(" MATCH ?")
-	args = append(args, q.build())
+	args = append(args, q.Build())
 
 	if cfg.withRank {
 		b.WriteString(" ORDER BY __rank")

@@ -37,11 +37,11 @@ func encodeBinary(v []float32) []byte {
 	return buf
 }
 
-// encodeValue routes through encodeJSON or encodeBinary according to enc, and
-// returns a value suitable for sql.DB.Exec args. JSON yields a string; Binary
-// yields a []byte. Both forms are accepted by sqlite-vec's vec0 module.
-func encodeValue(v []float32, enc Encoding) any {
-	switch enc {
+// Encode serializes a []float32 into a value suitable for sql.DB.Exec
+// bindings. JSON yields a string; Binary yields a []byte. Both forms are
+// accepted by sqlite-vec's vec0 module.
+func (e Encoding) Encode(v []float32) any {
+	switch e {
 	case Binary:
 		return encodeBinary(v)
 	default:
@@ -49,14 +49,19 @@ func encodeValue(v []float32, enc Encoding) any {
 	}
 }
 
-// matchPlaceholder returns the SQL fragment used to bind a vector argument on
-// the right-hand side of MATCH. JSON needs no wrapping; Binary needs to be
-// run through sqlite-vec's vec_f32 constructor so the BLOB is interpreted
-// correctly. We bind the actual value as a separate parameter to keep prepared-
-// statement caching happy.
-func matchPlaceholder(enc Encoding) string {
-	if enc == Binary {
+// Placeholder returns the SQL fragment used to bind a vector argument
+// on the right-hand side of MATCH. JSON needs no wrapping ("?"); Binary
+// needs to be run through sqlite-vec's vec_f32 constructor ("vec_f32(?)")
+// so the BLOB is interpreted correctly.
+func (e Encoding) Placeholder() string {
+	if e == Binary {
 		return "vec_f32(?)"
 	}
 	return "?"
 }
+
+// encodeValue / matchPlaceholder are the legacy private helpers — kept
+// as thin wrappers so existing call sites compile unchanged. New code
+// should call the methods on Encoding directly.
+func encodeValue(v []float32, enc Encoding) any { return enc.Encode(v) }
+func matchPlaceholder(enc Encoding) string      { return enc.Placeholder() }

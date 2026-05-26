@@ -13,7 +13,7 @@ import (
 // Raw lets you fall through to FTS5's native syntax when the builder doesn't
 // cover something you need (e.g. column filters in legacy spelling).
 type Query interface {
-	build() string
+	Build() string
 }
 
 // Raw lets you pass an FTS5 MATCH expression verbatim. The string is bound
@@ -23,7 +23,7 @@ func Raw(s string) Query { return rawQ(s) }
 
 type rawQ string
 
-func (r rawQ) build() string { return string(r) }
+func (r rawQ) Build() string { return string(r) }
 
 // Term matches a single token. FTS5 special characters in s are escaped by
 // double-quoting the whole term, which FTS5 treats as a string literal token.
@@ -31,7 +31,7 @@ func Term(s string) Query { return termQ(s) }
 
 type termQ string
 
-func (t termQ) build() string {
+func (t termQ) Build() string {
 	return ftsQuoteTerm(string(t))
 }
 
@@ -44,7 +44,7 @@ func Phrase(tokens ...string) Query { return phraseQ(tokens) }
 
 type phraseQ []string
 
-func (p phraseQ) build() string {
+func (p phraseQ) Build() string {
 	escaped := make([]string, len(p))
 	for i, t := range p {
 		// Inside a phrase, FTS5 still treats unbalanced double quotes as a
@@ -60,7 +60,7 @@ func Prefix(s string) Query { return prefixQ(s) }
 
 type prefixQ string
 
-func (p prefixQ) build() string {
+func (p prefixQ) Build() string {
 	// Prefix tokens cannot be quoted in FTS5, but they don't need special
 	// escaping either — they are matched as token-character runs followed by
 	// the literal star.
@@ -72,10 +72,10 @@ func And(qs ...Query) Query { return andQ(qs) }
 
 type andQ []Query
 
-func (a andQ) build() string {
+func (a andQ) Build() string {
 	parts := make([]string, len(a))
 	for i, q := range a {
-		parts[i] = "(" + q.build() + ")"
+		parts[i] = "(" + q.Build() + ")"
 	}
 	return strings.Join(parts, " AND ")
 }
@@ -85,10 +85,10 @@ func Or(qs ...Query) Query { return orQ(qs) }
 
 type orQ []Query
 
-func (o orQ) build() string {
+func (o orQ) Build() string {
 	parts := make([]string, len(o))
 	for i, q := range o {
-		parts[i] = "(" + q.build() + ")"
+		parts[i] = "(" + q.Build() + ")"
 	}
 	return strings.Join(parts, " OR ")
 }
@@ -105,15 +105,15 @@ type notQ struct {
 	neg []Query
 }
 
-func (n notQ) build() string {
+func (n notQ) Build() string {
 	if len(n.neg) == 0 {
-		return n.pos.build()
+		return n.pos.Build()
 	}
 	negs := make([]string, len(n.neg))
 	for i, q := range n.neg {
-		negs[i] = "(" + q.build() + ")"
+		negs[i] = "(" + q.Build() + ")"
 	}
-	return "(" + n.pos.build() + ") NOT (" + strings.Join(negs, " OR ") + ")"
+	return "(" + n.pos.Build() + ") NOT (" + strings.Join(negs, " OR ") + ")"
 }
 
 // Near matches terms appearing within `distance` tokens of each other in any
@@ -127,7 +127,7 @@ type nearQ struct {
 	terms []string
 }
 
-func (n nearQ) build() string {
+func (n nearQ) Build() string {
 	quoted := make([]string, len(n.terms))
 	for i, t := range n.terms {
 		quoted[i] = ftsQuoteTerm(t)
@@ -149,8 +149,8 @@ type columnQ struct {
 	q   Query
 }
 
-func (c columnQ) build() string {
-	return c.col + ": (" + c.q.build() + ")"
+func (c columnQ) Build() string {
+	return c.col + ": (" + c.q.Build() + ")"
 }
 
 // ftsQuoteTerm wraps a term in double-quotes for FTS5, doubling any embedded

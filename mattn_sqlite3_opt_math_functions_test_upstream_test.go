@@ -5,7 +5,6 @@
 
 //go:build mattn_upstream
 
-
 package sqlite
 
 import (

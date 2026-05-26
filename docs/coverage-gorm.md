@@ -166,3 +166,68 @@ result is **386 PASS / 0 FAIL / 22 SKIP**. The setup, reproduction
 recipe, and reasoning for each shim flag live in
 [gorm-upstream.md](gorm-upstream.md). The same recipe is enforced by
 the `gorm-upstream` CI job.
+
+## Deep integration: `vec/gorm` and `fts/gorm`
+
+Tag-driven sidecar packages live under `github.com/go-again/sqlite/vec/gorm`
+and `github.com/go-again/sqlite/fts/gorm`. They register as gorm
+plugins and own the full lifecycle of the sidecar (vec0 virtual table /
+FTS5 external-content table + triggers).
+
+### Tag syntax — vec
+
+| Key | Required | Meaning |
+|---|---|---|
+| `dim=N` | yes | Embedding dimension. |
+| `metric=l2 \| cosine \| dot` | no | Distance metric. Default `l2`. |
+| `encoding=json \| binary` | no | Wire encoding. Default `binary`. |
+| `table=NAME` | no | Override sidecar table name. Default `<source>_vec`. |
+| `column=NAME` | no | Override embedding column. Default `embedding`. |
+
+The tagged field's type must be either `vecgorm.Embedding`
+(recommended) or `[]float32` with `gorm:"-"` alongside. The wrapper
+type implements gorm's `GormDataType` interface so the schema parser
+accepts it; the plugin then sets `IgnoreMigration=true` so no column
+lands on the source table.
+
+### Tag syntax — fts5
+
+| Key | Required | Meaning |
+|---|---|---|
+| `tokenize=NAME[+args]` | no | FTS5 tokenize option. Spaces escaped as `+`. |
+| `prefix=N1,N2,...` | no | Pre-computed prefix-match index sizes. |
+| `column=NAME` | no | Override FTS5 column name (default = lowercase field). |
+| `table=NAME` | no | Override FTS5 table. Default `<source>_fts`. |
+| `detail=full \| column \| none` | no | FTS5 detail= option. |
+| `external=true \| false` | no | External-content mode (default true). false → in-table FTS5 manages text itself. |
+| `contentless=true` | no | Contentless FTS5 (index only, no text). Snippet/highlight are rejected at search time. Mutually exclusive with `external=true`. |
+
+Multiple `fts5:`-tagged fields on one model share **one** FTS5 table.
+Conflicting table-level keys across fields are rejected at parse time.
+
+### Lifecycle matrix
+
+| Event | vec/gorm behavior | fts/gorm behavior |
+|---|---|---|
+| Plugin install | `db.Use(vecgorm.Plugin())` | `db.Use(ftsgorm.Plugin())` |
+| AutoMigrate | `vecgorm.Migrate(db, &T{})` creates source + sidecar | `ftsgorm.Migrate(db, &T{})` creates source + FTS5 table + triggers |
+| Create | AfterCreate callback `BatchInsert` (single tx) | AFTER INSERT trigger writes to FTS5 |
+| Save/Update | AfterUpdate callback `(*vec.Table).Update` | AFTER UPDATE trigger refreshes index |
+| Delete (hard) | AfterDelete callback `(*vec.Table).Delete` | AFTER DELETE trigger emits FTS5 `'delete'` |
+| Delete (soft, via `gorm.DeletedAt`) | Sidecar `deleted` flag flipped to 1 | FTS5's UNINDEXED `deleted_at` mirror set by trigger |
+| KNN / Search | Soft-deleted excluded by default; `IncludeDeleted()` overrides | Same |
+| DropSidecar | Drops sidecar table | Drops FTS5 table + all three triggers (for external mode) |
+| Source DropTable | Cascades into sidecar via DropTableHook on our gorm Dialector | Cascades into FTS5 table + triggers |
+| dim mismatch on re-migrate | Logged warning, existing sidecar left alone | n/a |
+
+### Tests
+
+| File | Tests | Notes |
+|---|---|---|
+| `vec/gorm/vecgorm_test.go` | 12 | Basic create/update/delete, KNN ranking, BatchInsert single-tx, soft-delete, Embedding wrapper |
+| `vec/gorm/lifecycle_test.go` | 9 | DropTable cascade, DropSidecar, composite PK rejection, tag validation, WithFilter, dim mismatch |
+| `fts/gorm/ftsgorm_test.go` | 10 | Migrate creates index + triggers, search/snippet/highlight, ranking, soft-delete, backfill |
+| `fts/gorm/lifecycle_test.go` | 8 | Conflicting tags, non-string fields, composite PK, LIMIT/OFFSET, no-plugin error, DropTable cascade |
+| `fts/gorm/mode_test.go` | 7 | external/in-table/contentless modes, conflicting modes rejected, contentless rejects snippet, in-table soft-delete |
+
+46 tests total, all passing on linux/macos.

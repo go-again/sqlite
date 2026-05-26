@@ -107,7 +107,7 @@ func (o *Observable[K, V]) Search(ctx context.Context, q Query, opts ...SearchOp
 	start := time.Now()
 	matchStr := ""
 	if q != nil {
-		matchStr = q.build()
+		matchStr = q.Build()
 	}
 	inner := o.inner.Search(ctx, q, opts...)
 	return func(yield func(Match[K, V], error) bool) {

@@ -25,23 +25,23 @@ type Table struct {
 	encoding  Encoding
 }
 
-// quote returns name in backticks, escaping any embedded backticks. We rely
-// on this for identifier interpolation outside the vec0 constructor since
+// QuoteIdent returns name in backticks, escaping any embedded backticks.
+// Used for SQL identifier interpolation outside the vec0 constructor —
 // SQLite treats table/column names as identifiers, not bind parameters.
 //
-// Note: vec0's CREATE VIRTUAL TABLE column-argument parser does NOT accept
-// quoted identifiers — only bare names — so we validate identifiers used in
-// the constructor with validIdent below and never call quote on them.
-func quote(name string) string {
+// Note: vec0's CREATE VIRTUAL TABLE column-argument parser does NOT
+// accept quoted identifiers — only bare names — so identifiers fed
+// into that constructor must pass ValidIdent and be interpolated raw.
+func QuoteIdent(name string) string {
 	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
 }
 
-// validIdent guards against SQL injection for callers passing arbitrary
-// strings as table or column names. A valid identifier here is the
-// conservative ASCII subset: leading letter or underscore, then letters,
-// digits, or underscores. Any other input must be rejected at the API
-// boundary rather than blindly interpolated.
-func validIdent(s string) bool {
+// ValidIdent reports whether name is a safe SQL identifier — the
+// conservative ASCII subset: leading letter or underscore, then
+// letters, digits, or underscores. Used to guard against SQL injection
+// at the API boundary when callers pass arbitrary strings as table or
+// column names.
+func ValidIdent(s string) bool {
 	if s == "" {
 		return false
 	}
@@ -57,6 +57,12 @@ func validIdent(s string) bool {
 	}
 	return true
 }
+
+// quote / validIdent are the legacy private aliases — kept so the rest
+// of the vec package compiles unchanged. New code (and sub-packages
+// like vec/gorm) should use the exported names.
+func quote(name string) string { return QuoteIdent(name) }
+func validIdent(s string) bool { return ValidIdent(s) }
 
 // Create runs `CREATE VIRTUAL TABLE name USING vec0(embedding float[dim])`
 // with the supplied options and returns a Table handle. Use IF NOT EXISTS via

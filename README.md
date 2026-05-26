@@ -142,6 +142,74 @@ matches, _ := idx.SearchSlice(ctx, fts.Term("fox"),
 
 See [`examples/fts-search/`](examples/fts-search/main.go).
 
+### Deep gorm integration — tag-driven vec & FTS5
+
+The `vec/gorm` and `fts/gorm` sub-packages bridge gorm models to the
+vector / full-text sidecars. Tag a field, register the plugin, and
+gorm Create/Update/Delete maintains the sidecar automatically. Typed
+`KNN[T]` / `Search[T]` helpers return matching gorm models in
+ranking order with distance / rank attached.
+
+```go
+import (
+    _ "github.com/go-again/sqlite"
+    sqlitegorm "github.com/go-again/sqlite/gorm"
+    "github.com/go-again/sqlite/fts"
+    ftsgorm "github.com/go-again/sqlite/fts/gorm"
+    vecgorm "github.com/go-again/sqlite/vec/gorm"
+)
+
+type Document struct {
+    ID        uint   `gorm:"primaryKey"`
+    Title     string `fts5:"tokenize=porter+unicode61"`
+    Body      string `fts5:"tokenize=porter+unicode61"`
+    Embedding vecgorm.Embedding `vec:"dim=384;metric=cosine"`
+}
+
+db, _ := gorm.Open(sqlitegorm.Open("app.db"), &gorm.Config{})
+db.Use(vecgorm.Plugin())
+db.Use(ftsgorm.Plugin())
+
+vecgorm.Migrate(db, &Document{}) // creates documents + documents_vec
+ftsgorm.Migrate(db, &Document{}) // creates documents_fts + triggers
+
+db.Create(&Document{Title: "Hello", Body: "world", Embedding: vec})
+
+// Find documents semantically similar to a query vector:
+near, _ := vecgorm.KNN[Document](ctx, db, queryVec, 5)
+
+// Find documents matching a phrase, ranked by BM25:
+hits, _ := ftsgorm.Search[Document](ctx, db, fts.Term("world"))
+```
+
+Tag-driven features:
+
+- Auto-migrate sidecar tables alongside `db.AutoMigrate`.
+- Sync-on-write callbacks (vec) or triggers (FTS5) — including
+  `CreateInBatches` in a single transaction per batch.
+- Soft-delete awareness: models using `gorm.DeletedAt` get a
+  metadata column on the sidecar; KNN/Search excludes them
+  automatically. Pass `IncludeDeleted()` to override.
+- Typed helpers return `[]Result[T]` ordered by ranking so callers
+  don't have to rebuild the IN-clause + re-sort dance.
+- `db.Migrator().DropTable(&Model{})` cascades into the sidecar
+  (vec0 table or FTS5 table + triggers) via the dialector's
+  `DropTableHook` interface — no manual cleanup needed.
+- FTS5 mode is configurable per tag: `external` (default,
+  triggers-driven), `external=false` (in-table FTS5), or
+  `contentless=true` (index only, no text).
+
+The embedding field type is `vecgorm.Embedding` (a `[]float32`
+alias that implements gorm's `GormDataType`); `[]float32` with
+`gorm:"-"` also works for callers who prefer not to import the
+wrapper.
+
+See [`vec/gorm/`](vec/gorm/) and [`fts/gorm/`](fts/gorm/) for full
+package docs and [`examples/gorm-vec-tagged/`](examples/gorm-vec-tagged/)
++ [`examples/gorm-fts-tagged/`](examples/gorm-fts-tagged/) for
+runnable end-to-end usage; coverage matrix lives in
+[`docs/coverage-gorm.md`](docs/coverage-gorm.md).
+
 ### `embed.FS`-backed read-only databases
 
 ```go

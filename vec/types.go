@@ -23,7 +23,7 @@ const (
 
 // String renders a metric for logging and inspection. The strings are
 // approximate human labels, not the keywords sqlite-vec accepts in the
-// vec0 constructor — see metricKeyword for that.
+// vec0 constructor — see Keyword for that.
 func (m Metric) String() string {
 	switch m {
 	case L2:
@@ -34,6 +34,20 @@ func (m Metric) String() string {
 		return "Dot(L1)"
 	}
 	return fmt.Sprintf("Metric(%d)", int(m))
+}
+
+// Keyword returns the sqlite-vec vec0() constructor keyword for this
+// metric: "l2", "cosine", or "l1" (for the Dot alias). Use this when
+// building CREATE VIRTUAL TABLE statements outside vec.Create.
+func (m Metric) Keyword() string {
+	switch m {
+	case Cosine:
+		return "cosine"
+	case Dot:
+		return "l1"
+	}
+	// L2 / unknown
+	return "l2"
 }
 
 // Encoding chooses how this package serializes []float32 vectors when sending

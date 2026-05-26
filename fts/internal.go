@@ -5,17 +5,18 @@ import (
 	"strings"
 )
 
-// quote returns name in backticks, escaping any embedded backticks. Used for
-// table/column identifier interpolation. Sub-package vec has an identical
-// helper; we keep them separate so the two packages stay independent.
-func quote(name string) string {
+// QuoteIdent returns name in backticks, escaping any embedded backticks.
+// Used for SQL identifier interpolation outside FTS5's option parser.
+func QuoteIdent(name string) string {
 	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
 }
 
-// validIdent is the conservative ASCII subset accepted as a SQL identifier:
-// leading letter or underscore, then letters/digits/underscores. Anything
-// else is rejected at the API boundary rather than silently interpolated.
-func validIdent(s string) bool {
+// ValidIdent reports whether name is a safe SQL identifier — the
+// conservative ASCII subset: leading letter or underscore, then
+// letters/digits/underscores. Used to guard against injection at the
+// API boundary when callers pass arbitrary strings as table or column
+// names.
+func ValidIdent(s string) bool {
 	if s == "" {
 		return false
 	}
@@ -31,6 +32,12 @@ func validIdent(s string) bool {
 	}
 	return true
 }
+
+// quote / validIdent are legacy private aliases — kept so the rest of
+// the fts package compiles unchanged. Sub-packages like fts/gorm use
+// the exported names directly.
+func quote(name string) string { return QuoteIdent(name) }
+func validIdent(s string) bool { return ValidIdent(s) }
 
 // assignSQLType converts a SQLite-scanned value to the concrete generic type
 // T. The driver's underlying types are restricted to nil, int64, float64,
