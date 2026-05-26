@@ -17,13 +17,13 @@ go test -tags=mattn_upstream -count=1 -timeout 5m .
 
 ## What's vendored and passing
 
-| File | Tests | Status |
-|---|---|---|
-| `mattn_sqlite3_opt_math_functions_test_upstream_test.go` | 1 | ✓ pass |
-| `mattn_sqlite3_opt_unlock_notify_test_upstream_test.go` | 3 | ✓ pass |
+| File | Status |
+|---|---|
+| `mattn_sqlite3_opt_math_functions_test_upstream_test.go` | ✓ passes |
+| `mattn_sqlite3_opt_unlock_notify_test_upstream_test.go` | ✓ passes |
 
-Headline: **4/4 PASS in ~1.5 s** (vendored subset, excluding our own
-co-located tests that the tag also picks up).
+All vendored tests pass (excluding our own co-located tests that
+the tag also picks up).
 
 ## What's NOT vendored — and the divergences each surfaces
 

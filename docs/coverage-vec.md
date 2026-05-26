@@ -137,3 +137,11 @@ When `modernc.org/sqlite` bumps and `modernc.org/sqlite/vec` follows,
 re-run the recipe and watch for changes in `TestRaw_SqliteVecSample`'s
 distance assertions. Those assertions reproduce the upstream documentation
 fixture verbatim; a delta there means upstream changed numeric output.
+
+## See also
+
+- [`coverage-gorm.md`](coverage-gorm.md) — covers the tag-driven
+  `vec/gorm` bridge that wraps `vec.Table` for gorm models.
+- [`../examples/vec-search/`](../examples/vec-search/) — raw `vec.Table`.
+- [`../examples/gorm-vec-tagged/`](../examples/gorm-vec-tagged/) — the
+  `vecgorm.Plugin()` flow with a struct-tag-driven sidecar.

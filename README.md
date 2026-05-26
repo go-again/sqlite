@@ -412,40 +412,61 @@ Per-surface coverage matrices live in [`docs/`](docs/):
 - [`docs/coverage-sql.md`](docs/coverage-sql.md) — methodical
   feature-by-feature matrix of the raw SQL surface (SELECT clauses,
   joins, CTEs, window functions, JSON1, datetime, constraints,
-  triggers, UPSERT, RETURNING, PRAGMA, etc.) exercised by 182 tests
-  in [`tests/sql/`](tests/sql/).
+  triggers, UPSERT, RETURNING, PRAGMA, etc.) exercised by the
+  [`tests/sql/`](tests/sql/) conformance suite.
 
 Read these before filing "does this package support X?" — answer is
 in the matrices.
 
 ## Testing
 
-130 tests across the five packages cover:
+Tests live alongside each package and CI runs them on linux / macos /
+windows. The default `go test ./...` covers:
 
-- driver registration under both names, DSN flag translation matrix
-  (including the `_mutex`-honesty path that refuses NOMUTEX rather than
-  silently lying)
-- reflective UDFs (every Go scalar type, variadics, `(T, error)`),
-  aggregators, collations
-- update / authorizer / trace / preupdate / commit / rollback hooks
-- backup (Step/Remaining/PageCount), serialize/deserialize round-trip
-- error code + extended code + `errors.Is`
-- gorm: Dialector, Migrator, DDL parser, transaction commit/rollback,
-  unique-violation translation, plus integration tests proving the
-  side-by-side composition with vfs / vec / fts
-- vec: L2 / Cosine metrics (Dot via the SQL path), JSON + binary encoding
-  parity, KNN streaming with early break, dim-mismatch validation
-- fts: Porter / Unicode61 / Trigram tokenizers, phrase adjacency, BM25
-  ranking, snippet/highlight, external-content mode, multi-column index
-- both Observable wrappers: Recorder fires once per op, error propagation,
-  no-op when no options
-- vfs: round-trip from a real on-disk SQLite file into a fstest.MapFS
+- **root package** — driver registration under both names; DSN flag
+  translation matrix (including the `_mutex`-honesty path that refuses
+  NOMUTEX rather than silently lying); reflective UDFs (every Go scalar
+  type, variadics, `(T, error)`), aggregators, collations; update /
+  authorizer / trace / preupdate / commit / rollback hooks; backup
+  (Step/Remaining/PageCount); serialize/deserialize round-trip; error
+  code + extended code + `errors.Is`; time round-trip matrix; BLOB
+  semantics including `zeroblob`; WAL concurrent readers + writers;
+  context cancellation; prepared-statement LRU cache
+- **gorm** — Dialector, Migrator, DDL parser, transaction
+  commit/rollback, unique-violation translation, integration tests
+  proving side-by-side composition with vfs / vec / fts
+- **vec** — L2 / Cosine / Dot metrics, JSON + binary encoding parity,
+  KNN streaming with early break, dim-mismatch validation, raw-SQL
+  coverage of every documented sqlite-vec helper
+- **vec/gorm** — tag parser, plugin lifecycle, sidecar CRUD,
+  `vecgorm.Embedding` wrapper, `KNN[T]` typed helper, soft-delete
+  semantics, `DropTable` cascade, dim-mismatch warning
+- **fts** — Porter / Unicode61 / Trigram tokenizers, phrase adjacency,
+  BM25 ranking, snippet/highlight, external-content mode, multi-column
+  index, raw-SQL coverage of every documented FTS5 feature
+- **fts/gorm** — tag parser, plugin + triggers, `Search[T]` typed
+  helper, external / in-table / contentless modes, multi-field shared
+  table, soft-delete, `DropTable` cascade
+- **vfs** — round-trip from a real on-disk SQLite file into a `fstest.MapFS`
+- **tests/sql** — methodical SQL conformance suite organized by
+  SQLite Language Reference category (SELECT, JOIN, CTE, window
+  functions, JSON1, datetime, constraints, triggers, UPSERT,
+  RETURNING, PRAGMA, etc.)
 
-This is what we run. We do **not** claim to run gorm.io/gorm's full
-upstream test suite. The local gorm tests exercise every Dialector /
-Migrator path we care about for our dialector.
+CI also enforces three opt-in upstream-suite lanes:
 
-Run them with `just test` (or `go test ./...`).
+- **gorm-upstream** — clones `gorm.io/gorm` at the pinned version and
+  runs its full integration suite against our dialector via a tiny
+  shim. See [`docs/gorm-upstream.md`](docs/gorm-upstream.md).
+- **modernc-upstream** — vendored subset of `modernc.org/sqlite`'s
+  own test suite runs against this fork under
+  `-tags=modernc_upstream`. See
+  [`docs/modernc-upstream.md`](docs/modernc-upstream.md).
+- **mattn-upstream** — vendored subset of `mattn/go-sqlite3`'s suite
+  validates the mattn-compat surface under `-tags=mattn_upstream`.
+  See [`docs/mattn-upstream.md`](docs/mattn-upstream.md).
+
+Run the default sweep with `just test` (or `go test ./...`).
 
 ## Sponsors
 

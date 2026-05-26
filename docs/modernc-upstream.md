@@ -18,15 +18,13 @@ go test -tags=modernc_upstream -count=1 -timeout 5m .
 
 ## Vendored test files
 
-| File | Status | Tests |
-|---|---|---|
-| `null_upstream_test.go` | ✓ runs clean | 1 |
-| `backup_upstream_test.go` | ✓ runs clean | 3 |
-| `fcntl_upstream_test.go` | ✓ runs clean | 2 |
-| `module_upstream_test.go` | ✓ runs clean | 8 |
-| `pre_update_hook_upstream_test.go` | ✓ runs clean | 2 |
-
-Headline: **16/16 PASS in ~1.5 s**.
+| File | Status |
+|---|---|
+| `null_upstream_test.go` | ✓ runs clean |
+| `backup_upstream_test.go` | ✓ runs clean |
+| `fcntl_upstream_test.go` | ✓ runs clean |
+| `module_upstream_test.go` | ✓ runs clean |
+| `pre_update_hook_upstream_test.go` | ✓ runs clean |
 
 Each file was copied verbatim from `modernc.org/sqlite@v1.50.1`, with
 two mechanical edits:
@@ -71,7 +69,8 @@ Vendoring runs the tests against **our** code, against our build tag.
 ## When modernc bumps
 
 1. `just bump-modernc vX.Y.Z` (this also pulls libc forward).
-2. Run `go test -tags=modernc_upstream .` and confirm 16/16 still pass.
+2. Run `go test -tags=modernc_upstream .` and confirm all vendored
+   tests still pass.
 3. If a test starts failing, classify: genuine wrapper drift (fix the
    wrapper), upstream behavior change (port the new test version),
    or environment change (skip with rationale).

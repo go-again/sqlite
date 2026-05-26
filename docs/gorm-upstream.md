@@ -4,20 +4,14 @@ The canonical compatibility proof for our `gorm` sub-package is running the
 full `gorm.io/gorm/tests` integration suite against our dialector. Last
 reviewed against `gorm.io/gorm v1.31.1` on 2026-05-26.
 
-## Headline numbers
+## Headline
 
-| Result | Count |
-|---|---|
-| PASS | 386 |
-| FAIL | 0 |
-| SKIP | 22 (all other-dialect-specific; not our doing) |
-| Wall time | ~54 s, single goroutine pool |
-
-The 22 skips are: GaussDB / Postgres / TiDB / MySQL test variants, two
-MultiPrimaryKeys cases that need composite foreign keys SQLite doesn't
-support, `TestMigrateWithIndexComment` (SQLite has no column-comment
-syntax), and a handful of fixture-dependent association tests that opt
-themselves out via `if DB.Dialector.Name() == "sqlite" { t.Skip() }`.
+The gorm-upstream CI job clones gorm at the pinned version, wires
+the shim described below, and runs the full `gorm/tests` package
+against our dialector. It passes; the only skipped tests are the
+ones that opt out on `DB.Dialector.Name() == "sqlite"` or that need
+features SQLite doesn't expose (composite foreign keys, column
+comments, GaussDB/Postgres/TiDB/MySQL-specific variants).
 
 ## Reproduction recipe
 

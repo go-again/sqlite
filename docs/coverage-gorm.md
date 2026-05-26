@@ -161,11 +161,10 @@ gap.
 
 Beyond the per-method matrix above, the full `gorm.io/gorm/tests`
 integration suite (the "12k tests" colloquially) runs against this
-dialector via a thin shim. As of 2026-05-26 against gorm v1.31.1 the
-result is **386 PASS / 0 FAIL / 22 SKIP**. The setup, reproduction
-recipe, and reasoning for each shim flag live in
-[gorm-upstream.md](gorm-upstream.md). The same recipe is enforced by
-the `gorm-upstream` CI job.
+dialector via a thin shim, pinned to the same gorm version go.mod
+depends on. The setup, reproduction recipe, and reasoning for each
+shim flag live in [gorm-upstream.md](gorm-upstream.md). The same
+recipe is enforced by the `gorm-upstream` CI job.
 
 ## Deep integration: `vec/gorm` and `fts/gorm`
 
@@ -222,12 +221,10 @@ Conflicting table-level keys across fields are rejected at parse time.
 
 ### Tests
 
-| File | Tests | Notes |
-|---|---|---|
-| `vec/gorm/vecgorm_test.go` | 12 | Basic create/update/delete, KNN ranking, BatchInsert single-tx, soft-delete, Embedding wrapper |
-| `vec/gorm/lifecycle_test.go` | 9 | DropTable cascade, DropSidecar, composite PK rejection, tag validation, WithFilter, dim mismatch |
-| `fts/gorm/ftsgorm_test.go` | 10 | Migrate creates index + triggers, search/snippet/highlight, ranking, soft-delete, backfill |
-| `fts/gorm/lifecycle_test.go` | 8 | Conflicting tags, non-string fields, composite PK, LIMIT/OFFSET, no-plugin error, DropTable cascade |
-| `fts/gorm/mode_test.go` | 7 | external/in-table/contentless modes, conflicting modes rejected, contentless rejects snippet, in-table soft-delete |
-
-46 tests total, all passing on linux/macos.
+| File | Notes |
+|---|---|
+| `vec/gorm/vecgorm_test.go` | Basic create/update/delete, KNN ranking, BatchInsert single-tx, soft-delete, Embedding wrapper |
+| `vec/gorm/lifecycle_test.go` | DropTable cascade, DropSidecar, composite PK rejection, tag validation, WithFilter, dim mismatch |
+| `fts/gorm/ftsgorm_test.go` | Migrate creates index + triggers, search/snippet/highlight, ranking, soft-delete, backfill |
+| `fts/gorm/lifecycle_test.go` | Conflicting tags, non-string fields, composite PK, LIMIT/OFFSET, no-plugin error, DropTable cascade |
+| `fts/gorm/mode_test.go` | external/in-table/contentless modes, conflicting modes rejected, contentless rejects snippet, in-table soft-delete |

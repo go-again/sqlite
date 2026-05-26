@@ -5,9 +5,7 @@ documented SQLite SQL surface this driver exposes is exercised by at
 least one test. Last reviewed against SQLite 3.53.1 (bundled via
 `modernc.org/sqlite v1.50.1`) on 2026-05-26.
 
-Headline: **182 PASS / 0 FAIL / 0 SKIP** on linux/macos.
-
-Run locally with `go test ./tests/sql/...` (~0.3 s).
+Run locally with `go test ./tests/sql/...`.
 
 ## Status legend
 
@@ -346,7 +344,7 @@ Run locally with `go test ./tests/sql/...` (~0.3 s).
 ## When SQLite or modernc bumps
 
 1. `just bump-modernc vX.Y.Z` (or whatever the upstream version is).
-2. `go test ./tests/sql/...` — should still be 182/0/0.
+2. `go test ./tests/sql/...` — should still be green.
 3. If new SQL features ship in the bump, add tests + extend this doc.
 4. If existing tests fail, classify: genuine SQL behavior change
    (port the test) vs driver regression (fix the driver).

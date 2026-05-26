@@ -168,3 +168,12 @@ When SQLite bumps inside modernc, FTS5 features can grow. The
 trigger to revisit this matrix; check the
 [FTS5 changelog section](https://www.sqlite.org/fts5.html#changes) on each
 modernc bump.
+
+## See also
+
+- [`coverage-gorm.md`](coverage-gorm.md) — covers the tag-driven
+  `fts/gorm` bridge that wraps `fts.Index` for gorm models, including
+  the external / in-table / contentless modes.
+- [`../examples/fts-search/`](../examples/fts-search/) — raw `fts.Index`.
+- [`../examples/gorm-fts-tagged/`](../examples/gorm-fts-tagged/) — the
+  `ftsgorm.Plugin()` flow with a struct-tag-driven FTS5 table.
