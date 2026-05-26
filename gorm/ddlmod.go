@@ -242,7 +242,6 @@ func (d *ddl) removeConstraint(name string) bool {
 	return false
 }
 
-
 func (d *ddl) getColumns() []string {
 	res := []string{}
 

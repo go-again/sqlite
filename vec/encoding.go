@@ -64,4 +64,3 @@ func matchPlaceholder(enc Encoding) string {
 	}
 	return "?"
 }
-

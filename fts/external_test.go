@@ -12,7 +12,7 @@ import (
 )
 
 // TestContentless_RowidsOnly creates an FTS5 table in contentless mode
-// (`content=''`), inserts text, queries for term matches, and confirms the
+// (`content=”`), inserts text, queries for term matches, and confirms the
 // rowids come back correctly. The Value field on Match is NULL since the
 // index doesn't store the original text — that's the cost of contentless.
 //

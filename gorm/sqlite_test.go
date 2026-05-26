@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"gorm.io/gorm"
 	"github.com/go-again/sqlite"
+	"gorm.io/gorm"
 )
 
 func TestDialector(t *testing.T) {

@@ -177,9 +177,18 @@ INSERT INTO m (k, v) VALUES (1, 'one'), (2, 'two');`); err != nil {
 // binary with "fatal error: checkptr: pointer arithmetic result points to
 // invalid allocation". The underlying C code is correct; this is a known
 // modernc / Go-checkptr interaction.
+//
+// Also skipped on darwin and windows: modernc.org/libc's Xdlopen (darwin)
+// and XLoadLibraryW (windows) shims abort the test binary with TODOTODO
+// before our error-return path has a chance to fire. The test still
+// covers the disabled-extensions error contract on linux, where it runs
+// unconditionally.
 func TestLoadExtension_Disabled(t *testing.T) {
 	if raceEnabled {
 		t.Skip("modernc.org/sqlite's _sqlite3LoadExtension trips Go's checkptr under -race")
+	}
+	if loadExtensionUnsupported {
+		t.Skip("modernc.org/libc dlopen/LoadLibraryW shim unimplemented on this OS")
 	}
 	_, _, c := withMattnConn(t, ":memory:")
 	err := c.LoadExtension("/nonexistent/path/foo", "")
@@ -197,13 +206,13 @@ func TestLoadExtension_Disabled(t *testing.T) {
 // TestLoadExtension_EnabledBadPath enables loading and confirms a bad path
 // surfaces as an error rather than crashing.
 //
-// Skipped on platforms where modernc.org/libc's dlopen shim is incomplete
-// (e.g. darwin currently prints "Xdlopen: TODOTODO" and aborts). Also
-// skipped under -race for the same checkptr reason TestLoadExtension_Disabled
-// is skipped.
+// Skipped on platforms where modernc.org/libc's dynamic-loader shim is
+// incomplete: darwin's Xdlopen prints "Xdlopen: TODOTODO" and aborts;
+// windows's XLoadLibraryW does the same. Also skipped under -race for the
+// checkptr reason TestLoadExtension_Disabled is skipped.
 func TestLoadExtension_EnabledBadPath(t *testing.T) {
-	if isDarwin {
-		t.Skip("modernc.org/libc Xdlopen unimplemented on darwin")
+	if loadExtensionUnsupported {
+		t.Skip("modernc.org/libc dlopen/LoadLibraryW shim unimplemented on this OS")
 	}
 	if raceEnabled {
 		t.Skip("modernc.org/sqlite's _sqlite3LoadExtension trips Go's checkptr under -race")

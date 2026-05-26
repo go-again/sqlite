@@ -50,11 +50,11 @@ func TestWAL_ConcurrentReadersAndWriters(t *testing.T) {
 	}
 
 	const (
-		writers      = 4
-		readers      = 4
-		writeWindow  = 500 * time.Millisecond
-		readerSleep  = 1 * time.Millisecond
-		writerSleep  = 50 * time.Microsecond
+		writers     = 4
+		readers     = 4
+		writeWindow = 500 * time.Millisecond
+		readerSleep = 1 * time.Millisecond
+		writerSleep = 50 * time.Microsecond
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), writeWindow)

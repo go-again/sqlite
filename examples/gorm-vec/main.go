@@ -24,7 +24,7 @@ import (
 // Document is a typical gorm model. The ID is what the vec.Table's rowid
 // column references — keep them in lockstep on insert.
 type Document struct {
-	ID    uint   `gorm:"primaryKey"`
+	ID    uint `gorm:"primaryKey"`
 	Title string
 	Body  string
 }

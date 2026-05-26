@@ -114,7 +114,7 @@ func (o Options) prefixExpr() string {
 }
 
 // externalExpr renders the content= and content_rowid= options for the
-// external-content mode, or content='' for the contentless mode. Returns
+// external-content mode, or content=” for the contentless mode. Returns
 // empty when neither is configured (the FTS5 default: own-content storage).
 func (o Options) externalExpr() string {
 	if o.External != nil {
