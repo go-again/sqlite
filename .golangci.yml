@@ -6,8 +6,8 @@
 #     defer-Close idiom, or staticcheck's stylistic QF (quickfix) family.
 #   - Keep the default linter set enabled — errcheck/govet/staticcheck/
 #     ineffassign/unused — but with the surgical exclusions documented below.
-#   - Skip the dot-prefixed reference repositories (.sqlite/, .go-sqlite3/,
-#     .gorm-sqlite*, .fts/) — they're vendored for reference only.
+#   - Lint only files under the module tree; dot-prefixed local-only
+#     directories at the repo root are ignored by default.
 
 version: "2"
 

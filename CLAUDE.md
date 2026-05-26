@@ -157,9 +157,10 @@ github.com/go-again/sqlite/
     └── vfs-embed/          # bundling a DB inside a fs.FS
 ```
 
-Reference repositories in dot-prefixed dirs (`.sqlite/`, `.go-sqlite3/`,
-`.gorm-sqlite/`, `.gorm-sqlite-driver/`, `.fts/`) are **vendored for porting
-reference only** — never modify, never lint, never test.
+Anything under a dot-prefixed directory at the repo root is local-only
+working state (CI log dumps, scratch dirs, maintainer-side checkouts of
+reference repos). `.gitignore` excludes them; nothing in this module
+should reference them by name.
 
 ---
 

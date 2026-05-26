@@ -57,7 +57,7 @@ jobs:
         run: go vet -unsafeptr=false ./...
       - name: gofmt -d
         run: |
-          out=$(gofmt -d $(find . -name '*.go' -not -path './.sqlite/*' -not -path './.go-sqlite3/*' -not -path './.gorm-sqlite*/*' -not -path './.fts/*'))
+          out=$(gofmt -d $(find . -name '*.go' -not -path './.*/*'))
           if [ -n "$out" ]; then echo "$out"; exit 1; fi
       - name: staticcheck
         uses: dominikh/staticcheck-action@v1

@@ -2,10 +2,6 @@
 #
 # Install just from https://just.systems. Run `just` (no args) for the
 # default recipe (build + test + lint).
-#
-# The reference repositories under .sqlite/, .go-sqlite3/, .gorm-sqlite/,
-# .gorm-sqlite-driver/, and .fts/ are excluded from every recipe; they're
-# vendored for porting reference and are not part of this module.
 
 # Default recipe: a fast pre-commit gate.
 default: build test lint
@@ -77,20 +73,12 @@ golangci:
 
 # gofmt diff (read-only). Fails if any file would be reformatted.
 fmt-check:
-    @out=$(gofmt -d $(find . -name '*.go' \
-        -not -path './.sqlite/*' \
-        -not -path './.go-sqlite3/*' \
-        -not -path './.gorm-sqlite*/*' \
-        -not -path './.fts/*')); \
+    @out=$(gofmt -d $(find . -name '*.go' -not -path './.*/*')); \
     if [ -n "$out" ]; then echo "$out"; exit 1; fi
 
 # Apply gofmt in place.
 fmt:
-    @gofmt -w $(find . -name '*.go' \
-        -not -path './.sqlite/*' \
-        -not -path './.go-sqlite3/*' \
-        -not -path './.gorm-sqlite*/*' \
-        -not -path './.fts/*')
+    @gofmt -w $(find . -name '*.go' -not -path './.*/*')
 
 # go mod tidy across the module.
 tidy:
