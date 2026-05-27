@@ -144,15 +144,16 @@ func (p *plugin) registerSchema(db *gorm.DB, model any) (modelMeta, error) {
 		mm.Fields = append(mm.Fields, m)
 	}
 
-	if len(mm.Fields) == 0 {
-		// Cache the empty result so we don't reparse on every call.
-		p.mu.Lock()
-		p.meta[rt] = mm
-		p.mu.Unlock()
-		return mm, nil
-	}
-
+	// Double-checked locking: another goroutine may have cached an
+	// equivalent meta while we were parsing. Re-check under the write
+	// lock and prefer the cached entry so callers see one canonical
+	// value. Without this, two concurrent first-access calls both pay
+	// the schema.Parse cost.
 	p.mu.Lock()
+	if cached, ok := p.meta[rt]; ok {
+		p.mu.Unlock()
+		return cached, nil
+	}
 	p.meta[rt] = mm
 	p.mu.Unlock()
 	return mm, nil

@@ -44,8 +44,8 @@ bench *FLAGS:
 bench-auth:
     go test -run=^$ -bench=BenchmarkAuthorizer -benchmem -count=5 .
 
-# Lint with vet + staticcheck + golangci-lint (matches CI).
-lint: vet staticcheck golangci
+# Lint with vet + staticcheck + golangci-lint + modernize (matches CI).
+lint: vet staticcheck golangci modernize
 
 # go vet across all packages. unsafeptr=false suppresses the false-positive
 # storm from modernc's uintptr↔unsafe.Pointer conversions inherited in our
@@ -70,6 +70,19 @@ golangci:
         exit 1; \
     fi
     golangci-lint run --timeout 5m
+
+# gopls modernize: catches Go-version-bump idioms (range-over-int,
+# reflect.TypeFor, strings.SplitSeq, sync.WaitGroup.Go, etc.). Run via
+# `go run` so contributors don't need a separate install step. The grep
+# filter skips files we keep verbatim from upstream forks per CLAUDE.md
+# — those follow modernc/glebarez patterns and shouldn't drift on style.
+modernize:
+    @out=$(go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest ./... 2>&1 \
+        | grep -v -E '^/[^:]*/(sqlite|vtab|rows)\.go:' \
+        | grep -v -E '^/[^:]*/gorm/(sqlite|migrator)\.go:' \
+        | grep -v '^exit status' \
+        || true); \
+    if [ -n "$out" ]; then echo "$out"; exit 1; fi
 
 # gofmt diff (read-only). Fails if any file would be reformatted.
 fmt-check:

@@ -165,7 +165,7 @@ func reflectScalar(impl any) (func(*FunctionContext, []driver.Value) (driver.Val
 
 	// Pre-validate argument types and pre-build converters.
 	converters := make([]func(driver.Value) (reflect.Value, error), nin)
-	for i := 0; i < nin; i++ {
+	for i := range nin {
 		argT := t.In(i)
 		if variadic && i == nin-1 {
 			argT = argT.Elem()
@@ -194,7 +194,7 @@ func reflectScalar(impl any) (func(*FunctionContext, []driver.Value) (driver.Val
 				return nil, fmt.Errorf("expected at least %d args, got %d", fixed, len(args))
 			}
 			callArgs = make([]reflect.Value, fixed, len(args))
-			for i := 0; i < fixed; i++ {
+			for i := range fixed {
 				rv, err := converters[i](args[i])
 				if err != nil {
 					return nil, fmt.Errorf("arg %d: %w", i, err)
@@ -214,7 +214,7 @@ func reflectScalar(impl any) (func(*FunctionContext, []driver.Value) (driver.Val
 				return nil, fmt.Errorf("expected %d args, got %d", nin, len(args))
 			}
 			callArgs = make([]reflect.Value, nin)
-			for i := 0; i < nin; i++ {
+			for i := range nin {
 				rv, err := converters[i](args[i])
 				if err != nil {
 					return nil, fmt.Errorf("arg %d: %w", i, err)
@@ -267,7 +267,7 @@ func reflectAggregator(impl any) (func(FunctionContext) (AggregateFunction, erro
 		nArg = -1
 	}
 	stepConv := make([]func(driver.Value) (reflect.Value, error), stepIn)
-	for i := 0; i < stepIn; i++ {
+	for i := range stepIn {
 		argT := stepT.In(i + 1) // skip receiver
 		if stepVariadic && i == stepIn-1 {
 			argT = argT.Elem()
@@ -325,7 +325,7 @@ func (r *reflectAggregate) Step(ctx *FunctionContext, rowArgs []driver.Value) er
 		if len(rowArgs) < fixed {
 			return fmt.Errorf("expected at least %d Step args, got %d", fixed, len(rowArgs))
 		}
-		for i := 0; i < fixed; i++ {
+		for i := range fixed {
 			rv, err := r.stepConv[i](rowArgs[i])
 			if err != nil {
 				return fmt.Errorf("Step arg %d: %w", i, err)

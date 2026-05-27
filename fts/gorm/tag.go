@@ -117,7 +117,7 @@ func walkTags(rt reflect.Type, prefix []int, out *tableMeta) error {
 // into the accumulated tableMeta. Conflicts (e.g. two fields declaring
 // different `tokenize=` values) produce an error.
 func mergeTag(tm *tableMeta, tag string, fm *fieldMeta, structName, fieldName string) error {
-	for _, kv := range strings.Split(tag, ";") {
+	for kv := range strings.SplitSeq(tag, ";") {
 		kv = strings.TrimSpace(kv)
 		if kv == "" {
 			continue

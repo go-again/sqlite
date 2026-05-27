@@ -61,7 +61,7 @@ func TestWAL_ConcurrentReadersAndWriters(t *testing.T) {
 	var readErrs atomic.Int64
 	var writeErrs atomic.Int64
 
-	for w := 0; w < writers; w++ {
+	for w := range writers {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
@@ -80,10 +80,8 @@ func TestWAL_ConcurrentReadersAndWriters(t *testing.T) {
 			}
 		}(w)
 	}
-	for r := 0; r < readers; r++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range readers {
+		wg.Go(func() {
 			for {
 				select {
 				case <-ctx.Done():
@@ -97,7 +95,7 @@ func TestWAL_ConcurrentReadersAndWriters(t *testing.T) {
 				}
 				time.Sleep(readerSleep)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

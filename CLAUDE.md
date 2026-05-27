@@ -109,7 +109,7 @@ github.com/go-again/sqlite/
 │   ├── encoding.go         # JSON / binary float32 (de)serialization
 │   ├── table.go            # Create / Open / Insert / Update / Delete / KNN /
 │   │                       #   KNNSlice + QuoteIdent / ValidIdent exports
-│   ├── query.go            # WithWhere QueryOption (filtered KNN)
+│   ├── query.go            # WithFilter QueryOption (filtered KNN)
 │   ├── distance.go         # L2 / Cosine / Dot distance helpers
 │   ├── observability.go    # Wrap / WithLogger / WithRecorder
 │   └── gorm/               # tag-driven gorm bridge (package vecgorm)
@@ -326,7 +326,7 @@ doc) bakes this convention.
 | Full test suite | `just test` |
 | One named test or regex | `just test-one TestBLOB_` |
 | Race detector | `just test-race` |
-| Lint (vet + staticcheck + golangci-lint) | `just lint` |
+| Lint (vet + staticcheck + golangci-lint + gopls modernize) | `just lint` |
 | Format check / apply | `just fmt-check` / `just fmt` |
 | Run an example | `just example vec-search` |
 | Smoke-test every example | `just examples` |
@@ -371,6 +371,24 @@ Always:
    `vfs/`, `tests/sql/`) still build and pass.
 4. Don't quote test counts in user-facing docs — they drift quickly.
    Describe behavior, not numbers.
+5. Update **every** doc the change touches in the same PR. Drift across
+   docs is the most common failure mode in this repo. The set:
+   - `doc.go` for the package whose API moved (pkg.go.dev surface).
+   - `README.md` if the change is mentioned in the landing page Quick
+     start or feature list.
+   - `llms.txt` if a new top-level file or sub-package landed
+     (consumer-agent index).
+   - `llms-full.txt` if the change touches anything in its scoped
+     sections: driver-name picker, DSN flags, sub-package picker,
+     pitfalls, migration recipes, what-NOT-to-do list, version
+     stability note (consumer guide).
+   - `docs/coverage-<area>.md` for any change to vec / fts / gorm /
+     raw-SQL feature surface (status flips, new tests cited).
+   - `plan-doc-sweep.md` inventory if a new public sub-package or
+     top-level doc file is added.
+   - **Do not** link to `ARTICLE-EN.md` / `ARTICLE-RU.md` from any
+     onboarding/consumer doc — they're promotional content only.
+   - **Do not** touch `ARTICLE-RU.md` at all (maintainer-owned).
 
 ---
 

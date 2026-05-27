@@ -115,7 +115,7 @@ func TestSearch_WithLimitOffset(t *testing.T) {
 	if err := ftsgorm.Migrate(db, &Article{}); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		db.Create(&Article{Title: "fox " + string(rune('A'+i)), Body: ""})
 	}
 	results, err := ftsgorm.Search[Article](

@@ -101,42 +101,47 @@ func (p *plugin) registerSchema(db *gorm.DB, model any) (*modelMeta, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	var mm *modelMeta
 	if tm == nil {
-		// Cache empty result.
-		empty := &modelMeta{}
-		p.mu.Lock()
-		p.meta[rt] = empty
-		p.mu.Unlock()
-		return empty, nil
+		mm = &modelMeta{}
+	} else {
+		stmt := &gorm.Statement{DB: db}
+		if err := stmt.Parse(model); err != nil {
+			return nil, fmt.Errorf("ftsgorm: parse %s: %w", rt.Name(), err)
+		}
+		pkFields := stmt.Schema.PrimaryFields
+		if len(pkFields) != 1 {
+			return nil, fmt.Errorf(
+				"ftsgorm: %s has %d primary-key fields; FTS5 rowids require exactly one int PK",
+				rt.Name(), len(pkFields))
+		}
+		mm = &modelMeta{
+			SourceTable: stmt.Schema.Table,
+			PKField:     pkFields[0],
+			SoftDelete:  stmt.Schema.LookUpField("DeletedAt") != nil,
+			Table:       tm.Table,
+			Tokenize:    tm.Tokenize,
+			Prefix:      tm.Prefix,
+			Detail:      tm.Detail,
+			Mode:        tm.Mode,
+			Fields:      tm.Fields,
+		}
+		if mm.Table == "" {
+			mm.Table = mm.SourceTable + "_fts"
+		}
 	}
 
-	stmt := &gorm.Statement{DB: db}
-	if err := stmt.Parse(model); err != nil {
-		return nil, fmt.Errorf("ftsgorm: parse %s: %w", rt.Name(), err)
-	}
-	pkFields := stmt.Schema.PrimaryFields
-	if len(pkFields) != 1 {
-		return nil, fmt.Errorf(
-			"ftsgorm: %s has %d primary-key fields; FTS5 rowids require exactly one int PK",
-			rt.Name(), len(pkFields))
-	}
-
-	mm := &modelMeta{
-		SourceTable: stmt.Schema.Table,
-		PKField:     pkFields[0],
-		SoftDelete:  stmt.Schema.LookUpField("DeletedAt") != nil,
-		Table:       tm.Table,
-		Tokenize:    tm.Tokenize,
-		Prefix:      tm.Prefix,
-		Detail:      tm.Detail,
-		Mode:        tm.Mode,
-		Fields:      tm.Fields,
-	}
-	if mm.Table == "" {
-		mm.Table = mm.SourceTable + "_fts"
-	}
-
+	// Double-checked locking: another goroutine may have cached an
+	// equivalent meta while we were parsing. Re-check under the write
+	// lock and prefer the cached entry so callers see one canonical
+	// pointer. Without this, two concurrent first-access calls both
+	// pay the schema.Parse cost.
 	p.mu.Lock()
+	if cached, ok := p.meta[rt]; ok {
+		p.mu.Unlock()
+		return cached, nil
+	}
 	p.meta[rt] = mm
 	p.mu.Unlock()
 	return mm, nil

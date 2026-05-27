@@ -547,10 +547,7 @@ func TestGetLimit_RoundTrip(t *testing.T) {
 				t.Fatalf("GetLimit(%s) returned %d, want >= 0", lim.name, orig)
 			}
 			// Halve the limit (avoid <2 since some ids cap there).
-			target := orig / 2
-			if target < 1 {
-				target = 1
-			}
+			target := max(orig/2, 1)
 			prev := c.SetLimit(lim.id, target)
 			if prev != orig {
 				t.Errorf("SetLimit(%s, %d) returned %d, want %d", lim.name, target, prev, orig)
@@ -618,10 +615,10 @@ func TestCoexistence_CustomNameAlongsideMattn(t *testing.T) {
 // driver name via &sqlite3.SQLiteDriver{ConnectHook: ...}.
 func TestMattnDriverLiteral(t *testing.T) {
 	const custom = "go-again-custom-1"
-	var hookFired int32
+	var hookFired atomic.Int32
 	sql.Register(custom, &SQLiteDriver{
 		ConnectHook: func(c *SQLiteConn) error {
-			atomic.AddInt32(&hookFired, 1)
+			hookFired.Add(1)
 			return c.RegisterFunc("answer", func() int64 { return 42 }, true)
 		},
 	})
@@ -637,7 +634,7 @@ func TestMattnDriverLiteral(t *testing.T) {
 	if got != 42 {
 		t.Errorf("answer()=%d, want 42", got)
 	}
-	if atomic.LoadInt32(&hookFired) == 0 {
+	if hookFired.Load() == 0 {
 		t.Errorf("ConnectHook never fired")
 	}
 }

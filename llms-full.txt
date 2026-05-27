@@ -1,0 +1,405 @@
+# github.com/go-again/sqlite — Consumer guide
+
+This file is for AI coding agents (and humans) integrating
+`github.com/go-again/sqlite` as a dependency in another project. It
+collects everything an outside caller needs that doesn't fit cleanly
+into per-package `doc.go` comments: which driver name to pick, which
+DSN flags work, when to reach for each sub-package, the pitfalls that
+won't show up until runtime, and the migration recipes from the four
+upstream packages this one replaces.
+
+For maintainers working **inside** this repo, read `CLAUDE.md` /
+`AGENTS.md` instead.
+
+# What this package is
+
+A pure-Go (CGo-free) SQLite driver that registers under both `"sqlite"`
+(modernc-compatible) and `"sqlite3"` (mattn-compatible) — pick whichever
+matches the import you're swapping in. Same singleton driver under both
+names; no behavioural split. Built on `modernc.org/sqlite`'s transpiled
+SQLite engine, with a hand-written wrapper that adds:
+
+- The mattn-compat surface: `*SQLiteDriver` with `Extensions` and
+  `ConnectHook` fields, `RegisterFunc` / `RegisterAggregator` on the
+  driver, `ConnectionHook` API.
+- Per-conn helpers absent upstream: `RegisterUpdateHook`,
+  `RegisterAuthorizer`, `SetTrace`, `RegisterPreUpdateHook`, `Backup`,
+  `Serialize` / `Deserialize`, `FileControl`, `GetLimit`/`SetLimit`,
+  `LoadExtension` / `EnableLoadExtension`.
+- Typed Go APIs for two extensions: **vec** (sqlite-vec, vector search)
+  and **fts** (FTS5, full-text search). Both ship gorm bridges that wire
+  the sidecar tables to gorm models via struct tags.
+- A gorm dialector (a verbatim port of `glebarez/sqlite` rewired to use
+  this driver).
+- A `vfs` adapter that lets you back an `*sql.DB` with any `io/fs.FS` —
+  `embed.FS`, `fstest.MapFS`, a zip-fs, anything.
+
+Target Go version is **1.25+** (generics, `iter.Seq2`, `log/slog`,
+`sync.WaitGroup.Go`, `range over int`, generic type aliases).
+
+# Picking the driver name
+
+Two names register the same `*Driver` singleton:
+
+```go
+import _ "github.com/go-again/sqlite"
+
+db, _ := sql.Open("sqlite",  "file:app.db") // modernc name
+db, _ := sql.Open("sqlite3", "file:app.db") // mattn name
+```
+
+Use whichever name the existing code uses. Switching name within a
+project changes nothing; it's purely cosmetic. The `Driver{}` struct
+literal (mattn's `&SQLiteDriver{Extensions: …, ConnectHook: …}`) is
+available under both type aliases.
+
+# DSN flags
+
+Accepted (subset of mattn's `_*` flags, translated to modernc's
+parameter names):
+
+- `cache=shared` / `cache=private`
+- `mode=ro` / `mode=rw` / `mode=rwc` / `mode=memory`
+- `_journal=WAL` (and the other journal modes)
+- `_busy_timeout=N` (alias `_timeout`)
+- `_foreign_keys=on`
+- `_synchronous=NORMAL` (and FULL/OFF/EXTRA)
+- `_case_sensitive_like=on`
+- `_locking_mode=NORMAL` / `EXCLUSIVE`
+- `_recursive_triggers=on`
+- `_secure_delete=on`
+- `_loc=Local` / `_loc=UTC` (time conversion)
+- `_texttotime=1` — go-again-specific: scans DATETIME columns as
+  `time.Time` instead of RFC3339 strings in map-mode reads. The gorm
+  dialector injects this automatically. Set it manually if you want the
+  same behaviour with raw `database/sql` map-row scans.
+- `_stmt_cache_size=N` — accepted as a no-op for now (prepared-stmt LRU
+  is built but not yet sized by this flag).
+
+Rejected with a clear error:
+
+- `_auth*` (userauth, dropped by modernc upstream — not coming back).
+- `_mutex=no` (modernc doesn't expose the unsafe single-threaded mode).
+
+# Sub-package picker
+
+Reach for the smallest sub-package that solves your problem.
+
+## I just want SQL
+
+```go
+import _ "github.com/go-again/sqlite"
+db, _ := sql.Open("sqlite", "file:app.db?_journal=WAL&_foreign_keys=on")
+```
+
+Nothing else. Use `database/sql` as normal.
+
+## I want gorm
+
+```go
+import (
+    sqlitegorm "github.com/go-again/sqlite/gorm"
+    "gorm.io/gorm"
+)
+db, _ := gorm.Open(sqlitegorm.Open("file:app.db"), &gorm.Config{})
+```
+
+`sqlitegorm.Open` is a drop-in for `glebarez/sqlite.Open` and
+`gorm.io/driver/sqlite.Open`. The dialector implements
+`gorm.Dialector`, `gorm.Migrator`, `gorm.ErrorTranslator`, and
+`gorm.SavePointerDialectorInterface`. AutoMigrate works, including the
+ALTER-via-CREATE-INSERT-DROP-RENAME flow for column-type changes that
+plain SQLite doesn't support.
+
+## I want vector search
+
+Raw API:
+
+```go
+import (
+    _ "github.com/go-again/sqlite"
+    _ "github.com/go-again/sqlite/vec"   // blank import: registers sqlite-vec on every conn
+    "github.com/go-again/sqlite/vec"
+)
+
+tbl, _ := vec.Create(ctx, db, "docs", 384, vec.Options{Metric: vec.Cosine})
+tbl.BatchInsert(ctx, []vec.Row{{Rowid: 1, Embedding: vector1}, ...})
+for n, err := range tbl.KNN(ctx, query, 5, vec.WithFilter("rowid > ?", 100)) {
+    if err != nil { return err }
+    fmt.Println(n.Rowid, n.Distance)
+}
+```
+
+With gorm (tag-driven sidecars):
+
+```go
+import (
+    sqlitegorm "github.com/go-again/sqlite/gorm"
+    vecgorm    "github.com/go-again/sqlite/vec/gorm"
+)
+
+type Document struct {
+    ID        uint `gorm:"primaryKey"`
+    Title     string
+    Embedding vecgorm.Embedding `vec:"dim=384;metric=cosine"`
+}
+
+db, _ := gorm.Open(sqlitegorm.Open("file:app.db"), &gorm.Config{})
+db.Use(vecgorm.Plugin())
+vecgorm.Migrate(db, &Document{}) // creates documents + documents_vec sidecar
+db.Create(&doc)                  // sidecar auto-syncs via AfterCreate
+hits, _ := vecgorm.KNN[Document](ctx, db, query, 5)
+```
+
+## I want full-text search
+
+Raw API:
+
+```go
+import (
+    _ "github.com/go-again/sqlite"
+    "github.com/go-again/sqlite/fts"
+)
+
+idx, _ := fts.New[int64, string](ctx, db, "docs", fts.Options{
+    Tokenizer: fts.Porter{Base: fts.Unicode61{}},
+})
+idx.Insert(ctx, fts.Attr[int64, string]{Key: 1, Value: "the quick brown fox"})
+hits, _ := idx.SearchSlice(ctx, fts.Term("fox"), fts.WithRanking())
+```
+
+With gorm:
+
+```go
+import ftsgorm "github.com/go-again/sqlite/fts/gorm"
+
+type Article struct {
+    ID    uint   `gorm:"primaryKey"`
+    Title string `fts5:"tokenize=porter+unicode61"`
+    Body  string `fts5:"tokenize=porter+unicode61"`
+}
+
+db.Use(ftsgorm.Plugin())
+ftsgorm.Migrate(db, &Article{}) // creates articles_fts + AI/AU/AD triggers
+hits, _ := ftsgorm.Search[Article](ctx, db, fts.Term("fox"))
+```
+
+Tag keys: `tokenize`, `prefix`, `external` (default `true`), `detail`,
+`contentless` (default `false`), `table`. Three modes:
+**external-content** (default; triggers sync from the source table),
+**in-table** (`external=false`; FTS5 stores the text), **contentless**
+(`contentless=true`; index-only, snippet/highlight unavailable).
+
+## I want to embed a SQLite file inside my binary
+
+```go
+import (
+    "embed"
+    _ "github.com/go-again/sqlite"
+    "github.com/go-again/sqlite/vfs"
+)
+
+//go:embed seed.db
+var seed embed.FS
+
+func main() {
+    name, _, _ := vfs.New(seed)
+    db, _ := sql.Open("sqlite", "file:seed.db?vfs="+name+"&mode=ro")
+}
+```
+
+Read-only by design (the `fs.FS` contract doesn't allow writes). Append
+`&mode=ro` so SQLite rejects writes at open time with a clear error
+rather than mid-query.
+
+# Pitfalls
+
+These bite at runtime and aren't obvious from the API surface. Read
+this section.
+
+## Virtual tables are per-connection
+
+`vec0` (sqlite-vec) and FTS5 virtual tables are created on the SQLite
+connection that ran the `CREATE VIRTUAL TABLE` statement and are not
+visible to other connections in the pool. If your code path can grab
+any conn from `*sql.DB`'s pool, you'll see "no such table" errors.
+
+Fix: either pin the pool to one conn for the lifetime of the DB
+(`db.SetMaxOpenConns(1)`) or use a file-backed DSN with the virtual
+tables persisted on disk so every fresh conn sees them via SQLite's
+schema cache. The test fixtures in this repo pin to 1 conn because
+they use `:memory:` databases.
+
+## The libc version pin
+
+`modernc.org/sqlite/lib` is transpiled C tightly coupled to a specific
+`modernc.org/libc` version. **Bumping one without the other breaks the
+generated ABI at runtime** with cryptic crashes.
+
+If your project depends on this driver and you bump `modernc.org/sqlite`
+manually, also align `modernc.org/libc` to whatever that sqlite release
+pins. `go mod tidy` resolves the transitive set correctly when you
+bump `modernc.org/sqlite`; the failure mode is bumping libc
+*independently*, which `go mod tidy` won't catch.
+
+Check the current pin:
+
+```sh
+go list -m modernc.org/libc
+```
+
+## Per-conn hooks need a pinned conn
+
+`RegisterUpdateHook`, `RegisterAuthorizer`, `SetTrace`,
+`RegisterPreUpdateHook` install state on **one** SQLite connection.
+`db.Exec` / `db.Query` may pick any conn from the pool, so a hook
+installed once and called via `db.*` is effectively random.
+
+Idiom:
+
+```go
+db.SetMaxOpenConns(1)        // or use a single-conn session
+sc, _ := db.Conn(ctx)
+sc.Raw(func(dc any) error {
+    c := dc.(*sqlite.Conn)
+    c.RegisterUpdateHook(...)
+    return nil
+})
+// Use sc.ExecContext from here on, NOT db.Exec.
+```
+
+## KNN inside a gorm.Transaction is not supported
+
+`vec/gorm.KNN[T]` reads the sidecar through `*sql.DB`, not the active
+`*sql.Tx`. Inside a `gorm.Transaction`, KNN won't see your tx's
+uncommitted writes, and under a pinned-conn pool (the common SQLite
+setup) it will **deadlock** waiting for the conn the parent tx is
+holding.
+
+Workarounds:
+- Issue raw SQL through `tx.Raw(...)` against the sidecar (`<table>_vec`).
+- Commit the parent tx first, then KNN.
+
+`fts/gorm.Search` does route through the active pool, so it sees
+read-your-own-writes inside a tx.
+
+## sqlite-vec quirks
+
+- `INSERT OR REPLACE` is **not** honored on `vec0`. Use `(*Table).Update`
+  to overwrite a rowid, or delete-then-insert.
+- The `vec0(...)` column-argument parser rejects quoted identifiers.
+  We validate names via `vec.ValidIdent` before interpolation;
+  table/column names you pass must match `[A-Za-z_][A-Za-z0-9_]*`.
+- `LIMIT` is inlined as a literal in `KNN`'s generated SQL because
+  sqlite-vec's planner needs it visible alongside the MATCH conjunct.
+- Metric keywords are `l1` / `l2` / `cosine`. `vec.Dot` is an alias
+  for L1, kept for historical naming.
+
+## Soft-delete sidecars
+
+When a vec/gorm model has `gorm.DeletedAt`, the sidecar gets an extra
+`deleted INTEGER` metadata column. The plugin sets it to 0 on insert
+and to 1 when gorm processes a soft-delete UPDATE. Default KNN filters
+out rows with `deleted=1`. Pass `vecgorm.IncludeDeleted()` (and
+typically `db.Unscoped()` for the materialization fetch) to query
+across both.
+
+For fts/gorm, external mode mirrors source's `deleted_at` as a
+`deleted_at UNINDEXED` column; in-table / contentless modes use a
+`deleted UNINDEXED` flag maintained by row callbacks.
+
+## What's not supported
+
+- **Userauth** (`_auth*` DSN flags): dropped upstream by modernc.
+- **Server-side encryption** (SQLCipher / SEE / ROOT-LSM3): modernc
+  transpiles plain-vanilla SQLite; encryption isn't shipped.
+- **`_mutex=no`**: modernc doesn't expose the unsafe single-threaded
+  mode.
+
+# Migration recipes
+
+The driver is a drop-in for four upstream packages. Each migration is
+a one-line import swap; the public API stays compatible.
+
+## From mattn/go-sqlite3
+
+```diff
+-import _ "github.com/mattn/go-sqlite3"
++import _ "github.com/go-again/sqlite"
+```
+
+Driver name stays `"sqlite3"`. `&SQLiteDriver{Extensions, ConnectHook}`
+still works (it's an alias for our `Driver`). `RegisterFunc`,
+`RegisterAggregator`, `ConnectionHook` — all there.
+
+Build tag changes: drop `-tags sqlite_userauth` (rejected) and
+`-tags sqlite_vtable` (vtable is on by default). CGo flags
+(`-tags=sqlite_fts5`, `-tags=sqlite_json1`) are unnecessary — FTS5 and
+JSON1 are compiled in.
+
+## From modernc.org/sqlite
+
+```diff
+-import _ "modernc.org/sqlite"
++import _ "github.com/go-again/sqlite"
+```
+
+Driver name stays `"sqlite"`. Public API stays the same. You gain the
+per-conn hooks (`RegisterUpdateHook`, etc.) that modernc doesn't
+expose; existing code keeps working.
+
+## From glebarez/sqlite
+
+```diff
+-import "github.com/glebarez/sqlite"
++import sqlitegorm "github.com/go-again/sqlite/gorm"
+
+-db, _ := gorm.Open(sqlite.Open("file:app.db"), &gorm.Config{})
++db, _ := gorm.Open(sqlitegorm.Open("file:app.db"), &gorm.Config{})
+```
+
+Same dialector behaviour. The driver underneath is no longer modernc
+directly but our fork of it — the libc pin invariant above applies.
+
+## From gorm.io/driver/sqlite (mattn-based)
+
+```diff
+-import "gorm.io/driver/sqlite"
++import sqlitegorm "github.com/go-again/sqlite/gorm"
+
+-db, _ := gorm.Open(sqlite.Open("file:app.db"), &gorm.Config{})
++db, _ := gorm.Open(sqlitegorm.Open("file:app.db"), &gorm.Config{})
+```
+
+Same swap. The mattn CGo dependency goes away.
+
+# What NOT to do
+
+- **Don't** call `vecgorm.KNN[T]` inside a `gorm.Transaction` (see
+  pitfalls above). Use `tx.Raw` against the sidecar instead.
+- **Don't** use `_auth*` DSN flags; they're rejected with a clear error.
+- **Don't** bump `modernc.org/libc` independently of `modernc.org/sqlite`.
+- **Don't** install per-conn hooks via `db.Exec` — pin a conn first.
+- **Don't** expect `INSERT OR REPLACE` to work on `vec0` rows.
+- **Don't** SELECT/UPDATE virtual tables across multiple conns of an
+  unpinned `:memory:` pool.
+- **Don't** rely on `Stmt.Exec` / `Stmt.Query` / `Conn.Begin` /
+  `Conn.Exec` / `Conn.Query` — they're deprecated by `database/sql`'s
+  contract. Use the `Context` variants. The driver implements both for
+  compatibility, but new code should use the new names.
+
+# Versioning and stability
+
+Pre-v1.0. Public API is settling but not frozen. Renames in the
+v0.x → v0.x+1 line are allowed (the most recent rename pass swapped
+`Match` → `Neighbor`, `Item` → `Row`, `Result[T]` → `Hit[T]`,
+`WithWhere` → `WithFilter` — without deprecated aliases, because the
+package was fresh enough that no real-world consumers had to bridge).
+Pin to a specific version in your `go.mod`.
+
+# Pointers
+
+- pkg.go.dev: https://pkg.go.dev/github.com/go-again/sqlite
+- Repository: https://github.com/go-again/sqlite
+- Issue tracker: same.
+- llmstxt.org index for this project: see `llms.txt` alongside this file.

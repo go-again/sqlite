@@ -77,6 +77,18 @@ jobs:
         with:
           version: v2.4.0
           args: --timeout 5m
+      - name: gopls modernize
+        # Surfaces Go-version-bump idioms (range-over-int, reflect.TypeFor,
+        # strings.SplitSeq, sync.WaitGroup.Go, etc.). Skips the forked
+        # modernc/glebarez files we keep verbatim per CLAUDE.md — those
+        # follow upstream patterns and shouldn't drift on style.
+        run: |
+          out=$(go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest ./... 2>&1 \
+              | grep -v -E '^/[^:]*/(sqlite|vtab|rows)\.go:' \
+              | grep -v -E '^/[^:]*/gorm/(sqlite|migrator)\.go:' \
+              | grep -v '^exit status' \
+              || true)
+          if [ -n "$out" ]; then echo "$out"; exit 1; fi
 
   # Cross-build every modernc-supported GOOS/GOARCH so we catch
   # platform-specific compile errors without running the (often unavailable)

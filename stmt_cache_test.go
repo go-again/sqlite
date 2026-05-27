@@ -162,7 +162,7 @@ func TestStmtCache_PrepareCacheHit(t *testing.T) {
 	// contain the SELECT and subsequent prepares are hits — the cache
 	// length should grow by exactly 1, not 10.
 	const query = "SELECT x FROM t WHERE x > ?"
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		stmt, err := sc.PrepareContext(ctx, query)
 		if err != nil {
 			t.Fatal(err)

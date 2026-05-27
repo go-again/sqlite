@@ -110,11 +110,11 @@ func batchInsertEmbeddings(ctx context.Context, db *gorm.DB, m meta, items []vec
 	}
 	tx, err := sqlDB.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("vecgorm: begin tx for %s: %w", m.Table, err)
 	}
 	prep, err := tx.PrepareContext(ctx, stmt)
 	if err != nil {
-		return joinTxErr(err, tx.Rollback())
+		return joinTxErr(fmt.Errorf("vecgorm: prepare insert into %s: %w", m.Table, err), tx.Rollback())
 	}
 	defer prep.Close()
 	for _, it := range items {

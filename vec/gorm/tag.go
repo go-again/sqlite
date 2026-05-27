@@ -50,18 +50,25 @@ type meta struct {
 // parseTag decodes a vec:"..." tag value into a meta. The fieldName /
 // fieldIndex are filled in by the caller. dim is required; everything
 // else has defaults defined in the package doc.
+//
+// Encoding default note: vec.Options{} (the raw-vec API) defaults to
+// vec.JSON for backwards compatibility with the sqlite-vec docs;
+// vec/gorm tags default to vec.Binary because tag-driven users
+// usually want the faster wire format and we own the codepath end-to-
+// end. Override with `vec:"...;encoding=json"` when round-tripping
+// with the raw-vec API or sqlite-vec text examples.
 func parseTag(tagValue, fieldName string, fieldIndex []int) (meta, error) {
 	m := meta{
 		FieldName:  fieldName,
 		FieldIndex: append([]int(nil), fieldIndex...),
 		Metric:     vec.L2,
-		Encoding:   vec.Binary, // binary is the better default; JSON kept for compat in vec.Options.
+		Encoding:   vec.Binary,
 		Column:     "embedding",
 	}
 	if tagValue == "" {
 		return m, fmt.Errorf("vecgorm: %s: empty vec: tag", fieldName)
 	}
-	for _, kv := range strings.Split(tagValue, ";") {
+	for kv := range strings.SplitSeq(tagValue, ";") {
 		kv = strings.TrimSpace(kv)
 		if kv == "" {
 			continue
@@ -197,7 +204,7 @@ func hasGormDataType(t reflect.Type) bool {
 // skip the field entirely. gorm accepts "-", "-:all", and "-:migration"
 // among other "-:" forms; for our purposes any "-" entry is sufficient.
 func hasGormIgnore(tag string) bool {
-	for _, entry := range strings.Split(tag, ";") {
+	for entry := range strings.SplitSeq(tag, ";") {
 		entry = strings.TrimSpace(entry)
 		if entry == "-" {
 			return true

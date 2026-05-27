@@ -31,7 +31,7 @@ func TestQuery_WithFilter_RestrictsToRowidSubset(t *testing.T) {
 		t.Fatalf("baseline KNN unexpected: %+v", base)
 	}
 
-	// Restrict to rowids {3, 4} via WithWhere. Result should never include
+	// Restrict to rowids {3, 4} via WithFilter. Result should never include
 	// rowids 1 or 2.
 	filtered, err := tbl.KNNSlice(ctx, fixtureQuery, 4,
 		vec.WithFilter("rowid IN (?, ?)", int64(3), int64(4)))
@@ -87,6 +87,6 @@ func TestQuery_WithFilter_InvalidSQLSurfaces(t *testing.T) {
 	}
 	_, err = tbl.KNNSlice(ctx, fixtureQuery, 1, vec.WithFilter("not a real clause"))
 	if err == nil {
-		t.Errorf("expected error from malformed WithWhere SQL")
+		t.Errorf("expected error from malformed WithFilter SQL")
 	}
 }
