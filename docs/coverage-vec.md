@@ -54,10 +54,10 @@ The core construct. `CREATE VIRTUAL TABLE name USING vec0(...)`.
 |---|---|---|
 | `... WHERE embedding MATCH ? ORDER BY distance LIMIT N` | ✓ typed | `TestTyped_CreateInsertKNN_JSON` (asserts exact rowids + distances against the upstream sample fixture) |
 | `... WHERE k = ?` (alternate cap syntax) | ✓ raw | `TestRaw_KNN_KEqualsForm` | sqlite-vec accepts both forms. We always emit `LIMIT N` inlined as a literal. |
-| Streaming iterator (`iter.Seq2[Match, error]`) | ✓ typed | `TestTyped_KNN_StreamingIteratorBreak` (asserts early-break cleanup) |
+| Streaming iterator (`iter.Seq2[Neighbor, error]`) | ✓ typed | `TestTyped_KNN_StreamingIteratorBreak` (asserts early-break cleanup) |
 | Slice form (`KNNSlice`) | ✓ typed | `TestTyped_CreateInsertKNN_JSON` |
-| Filtered KNN via `WithWhere(sql, args...)` | ✓ typed | `TestQuery_WithWhere_RestrictsToRowidSubset`, `TestQuery_WithWhere_EmptyResult`, `TestQuery_WithWhere_InvalidSQLSurfaces` |
-| Filter on aux / metadata / partition columns | ✓ raw | `TestRaw_AuxColumn`, `TestRaw_MetadataColumn_FilteredKNN`, `TestRaw_PartitionKey` | Each variant exercised via raw SQL. Reachable through `WithWhere(...)` once you declare the columns. |
+| Filtered KNN via `WithFilter(sql, args...)` | ✓ typed | `TestQuery_WithFilter_RestrictsToRowidSubset`, `TestQuery_WithFilter_EmptyResult`, `TestQuery_WithFilter_InvalidSQLSurfaces` |
+| Filter on aux / metadata / partition columns | ✓ raw | `TestRaw_AuxColumn`, `TestRaw_MetadataColumn_FilteredKNN`, `TestRaw_PartitionKey` | Each variant exercised via raw SQL. Reachable through `WithFilter(...)` once you declare the columns. |
 
 ### Wire encoding
 

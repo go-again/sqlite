@@ -157,13 +157,6 @@ type Row struct {
 	Embedding []float32
 }
 
-// Item is the previous name of [Row] and remains as a type alias so
-// existing call sites (`vec.Item{Rowid: …, Embedding: …}`) keep
-// compiling. New code should use [Row].
-//
-// Deprecated: use [Row].
-type Item = Row
-
 // BatchInsert inserts every item in a single transaction. Each rowid must be
 // unique within the table; conflicts surface as errors (sqlite-vec's vec0
 // INSERT does not honor OR REPLACE).
@@ -250,21 +243,13 @@ type Neighbor struct {
 	Distance float64
 }
 
-// Match is the previous name of [Neighbor] and remains as a type alias
-// so existing call sites (`var m vec.Match` and `iter.Seq2[vec.Match,
-// error]`) keep compiling. New code should use [Neighbor].
-//
-// Deprecated: use [Neighbor].
-type Match = Neighbor
-
 // KNN issues an approximate k-nearest-neighbour query for the given vector
 // and returns an iter.Seq2 cursor over the results in ascending-distance
 // order. Yielding stops at k rows or on error.
 //
 // Optional QueryOptions filter the result set. WithFilter appends a
 // custom WHERE conjunct (e.g. "rowid IN (1, 2, 3)" to restrict to known
-// IDs); see [WithFilter] for details. The older name [WithWhere] is kept
-// as a deprecated wrapper.
+// IDs); see [WithFilter] for details.
 //
 // The yielded error is always nil except for the final iteration after a
 // row-scan failure, where it carries the scan error and the Neighbor is
@@ -275,9 +260,9 @@ func (t *Table) KNN(ctx context.Context, query []float32, k int, opts ...QueryOp
 	for _, opt := range opts {
 		opt(cfg)
 	}
-	return func(yield func(Match, error) bool) {
+	return func(yield func(Neighbor, error) bool) {
 		if len(query) != t.dim {
-			yield(Match{}, fmt.Errorf("vec.KNN: query length %d != dim %d", len(query), t.dim))
+			yield(Neighbor{}, fmt.Errorf("vec.KNN: query length %d != dim %d", len(query), t.dim))
 			return
 		}
 		if k <= 0 {
@@ -310,14 +295,14 @@ func (t *Table) KNN(ctx context.Context, query []float32, k int, opts ...QueryOp
 
 		rows, err := t.db.QueryContext(ctx, b.String(), args...)
 		if err != nil {
-			yield(Match{}, err)
+			yield(Neighbor{}, err)
 			return
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var m Match
+			var m Neighbor
 			if err := rows.Scan(&m.Rowid, &m.Distance); err != nil {
-				yield(Match{}, err)
+				yield(Neighbor{}, err)
 				return
 			}
 			if !yield(m, nil) {
@@ -325,7 +310,7 @@ func (t *Table) KNN(ctx context.Context, query []float32, k int, opts ...QueryOp
 			}
 		}
 		if err := rows.Err(); err != nil {
-			yield(Match{}, err)
+			yield(Neighbor{}, err)
 		}
 	}
 }
@@ -333,8 +318,8 @@ func (t *Table) KNN(ctx context.Context, query []float32, k int, opts ...QueryOp
 // KNNSlice is a convenience wrapper that collects the first k matches into a
 // slice. Use it when you don't need streaming behavior. Accepts the same
 // QueryOptions as KNN.
-func (t *Table) KNNSlice(ctx context.Context, query []float32, k int, opts ...QueryOption) ([]Match, error) {
-	out := make([]Match, 0, k)
+func (t *Table) KNNSlice(ctx context.Context, query []float32, k int, opts ...QueryOption) ([]Neighbor, error) {
+	out := make([]Neighbor, 0, k)
 	for m, err := range t.KNN(ctx, query, k, opts...) {
 		if err != nil {
 			return nil, err

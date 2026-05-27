@@ -59,7 +59,7 @@ func main() {
 	}
 
 	// Find the closest document to a query vector. KNN returns
-	// []Result[Document] with .Distance attached — no manual IN-clause
+	// []Hit[Document] with .Distance attached — no manual IN-clause
 	// or re-sorting required.
 	ctx := context.Background()
 	results, err := vecgorm.KNN[Document](ctx, db, []float32{0, 0.95, 0, 0}, 2)

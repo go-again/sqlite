@@ -2,7 +2,6 @@ package vecgorm
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"reflect"
 	"sync"
@@ -183,11 +182,12 @@ func (p *plugin) lookupForDB(db *gorm.DB) (modelMeta, bool) {
 }
 
 // pluginFrom extracts the registered plugin instance from a *gorm.DB.
-// Returns an error if Plugin() wasn't installed.
+// Returns an error wrapping [ErrNotInstalled] when Plugin() has not
+// been installed via db.Use.
 func pluginFrom(db *gorm.DB) (*plugin, error) {
 	raw, ok := db.Config.Plugins[pluginName]
 	if !ok {
-		return nil, errors.New("vecgorm: Plugin() not installed; call db.Use(vecgorm.Plugin()) first")
+		return nil, fmt.Errorf("%w; call db.Use(vecgorm.Plugin()) first", ErrNotInstalled)
 	}
 	p, ok := raw.(*plugin)
 	if !ok {

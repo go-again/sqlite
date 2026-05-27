@@ -103,14 +103,14 @@ func (o *Observable[K, V]) Delete(ctx context.Context, keys ...K) error {
 // Search wraps the underlying iter.Seq2 so the recorder/logger fire exactly
 // once per Search invocation (after the iterator is fully drained or cleaned
 // up by an early break). The recorded match string is FTS5's MATCH RHS.
-func (o *Observable[K, V]) Search(ctx context.Context, q Query, opts ...SearchOption) iter.Seq2[Match[K, V], error] {
+func (o *Observable[K, V]) Search(ctx context.Context, q Query, opts ...SearchOption) iter.Seq2[Hit[K, V], error] {
 	start := time.Now()
 	matchStr := ""
 	if q != nil {
 		matchStr = q.Build()
 	}
 	inner := o.inner.Search(ctx, q, opts...)
-	return func(yield func(Match[K, V], error) bool) {
+	return func(yield func(Hit[K, V], error) bool) {
 		var firstErr error
 		defer func() {
 			dur := time.Since(start)
@@ -136,8 +136,8 @@ func (o *Observable[K, V]) Search(ctx context.Context, q Query, opts ...SearchOp
 }
 
 // SearchSlice mirrors Index.SearchSlice with observability.
-func (o *Observable[K, V]) SearchSlice(ctx context.Context, q Query, opts ...SearchOption) ([]Match[K, V], error) {
-	var out []Match[K, V]
+func (o *Observable[K, V]) SearchSlice(ctx context.Context, q Query, opts ...SearchOption) ([]Hit[K, V], error) {
+	var out []Hit[K, V]
 	for m, err := range o.Search(ctx, q, opts...) {
 		if err != nil {
 			return nil, err

@@ -30,13 +30,3 @@ func WithFilter(sql string, args ...any) QueryOption {
 		c.whereArgs = args
 	}
 }
-
-// WithWhere is the previous name of [WithFilter] and remains as a
-// thin wrapper for backward compatibility. New code should call
-// [WithFilter] directly; the names were unified with vec/gorm's
-// matching option in v0.2.x.
-//
-// Deprecated: use [WithFilter].
-func WithWhere(sql string, args ...any) QueryOption {
-	return WithFilter(sql, args...)
-}

@@ -164,11 +164,17 @@ func (p *plugin) lookupForDB(db *gorm.DB) (*modelMeta, bool) {
 	return mm, len(mm.Fields) > 0
 }
 
-// pluginFrom returns the registered plugin instance or an error.
+// ErrNotInstalled is returned by helper APIs when ftsgorm.Plugin() has
+// not been registered on the *gorm.DB. Mirrors [vecgorm.ErrNotInstalled]
+// so callers can match either bridge symmetrically via errors.Is.
+var ErrNotInstalled = errors.New("ftsgorm: Plugin() not installed on *gorm.DB")
+
+// pluginFrom returns the registered plugin instance or an error. The
+// error wraps [ErrNotInstalled] when the plugin has not been installed.
 func pluginFrom(db *gorm.DB) (*plugin, error) {
 	raw, ok := db.Config.Plugins[pluginName]
 	if !ok {
-		return nil, errors.New("ftsgorm: Plugin() not installed; call db.Use(ftsgorm.Plugin()) first")
+		return nil, fmt.Errorf("%w; call db.Use(ftsgorm.Plugin()) first", ErrNotInstalled)
 	}
 	p, ok := raw.(*plugin)
 	if !ok {

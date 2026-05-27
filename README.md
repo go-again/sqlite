@@ -190,7 +190,7 @@ Tag-driven features:
 - Soft-delete awareness: models using `gorm.DeletedAt` get a
   metadata column on the sidecar; KNN/Search excludes them
   automatically. Pass `IncludeDeleted()` to override.
-- Typed helpers return `[]Result[T]` ordered by ranking so callers
+- Typed helpers return `[]Hit[T]` ordered by ranking so callers
   don't have to rebuild the IN-clause + re-sort dance.
 - `db.Migrator().DropTable(&Model{})` cascades into the sidecar
   (vec0 table or FTS5 table + triggers) via the dialector's

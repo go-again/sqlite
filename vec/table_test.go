@@ -27,7 +27,7 @@ func openDB(t *testing.T) *sql.DB {
 // fixture corresponds to the four vectors from sqlite-vec's documentation
 // example. Reusing the same data across encoding + metric tests gives us a
 // stable reference baseline.
-var fixture = []vec.Item{
+var fixture = []vec.Row{
 	{Rowid: 1, Embedding: []float32{-0.200, 0.250, 0.341, -0.211, 0.645, 0.935, -0.316, -0.924}},
 	{Rowid: 2, Embedding: []float32{0.443, -0.501, 0.355, -0.771, 0.707, -0.708, -0.185, 0.362}},
 	{Rowid: 3, Embedding: []float32{0.716, -0.927, 0.134, 0.052, -0.669, 0.793, -0.634, -0.162}},
@@ -308,7 +308,7 @@ func TestTyped_KNN_StreamingIteratorBreak(t *testing.T) {
 	if err := tbl.BatchInsert(ctx, fixture); err != nil {
 		t.Fatal(err)
 	}
-	var first vec.Match
+	var first vec.Neighbor
 	count := 0
 	for m, err := range tbl.KNN(ctx, fixtureQuery, 4) {
 		if err != nil {

@@ -447,8 +447,8 @@ func TestIndex_MultiColumn(t *testing.T) {
 	}
 }
 
-// keysOf is a small helper that extracts the Key field from every Match.
-func keysOf(matches []fts.Match[int64, string]) []int64 {
+// keysOf is a small helper that extracts the Key field from every Hit.
+func keysOf(matches []fts.Hit[int64, string]) []int64 {
 	out := make([]int64, len(matches))
 	for i, m := range matches {
 		out[i] = m.Key

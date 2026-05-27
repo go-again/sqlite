@@ -21,13 +21,6 @@ type Hit[T any] struct {
 	Highlight string
 }
 
-// Result is the previous name of [Hit] and remains as a generic type
-// alias so existing call sites (`ftsgorm.Result[Model]`) keep
-// compiling. New code should use [Hit].
-//
-// Deprecated: use [Hit].
-type Result[T any] = Hit[T]
-
 type options struct {
 	limit      int
 	offset     int

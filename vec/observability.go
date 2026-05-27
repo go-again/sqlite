@@ -94,7 +94,7 @@ func (o *Observable) Insert(ctx context.Context, rowid int64, embedding []float3
 }
 
 // BatchInsert records the operation and delegates.
-func (o *Observable) BatchInsert(ctx context.Context, items []Item) error {
+func (o *Observable) BatchInsert(ctx context.Context, items []Row) error {
 	start := time.Now()
 	err := o.inner.BatchInsert(ctx, items)
 	dur := time.Since(start)
@@ -135,11 +135,11 @@ func (o *Observable) Delete(ctx context.Context, rowid int64) error {
 // KNN wraps the underlying iter.Seq2 so the recorder/logger fire exactly
 // once per KNN invocation, after the iterator is fully drained or cleaned
 // up by an early break. Forwards QueryOptions to the underlying Table.KNN.
-func (o *Observable) KNN(ctx context.Context, query []float32, k int, opts ...QueryOption) iter.Seq2[Match, error] {
+func (o *Observable) KNN(ctx context.Context, query []float32, k int, opts ...QueryOption) iter.Seq2[Neighbor, error] {
 	start := time.Now()
 	dim := len(query)
 	inner := o.inner.KNN(ctx, query, k, opts...)
-	return func(yield func(Match, error) bool) {
+	return func(yield func(Neighbor, error) bool) {
 		var firstErr error
 		defer func() {
 			dur := time.Since(start)
@@ -166,8 +166,8 @@ func (o *Observable) KNN(ctx context.Context, query []float32, k int, opts ...Qu
 }
 
 // KNNSlice mirrors Table.KNNSlice with observability. Forwards QueryOptions.
-func (o *Observable) KNNSlice(ctx context.Context, query []float32, k int, opts ...QueryOption) ([]Match, error) {
-	var out []Match
+func (o *Observable) KNNSlice(ctx context.Context, query []float32, k int, opts ...QueryOption) ([]Neighbor, error) {
+	var out []Neighbor
 	for m, err := range o.KNN(ctx, query, k, opts...) {
 		if err != nil {
 			return nil, err

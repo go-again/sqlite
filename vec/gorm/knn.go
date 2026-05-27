@@ -18,13 +18,6 @@ type Hit[T any] struct {
 	Distance float64
 }
 
-// Result is the previous name of [Hit] and remains as a generic type
-// alias so existing call sites (`vecgorm.Result[Model]`) keep
-// compiling. New code should use [Hit].
-//
-// Deprecated: use [Hit].
-type Result[T any] = Hit[T]
-
 // options controls KNN behavior. See WithFilter and IncludeDeleted.
 type options struct {
 	extraWhere string
@@ -62,6 +55,15 @@ func IncludeDeleted() Option {
 // any scopes / preloads chained on db apply.
 //
 // k is the maximum number of matches to return.
+//
+// Transaction semantics: KNN reads the sidecar through *sql.DB (not
+// the active *sql.Tx on db.Statement.ConnPool), so it sees the latest
+// committed state — not writes made earlier in the same
+// gorm.Transaction. Calling KNN inside a Transaction is therefore not
+// supported in general, and will deadlock under pools pinned to one
+// connection (the typical SQLite test setup), since the parent tx
+// holds that conn. To query uncommitted state, issue raw SQL through
+// tx.Raw against the sidecar table directly.
 func KNN[T any](
 	ctx context.Context,
 	db *gorm.DB,

@@ -20,8 +20,8 @@ type Attr[K, V SQLType] struct {
 	Extras map[string]any
 }
 
-// Match is a single search hit.
-type Match[K, V SQLType] struct {
+// Hit is a single search hit returned by [Index.Search].
+type Hit[K, V SQLType] struct {
 	// Key mirrors the rowid stored at insert time.
 	Key K
 
@@ -276,7 +276,7 @@ func WithOffset(n int) SearchOption {
 }
 
 // WithRanking enables BM25 ranking; weights, if supplied, are per column in
-// declaration order. Without WithRanking, Match.Rank is zero.
+// declaration order. Without WithRanking, Hit.Rank is zero.
 func WithRanking(weights ...float64) SearchOption {
 	return func(c *searchConfig) {
 		c.withRank = true
@@ -314,30 +314,30 @@ func WithHighlight(column, before, after string) SearchOption {
 // Search executes the given Query and returns an iter.Seq2 over matching
 // rows in BM25 order. Stops early when the consumer breaks the range loop.
 //
-// Match.Rank is populated only when WithRanking is passed. Match.Snippet
-// and Match.Highlight are populated only when their respective options are
+// Hit.Rank is populated only when WithRanking is passed. Hit.Snippet
+// and Hit.Highlight are populated only when their respective options are
 // requested.
-func (i *Index[K, V]) Search(ctx context.Context, q Query, opts ...SearchOption) iter.Seq2[Match[K, V], error] {
+func (i *Index[K, V]) Search(ctx context.Context, q Query, opts ...SearchOption) iter.Seq2[Hit[K, V], error] {
 	cfg := &searchConfig{}
 	for _, o := range opts {
 		o(cfg)
 	}
-	return func(yield func(Match[K, V], error) bool) {
+	return func(yield func(Hit[K, V], error) bool) {
 		stmt, args, err := i.buildSearchSQL(q, cfg)
 		if err != nil {
-			yield(Match[K, V]{}, err)
+			yield(Hit[K, V]{}, err)
 			return
 		}
 		rows, err := i.db.QueryContext(ctx, stmt, args...)
 		if err != nil {
-			yield(Match[K, V]{}, err)
+			yield(Hit[K, V]{}, err)
 			return
 		}
 		defer rows.Close()
 
 		colNames, err := rows.Columns()
 		if err != nil {
-			yield(Match[K, V]{}, err)
+			yield(Hit[K, V]{}, err)
 			return
 		}
 		for rows.Next() {
@@ -347,12 +347,12 @@ func (i *Index[K, V]) Search(ctx context.Context, q Query, opts ...SearchOption)
 				holders[i] = &scanTargets[i]
 			}
 			if err := rows.Scan(holders...); err != nil {
-				yield(Match[K, V]{}, err)
+				yield(Hit[K, V]{}, err)
 				return
 			}
 			m, err := i.makeMatch(colNames, scanTargets, cfg)
 			if err != nil {
-				yield(Match[K, V]{}, err)
+				yield(Hit[K, V]{}, err)
 				return
 			}
 			if !yield(m, nil) {
@@ -360,15 +360,15 @@ func (i *Index[K, V]) Search(ctx context.Context, q Query, opts ...SearchOption)
 			}
 		}
 		if err := rows.Err(); err != nil {
-			yield(Match[K, V]{}, err)
+			yield(Hit[K, V]{}, err)
 		}
 	}
 }
 
 // SearchSlice is a convenience around Search that collects all matches into a
 // slice. Use Search when you need streaming behavior.
-func (i *Index[K, V]) SearchSlice(ctx context.Context, q Query, opts ...SearchOption) ([]Match[K, V], error) {
-	var out []Match[K, V]
+func (i *Index[K, V]) SearchSlice(ctx context.Context, q Query, opts ...SearchOption) ([]Hit[K, V], error) {
+	var out []Hit[K, V]
 	for m, err := range i.Search(ctx, q, opts...) {
 		if err != nil {
 			return nil, err
@@ -459,9 +459,9 @@ func (i *Index[K, V]) buildSearchSQL(q Query, cfg *searchConfig) (string, []any,
 	return b.String(), args, nil
 }
 
-// makeMatch decodes a single scanned row into a typed Match[K, V].
-func (i *Index[K, V]) makeMatch(colNames []string, vals []any, cfg *searchConfig) (Match[K, V], error) {
-	var m Match[K, V]
+// makeMatch decodes a single scanned row into a typed Hit[K, V].
+func (i *Index[K, V]) makeMatch(colNames []string, vals []any, cfg *searchConfig) (Hit[K, V], error) {
+	var m Hit[K, V]
 	for j, name := range colNames {
 		raw := vals[j]
 		switch name {
