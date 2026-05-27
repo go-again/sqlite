@@ -37,4 +37,23 @@
 // The underlying transpiled vec extension is built per-target by
 // modernc.org/sqlite/vec. Some GOOS/GOARCH combinations may not be supported
 // upstream; see that package's build tags for the authoritative list.
+//
+// # Observability
+//
+// Insert / BatchInsert / Update / Delete / KNN can be wrapped with slog
+// logging or a metrics recorder by composing the optional decorators in
+// observability.go: Wrap, WithLogger, WithRecorder. Parallel to the
+// matching surface in github.com/go-again/sqlite/fts.
+//
+// # See also
+//
+//   - github.com/go-again/sqlite/vec/gorm — tag-driven sqlite-vec
+//     sidecars wired into gorm models. Define an Embedding field on
+//     a gorm model and the plugin owns CRUD sync, soft-delete
+//     filtering, and DropTable cascade.
+//   - examples/vec-search — runnable demo of the raw vec.Table API.
+//   - examples/gorm-vec-tagged — the same data flow expressed via
+//     the gorm bridge.
+//   - docs/coverage-vec.md — every documented sqlite-vec feature
+//     with its current status (typed / raw / inherited).
 package vec
