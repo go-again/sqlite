@@ -36,6 +36,13 @@ type Option func(*options)
 // reference columns the sidecar has — rowid plus any metadata columns
 // the model's tag declared. It must NOT reference gorm-side columns;
 // for that, chain a db.Where(...) on the returned slice instead.
+//
+// # Trust model
+//
+// The sqlFragment is caller-trusted raw SQL (parameters in args... are
+// bound, fragment text interpolates as-is) — same contract as
+// [gorm.DB.Where] and [vec.WithFilter]. Validate identifiers with
+// [vec.ValidIdent] before interpolating; pass literals through args.
 func WithFilter(sqlFragment string, args ...any) Option {
 	return func(o *options) {
 		o.extraWhere = sqlFragment

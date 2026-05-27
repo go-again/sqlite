@@ -340,12 +340,21 @@ func (i *Index[K, V]) Search(ctx context.Context, q Query, opts ...SearchOption)
 			yield(Hit[K, V]{}, err)
 			return
 		}
+		// Hoist scanTargets/holders above the loop so they're allocated
+		// once per Search instead of once per row. Reuse is safe here
+		// because FTS5 columns are TEXT / INTEGER / REAL — when scanned
+		// into *any, those land as string / int64 / float64 values
+		// stored fully inside the interface header, so a subsequent
+		// Scan that overwrites a slot doesn't alias prior values that
+		// makeMatch stashed into a Hit's Extras map. If FTS5 ever
+		// supports BLOB columns and the driver returns a reused []byte
+		// buffer, makeMatch will need to copy before stashing.
+		scanTargets := make([]any, len(colNames))
+		holders := make([]any, len(colNames))
+		for i := range scanTargets {
+			holders[i] = &scanTargets[i]
+		}
 		for rows.Next() {
-			scanTargets := make([]any, len(colNames))
-			holders := make([]any, len(colNames))
-			for i := range scanTargets {
-				holders[i] = &scanTargets[i]
-			}
 			if err := rows.Scan(holders...); err != nil {
 				yield(Hit[K, V]{}, err)
 				return

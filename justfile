@@ -44,8 +44,18 @@ bench *FLAGS:
 bench-auth:
     go test -run=^$ -bench=BenchmarkAuthorizer -benchmem -count=5 .
 
-# Lint with vet + staticcheck + golangci-lint + modernize (matches CI).
-lint: vet staticcheck golangci modernize
+# Vec hot-path benchmarks (KNN, KNN+filter, BatchInsert JSON/Binary).
+bench-vec:
+    go test -run=^$ -bench='^Benchmark' -benchmem -count=5 ./vec/
+
+# FTS5 hot-path benchmarks (Search, Search+ranking, Insert batch).
+bench-fts:
+    go test -run=^$ -bench='^Benchmark' -benchmem -count=5 ./fts/
+
+# Lint with fmt-check + vet + staticcheck + golangci-lint + modernize
+# (matches CI). fmt-check runs first because it's the cheapest and the
+# most common cause of CI failures from local-only pushes.
+lint: fmt-check vet staticcheck golangci modernize
 
 # go vet across all packages. unsafeptr=false suppresses the false-positive
 # storm from modernc's uintptr↔unsafe.Pointer conversions inherited in our
@@ -76,11 +86,17 @@ golangci:
 # `go run` so contributors don't need a separate install step. The grep
 # filter skips files we keep verbatim from upstream forks per CLAUDE.md
 # — those follow modernc/glebarez patterns and shouldn't drift on style.
+#
+# `^go:` strips Go's auto-toolchain breadcrumbs (`go: downloading ...`,
+# `go: switching to go1.X` etc.) — newer gopls releases require a
+# newer Go than we pin in go.mod, so `go run @latest` auto-downloads
+# and that chatter would otherwise trip the `[ -n "$out" ]` gate.
 modernize:
     @out=$(go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest ./... 2>&1 \
         | grep -v -E '^/[^:]*/(sqlite|vtab|rows)\.go:' \
         | grep -v -E '^/[^:]*/gorm/(sqlite|migrator)\.go:' \
         | grep -v '^exit status' \
+        | grep -v '^go: ' \
         || true); \
     if [ -n "$out" ]; then echo "$out"; exit 1; fi
 

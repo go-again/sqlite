@@ -19,4 +19,9 @@ var (
 // loadExtensionUnsupported is true on platforms where modernc.org/libc's
 // dynamic-loader shim aborts rather than returning an error. Use this to
 // gate LoadExtension-touching tests.
+//
+// Exported (lowercase-but-package-level) for use by sibling tests only.
+// Not stable API — if you import this package as a library, do not
+// depend on this variable; it may move or change semantics when the
+// upstream libc shim grows real dlopen support.
 var loadExtensionUnsupported = isDarwin || isWindows

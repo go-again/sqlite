@@ -86,6 +86,14 @@ func IncludeDeleted() Option { return func(o *options) { o.includeDel = true } }
 //
 // Mirrors vec/gorm.WithFilter; for gorm-side scopes / preloads, chain
 // db.Where(...) on the returned slice instead.
+//
+// # Trust model
+//
+// The sqlFragment is caller-trusted raw SQL (parameters in args... are
+// bound, fragment text interpolates as-is) — same contract as
+// [gorm.DB.Where] and [fts.QuoteIdent]/[fts.ValidIdent] usage.
+// Validate identifiers before interpolating; pass literals through
+// args.
 func WithFilter(sqlFragment string, args ...any) Option {
 	return func(o *options) {
 		o.extraWhere = sqlFragment

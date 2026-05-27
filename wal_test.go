@@ -46,9 +46,13 @@ func TestWAL_ConcurrentReadersAndWriters(t *testing.T) {
 	}
 
 	const (
-		writers     = 4
-		readers     = 4
-		writeWindow = 500 * time.Millisecond
+		writers = 4
+		readers = 4
+		// 1s window so slow CI runners (emulated linux/arm64, Windows
+		// under github-actions) reliably accumulate writes. The 500ms
+		// version this replaced occasionally ended with zero writes
+		// observed on the slowest matrix legs.
+		writeWindow = 1 * time.Second
 		readerSleep = 1 * time.Millisecond
 		writerSleep = 50 * time.Microsecond
 	)

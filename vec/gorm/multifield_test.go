@@ -13,10 +13,10 @@ import (
 // rejects the model because it can't disambiguate which embedding to
 // query — that limitation is exercised below.
 type MultiEmbedDoc struct {
-	ID      uint              `gorm:"primaryKey"`
-	Title   string
-	Text    vecgorm.Embedding `vec:"dim=4;table=multi_embed_docs_text"`
-	Image   vecgorm.Embedding `vec:"dim=4;table=multi_embed_docs_image"`
+	ID    uint `gorm:"primaryKey"`
+	Title string
+	Text  vecgorm.Embedding `vec:"dim=4;table=multi_embed_docs_text"`
+	Image vecgorm.Embedding `vec:"dim=4;table=multi_embed_docs_image"`
 }
 
 // TestMultiField_KNNRejected asserts the explicit error when a caller

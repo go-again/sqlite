@@ -33,6 +33,30 @@ db, _ := sql.Open("sqlite3", "file:my.db?_pragma=foreign_keys(1)")
 - Typed Go APIs for vector search and FTS5, with `iter.Seq2` streaming and
   optional `log/slog` + Recorder observability.
 
+## Supported Go versions
+
+The project tracks the **two most recent Go releases**: today that's
+**Go 1.26 (current)** and **Go 1.25 (previous)**. Anything older is
+unsupported on purpose. When a new Go minor ships, the just-superseded
+version drops out of the support matrix within one release cycle.
+Downstream consumers who need to stay on an older Go should pin an
+older tag of this package.
+
+This is a deliberate stance, not a side-effect:
+
+- **Modern syntax is a feature.** The typed APIs lean on generics,
+  `iter.Seq2`, `log/slog`, generic type aliases (Go 1.24+), `range
+  over int` (Go 1.22+), `sync.WaitGroup.Go` (Go 1.25), `strings.SplitSeq`,
+  `reflect.TypeFor`. We adopt new idioms as soon as the second-most-
+  recent release picks them up. `just lint` runs `gopls modernize` to
+  enforce that contributions don't drift to older forms.
+- **Code stays small.** `for i := range n` doesn't need a comment;
+  `for i := 0; i < n; i++` would. Fewer lines, fewer reviewer-attention
+  pixels.
+- **Security and toolchain fixes reach you for free.** We aren't going
+  to ship a year-old runtime to a downstream just to keep an extra Go
+  version on a green build matrix.
+
 ## Why CGo-free matters
 
 If you've never hit it, this whole section sounds like premature paranoia.

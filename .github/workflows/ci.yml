@@ -82,11 +82,18 @@ jobs:
         # strings.SplitSeq, sync.WaitGroup.Go, etc.). Skips the forked
         # modernc/glebarez files we keep verbatim per CLAUDE.md — those
         # follow upstream patterns and shouldn't drift on style.
+        #
+        # `^go:` strips Go's auto-toolchain breadcrumbs (`go: downloading
+        # ...`, `go: switching to go1.X`) — newer gopls releases require
+        # a newer Go than we pin in go.mod, so `go run @latest` will
+        # auto-download and that chatter would otherwise trip the
+        # `[ -n "$out" ]` gate.
         run: |
           out=$(go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest ./... 2>&1 \
               | grep -v -E '^/[^:]*/(sqlite|vtab|rows)\.go:' \
               | grep -v -E '^/[^:]*/gorm/(sqlite|migrator)\.go:' \
               | grep -v '^exit status' \
+              | grep -v '^go: ' \
               || true)
           if [ -n "$out" ]; then echo "$out"; exit 1; fi
 

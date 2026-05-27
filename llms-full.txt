@@ -34,8 +34,13 @@ SQLite engine, with a hand-written wrapper that adds:
 - A `vfs` adapter that lets you back an `*sql.DB` with any `io/fs.FS` —
   `embed.FS`, `fstest.MapFS`, a zip-fs, anything.
 
-Target Go version is **1.25+** (generics, `iter.Seq2`, `log/slog`,
-`sync.WaitGroup.Go`, `range over int`, generic type aliases).
+The project supports the **two most recent Go releases** — today that's
+**1.26 (current)** and **1.25 (previous)**. When a new minor ships, the
+just-superseded version drops out within one release cycle. Modern
+syntax is treated as a feature, not an accident: generics, `iter.Seq2`,
+`log/slog`, generic type aliases, `range over int`, `sync.WaitGroup.Go`,
+`strings.SplitSeq`, `reflect.TypeFor` are all in use. `just lint` runs
+`gopls modernize` to keep new contributions on the leading idiom.
 
 # Picking the driver name
 

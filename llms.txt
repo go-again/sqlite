@@ -7,8 +7,10 @@
 
 The driver registers under two names so it slots into either ecosystem's
 blank imports verbatim: `"sqlite"` (modernc-compatible) and `"sqlite3"`
-(mattn-compatible). Same singleton, no behavioural split. Go 1.25+,
-generics + iter.Seq2 + log/slog throughout.
+(mattn-compatible). Same singleton, no behavioural split. Supports the
+two most recent Go releases only (today: 1.26 current, 1.25 previous);
+modern syntax is treated as a feature — generics, iter.Seq2, log/slog,
+range-over-int, sync.WaitGroup.Go, etc. are all in use.
 
 ## Read this first
 

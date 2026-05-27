@@ -38,6 +38,15 @@
 // modernc.org/sqlite/vec. Some GOOS/GOARCH combinations may not be supported
 // upstream; see that package's build tags for the authoritative list.
 //
+// Practical consequence for downstream consumers: if you compile on a
+// target the upstream `modernc.org/sqlite/vec` does not cover, `go
+// build ./...` against your module will fail at this sub-package
+// while the rest of github.com/go-again/sqlite still compiles. The
+// remaining sub-packages (root driver, fts, gorm, vfs, fts/gorm) work
+// on every supported target. Build with `go build ./... 2>/dev/null
+// || go build ./` if you want to skip vec/ on niche arches, or list
+// the packages you actually consume explicitly.
+//
 // # Observability
 //
 // Insert / BatchInsert / Update / Delete / KNN can be wrapped with slog

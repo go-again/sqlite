@@ -73,12 +73,12 @@
 //
 // KNN[T] accepts these options:
 //
-//	- WithFilter(sql, args...) — extra WHERE conjunct on the sidecar
-//	  (typically against metadata columns the user declared via raw
-//	  SQL; sqlite-vec accepts rowid filters too but may bypass the
-//	  ANN planner for them).
-//	- IncludeDeleted() — disables the default `deleted = 0` filter
-//	  on models that have gorm.DeletedAt.
+//   - WithFilter(sql, args...) — extra WHERE conjunct on the sidecar
+//     (typically against metadata columns the user declared via raw
+//     SQL; sqlite-vec accepts rowid filters too but may bypass the
+//     ANN planner for them).
+//   - IncludeDeleted() — disables the default `deleted = 0` filter
+//     on models that have gorm.DeletedAt.
 //
 // # Soft-delete
 //

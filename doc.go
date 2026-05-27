@@ -27,21 +27,21 @@
 // The mattn drop-in is exhaustive — change the import path and
 // existing code typically keeps compiling:
 //
-//	- Construction via &sqlite.SQLiteDriver{Extensions, ConnectHook}
-//	  (struct literal with the field names mattn used).
-//	- Type aliases: SQLiteConn, SQLiteStmt, SQLiteRows, SQLiteTx,
-//	  SQLiteResult, SQLiteBackup, SQLiteError.
-//	- Reflective RegisterFunc / RegisterAggregator with the same
-//	  call shape mattn exposes — variadic args, (T, error) returns,
-//	  pure-vs-deterministic UDF flag.
-//	- DSN flag translation: every `_*` flag mattn supports
-//	  (_foreign_keys, _busy_timeout, _journal_mode, _txlock,
-//	  _time_format, …) lands as the equivalent PRAGMA. See dsn.go for
-//	  the full table; unknown flags surface a clear error rather than
-//	  being silently dropped.
-//	- Error code introspection: (*Error).Code() / ExtendedCode() plus
-//	  the SQLITE_* / SQLITE_CONSTRAINT_* sentinels exposed in
-//	  constants.go. Works with errors.Is.
+//   - Construction via &sqlite.SQLiteDriver{Extensions, ConnectHook}
+//     (struct literal with the field names mattn used).
+//   - Type aliases: SQLiteConn, SQLiteStmt, SQLiteRows, SQLiteTx,
+//     SQLiteResult, SQLiteBackup, SQLiteError.
+//   - Reflective RegisterFunc / RegisterAggregator with the same
+//     call shape mattn exposes — variadic args, (T, error) returns,
+//     pure-vs-deterministic UDF flag.
+//   - DSN flag translation: every `_*` flag mattn supports
+//     (_foreign_keys, _busy_timeout, _journal_mode, _txlock,
+//     _time_format, …) lands as the equivalent PRAGMA. See dsn.go for
+//     the full table; unknown flags surface a clear error rather than
+//     being silently dropped.
+//   - Error code introspection: (*Error).Code() / ExtendedCode() plus
+//     the SQLITE_* / SQLITE_CONSTRAINT_* sentinels exposed in
+//     constants.go. Works with errors.Is.
 //
 // The compat surface is enforced by tests we vendored from mattn's
 // own suite — see docs/mattn-upstream.md and the `mattn_upstream`
@@ -53,12 +53,12 @@
 // wired in via the same trampoline pattern modernc uses for the
 // hooks it does expose:
 //
-//	- (*Conn).RegisterAuthorizer
-//	- (*Conn).RegisterUpdateHook
-//	- (*Conn).RegisterCommitHook / RegisterRollbackHook
-//	- (*Conn).RegisterPreUpdateHook
-//	- (*Conn).SetTrace
-//	- (*Conn).Backup / SerializeNoCopy / Deserialize
+//   - (*Conn).RegisterAuthorizer
+//   - (*Conn).RegisterUpdateHook
+//   - (*Conn).RegisterCommitHook / RegisterRollbackHook
+//   - (*Conn).RegisterPreUpdateHook
+//   - (*Conn).SetTrace
+//   - (*Conn).Backup / SerializeNoCopy / Deserialize
 //
 // Hooks are per-connection. To install one on a known *Conn, pin the
 // pool to one with db.SetMaxOpenConns(1), grab a *sql.Conn, and use

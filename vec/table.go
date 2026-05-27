@@ -319,7 +319,11 @@ func (t *Table) KNN(ctx context.Context, query []float32, k int, opts ...QueryOp
 // slice. Use it when you don't need streaming behavior. Accepts the same
 // QueryOptions as KNN.
 func (t *Table) KNNSlice(ctx context.Context, query []float32, k int, opts ...QueryOption) ([]Neighbor, error) {
-	out := make([]Neighbor, 0, k)
+	// Cap the initial slice capacity so a caller passing a pathological
+	// k (millions) doesn't pre-allocate gigabytes before the query
+	// runs. Append will grow the slice naturally past the cap for the
+	// rare legitimate large-k case.
+	out := make([]Neighbor, 0, min(k, 1024))
 	for m, err := range t.KNN(ctx, query, k, opts...) {
 		if err != nil {
 			return nil, err

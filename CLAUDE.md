@@ -22,8 +22,12 @@ positioned as a drop-in replacement for:
 Plus first-class typed Go APIs for **sqlite-vec** vector search and **FTS5**
 full-text search.
 
-Target Go version is **1.25+**; we use generics, `iter.Seq2`, and `log/slog`
-throughout.
+Supported Go versions: the **two most recent releases** (today: 1.26
+current, 1.25 previous). Older Go is out of support on purpose; a new
+minor drops the just-superseded version within one release cycle. We
+use generics, `iter.Seq2`, `log/slog`, generic type aliases, `range
+over int`, `sync.WaitGroup.Go`, `strings.SplitSeq`, `reflect.TypeFor`
+freely. `just lint` runs `gopls modernize` to enforce the policy.
 
 ---
 
@@ -295,7 +299,7 @@ the excluded files without checking errors.
 
 ### `interface{}` is `any`
 
-We're Go 1.25+. Use `any`, never `interface{}`. The codebase has been
+Use `any`, never `interface{}`. The codebase has been
 swept; new contributions should match.
 
 ### Test fixtures
@@ -326,7 +330,7 @@ doc) bakes this convention.
 | Full test suite | `just test` |
 | One named test or regex | `just test-one TestBLOB_` |
 | Race detector | `just test-race` |
-| Lint (vet + staticcheck + golangci-lint + gopls modernize) | `just lint` |
+| Lint (fmt-check + vet + staticcheck + golangci-lint + gopls modernize) | `just lint` |
 | Format check / apply | `just fmt-check` / `just fmt` |
 | Run an example | `just example vec-search` |
 | Smoke-test every example | `just examples` |
@@ -455,6 +459,15 @@ let `go mod tidy` resolve the transitive set.
   the abort. The two LoadExtension tests opt out via `raceEnabled`
   (in `race_helper{,_race}_test.go`) and `loadExtensionUnsupported`
   (in `platform_test.go`). linux is fine.
+- **CI's `build_all_targets` job swallows a `vec/` build failure** —
+  `modernc.org/sqlite/vec` is the transpiled sqlite-vec extension; it
+  isn't generated for every GOOS/GOARCH the matrix covers (notably some
+  niche linux arches). The CI step builds the rest of the module
+  unconditionally and falls back to `|| echo "(vec skipped)"` for
+  `./vec/...`. Don't "fix" the skip; it lets us catch real cross-
+  platform regressions in the rest of the module without being held
+  hostage to upstream's vec coverage gaps. `vec/doc.go` covers the
+  downstream-consumer side of the same gap.
 
 If you find yourself "fixing" any of the above, stop and re-read this
 section. Each one is a deliberate choice we already debated.
