@@ -11,21 +11,31 @@ import (
 	"gorm.io/gorm/schema"
 )
 
-// Result pairs a typed model T with the FTS5 rank score and the
-// optional snippet/highlight strings that the caller may request via
-// the matching Option.
-type Result[T any] struct {
+// Hit pairs a typed model T with the FTS5 rank score and the optional
+// snippet/highlight strings that the caller may request via the
+// matching Option.
+type Hit[T any] struct {
 	Model     T
 	Rank      float64
 	Snippet   string
 	Highlight string
 }
 
+// Result is the previous name of [Hit] and remains as a generic type
+// alias so existing call sites (`ftsgorm.Result[Model]`) keep
+// compiling. New code should use [Hit].
+//
+// Deprecated: use [Hit].
+type Result[T any] = Hit[T]
+
 type options struct {
 	limit      int
 	offset     int
 	weights    []float64
 	includeDel bool
+
+	extraWhere string
+	extraArgs  []any
 
 	snippet *snippetCfg
 	hilite  *hiliteCfg
@@ -75,6 +85,21 @@ func WithHighlight(column, before, after string) Option {
 // effect on models without gorm.DeletedAt.
 func IncludeDeleted() Option { return func(o *options) { o.includeDel = true } }
 
+// WithFilter adds an extra WHERE conjunct to the FTS5 search (joined
+// with AND). Useful for "this user's documents only", "rows tagged
+// before :ts", etc. The fragment is concatenated into the FTS5 SELECT
+// and so must reference columns the FTS5 table has — rowid plus any
+// UNINDEXED columns declared on the model.
+//
+// Mirrors vec/gorm.WithFilter; for gorm-side scopes / preloads, chain
+// db.Where(...) on the returned slice instead.
+func WithFilter(sqlFragment string, args ...any) Option {
+	return func(o *options) {
+		o.extraWhere = sqlFragment
+		o.extraArgs = args
+	}
+}
+
 // Search runs an FTS5 query against the model T's shared FTS5 table
 // and returns matching gorm models in rank order. Reads:
 //
@@ -85,7 +110,7 @@ func IncludeDeleted() Option { return func(o *options) { o.includeDel = true } }
 //
 // k=0 returns all matches subject to FTS5's row limit; otherwise
 // LIMIT k OFFSET 0 unless WithOffset is supplied.
-func Search[T any](ctx context.Context, db *gorm.DB, q fts.Query, opts ...Option) ([]Result[T], error) {
+func Search[T any](ctx context.Context, db *gorm.DB, q fts.Query, opts ...Option) ([]Hit[T], error) {
 	p, err := pluginFrom(db)
 	if err != nil {
 		return nil, err
@@ -111,7 +136,7 @@ func Search[T any](ctx context.Context, db *gorm.DB, q fts.Query, opts ...Option
 			mm.Table)
 	}
 
-	sqlDB, err := extractSQLDB(db)
+	pool, err := activePool(db)
 	if err != nil {
 		return nil, err
 	}
@@ -161,6 +186,10 @@ func Search[T any](ctx context.Context, db *gorm.DB, q fts.Query, opts ...Option
 			wheres = append(wheres, "deleted = 0")
 		}
 	}
+	if o.extraWhere != "" {
+		wheres = append(wheres, "("+o.extraWhere+")")
+		args = append(args, o.extraArgs...)
+	}
 
 	query := fmt.Sprintf(
 		"SELECT %s FROM %s WHERE %s ORDER BY rank_",
@@ -175,7 +204,7 @@ func Search[T any](ctx context.Context, db *gorm.DB, q fts.Query, opts ...Option
 		query += fmt.Sprintf(" OFFSET %d", o.offset)
 	}
 
-	rows, err := sqlDB.QueryContext(ctx, query, args...)
+	rows, err := pool.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ftsgorm: search %s: %w", mm.Table, err)
 	}
@@ -224,13 +253,13 @@ func Search[T any](ctx context.Context, db *gorm.DB, q fts.Query, opts ...Option
 		indexed[pk] = row.Interface().(T)
 	}
 
-	results := make([]Result[T], 0, len(matches))
+	results := make([]Hit[T], 0, len(matches))
 	for _, m := range matches {
 		model, ok := indexed[m.rowid]
 		if !ok {
 			continue
 		}
-		results = append(results, Result[T]{
+		results = append(results, Hit[T]{
 			Model:     model,
 			Rank:      m.rank,
 			Snippet:   m.snippet,

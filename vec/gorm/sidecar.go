@@ -12,11 +12,13 @@ import (
 )
 
 // openSidecar returns a vec.Table handle for the meta's sidecar. The
-// underlying *sql.DB comes from gorm's ConnPool; we extract it via the
-// db.Statement's connection. Because vec.Open issues a probe SELECT it
-// would fail if the sidecar weren't created — Migrate must have run.
+// underlying *sql.DB comes from gorm's connection pool; it is used only
+// for KNN reads, where reading the latest committed state is the
+// documented behavior. Sidecar writes go through the active *gorm.DB
+// (see batchInsertEmbeddings / updateEmbedding / deleteEmbedding) so
+// they participate in the caller's transaction.
 func openSidecar(db *gorm.DB, m meta) (*vec.Table, error) {
-	sqlDB, err := extractSQLDB(db)
+	sqlDB, err := poolDB(db)
 	if err != nil {
 		return nil, err
 	}
@@ -26,18 +28,40 @@ func openSidecar(db *gorm.DB, m meta) (*vec.Table, error) {
 	})
 }
 
-// extractSQLDB pulls a *sql.DB out of a *gorm.DB. For most setups the
-// ConnPool is a *sql.DB; inside a transaction it's a *sql.Tx, which the
-// vec.Table API doesn't accept directly. Inside a tx we fall back to
-// the parent *sql.DB on the same connection — sqlite serializes writes
-// per connection, so this is safe.
-func extractSQLDB(db *gorm.DB) (*sql.DB, error) {
-	if db.Statement != nil {
-		switch p := db.Statement.ConnPool.(type) {
-		case *sql.DB:
+// execPool is the subset of gorm.ConnPool we need to issue sidecar
+// statements. Both *sql.DB and *sql.Tx satisfy it. Using this interface
+// in callbacks ensures writes participate in any active gorm.Transaction
+// rather than auto-committing through the parent *sql.DB.
+type execPool interface {
+	PrepareContext(ctx context.Context, query string) (*sql.Stmt, error)
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+// activePool returns the connection pool the gorm.DB is currently using.
+// Inside a gorm transaction (db.Transaction / db.Begin) this is the
+// active *sql.Tx, so sidecar writes commit or roll back with the parent.
+// Outside a transaction it is the underlying *sql.DB.
+func activePool(db *gorm.DB) (execPool, error) {
+	if db.Statement != nil && db.Statement.ConnPool != nil {
+		if p, ok := db.Statement.ConnPool.(execPool); ok {
 			return p, nil
 		}
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("vecgorm: unable to obtain ConnPool: %w", err)
+	}
+	return sqlDB, nil
+}
+
+// poolDB returns a *sql.DB for read paths (KNN) that pre-date the
+// pool-aware refactor. When gorm's ConnPool is a *sql.Tx we still hand
+// back the underlying *sql.DB — KNN reads are read-only and seeing the
+// latest committed state is acceptable; nesting them inside the active
+// tx would require plumbing the pool down through vec.Table, which is
+// not worth the API churn for a read.
+func poolDB(db *gorm.DB) (*sql.DB, error) {
 	sqlDB, err := db.DB()
 	if err != nil {
 		return nil, fmt.Errorf("vecgorm: unable to obtain *sql.DB: %w", err)
@@ -45,39 +69,126 @@ func extractSQLDB(db *gorm.DB) (*sql.DB, error) {
 	return sqlDB, nil
 }
 
-// batchInsertWithSoftDelete writes the embedding + deleted=0 in a
-// single statement per row, all wrapped in one transaction. Used when
-// the source model has gorm.DeletedAt; vec0 INTEGER metadata columns
-// reject NULL so we can't rely on the typed BatchInsert which only
-// writes (rowid, embedding).
-func batchInsertWithSoftDelete(db *gorm.DB, m meta, items []vec.Item) error {
-	sqlDB, err := extractSQLDB(db)
+// batchInsertEmbeddings INSERTs every item into the sidecar in a single
+// prepared loop. When db is inside a gorm.Transaction the active *sql.Tx
+// is reused so the writes commit or roll back with the parent. Outside a
+// transaction we wrap the batch in our own tx for atomicity.
+//
+// When m.SoftDelete is set the statement also writes deleted=0, since
+// vec0 INTEGER metadata columns reject NULL.
+func batchInsertEmbeddings(ctx context.Context, db *gorm.DB, m meta, items []vec.Row) error {
+	if len(items) == 0 {
+		return nil
+	}
+	pool, err := activePool(db)
 	if err != nil {
 		return err
 	}
-	ctx := helperContext(db)
+	stmt := insertStmt(m)
+
+	// Already inside a gorm.Transaction: reuse the active *sql.Tx
+	// directly. Do NOT begin a nested tx — SQLite does not support
+	// real nesting, and the parent owns Commit/Rollback.
+	if _, inTx := pool.(*sql.Tx); inTx {
+		prep, err := pool.PrepareContext(ctx, stmt)
+		if err != nil {
+			return err
+		}
+		defer prep.Close()
+		for _, it := range items {
+			if _, err := prep.ExecContext(ctx, insertArgs(m, it)...); err != nil {
+				return fmt.Errorf("vecgorm: insert into %s: %w", m.Table, err)
+			}
+		}
+		return nil
+	}
+
+	// Autocommit path: open our own tx so the batch is atomic.
+	sqlDB, ok := pool.(*sql.DB)
+	if !ok {
+		return fmt.Errorf("vecgorm: unexpected ConnPool type %T", pool)
+	}
 	tx, err := sqlDB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	stmt := fmt.Sprintf(
-		"INSERT INTO %s (rowid, %s, deleted) VALUES (?, %s, 0)",
-		quoteIdent(m.Table), quoteIdent(m.Column),
-		m.Encoding.Placeholder(),
-	)
 	prep, err := tx.PrepareContext(ctx, stmt)
 	if err != nil {
-		tx.Rollback()
-		return err
+		return joinTxErr(err, tx.Rollback())
 	}
 	defer prep.Close()
 	for _, it := range items {
-		if _, err := prep.ExecContext(ctx, it.Rowid, m.Encoding.Encode(it.Embedding)); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("vecgorm: insert into %s: %w", m.Table, err)
+		if _, err := prep.ExecContext(ctx, insertArgs(m, it)...); err != nil {
+			return joinTxErr(
+				fmt.Errorf("vecgorm: insert into %s: %w", m.Table, err),
+				tx.Rollback(),
+			)
 		}
 	}
 	return tx.Commit()
+}
+
+// updateEmbedding overwrites a single sidecar row.
+func updateEmbedding(ctx context.Context, db *gorm.DB, m meta, rowid int64, emb []float32) error {
+	if len(emb) != m.Dim {
+		return fmt.Errorf("vecgorm: %s: embedding length %d != dim %d", m.Table, len(emb), m.Dim)
+	}
+	pool, err := activePool(db)
+	if err != nil {
+		return err
+	}
+	stmt := fmt.Sprintf(
+		"UPDATE %s SET %s = %s WHERE rowid = ?",
+		quoteIdent(m.Table), quoteIdent(m.Column), m.Encoding.Placeholder(),
+	)
+	if _, err := pool.ExecContext(ctx, stmt, m.Encoding.Encode(emb), rowid); err != nil {
+		return fmt.Errorf("vecgorm: update %s: %w", m.Table, err)
+	}
+	return nil
+}
+
+// deleteEmbedding removes a single sidecar row by rowid.
+func deleteEmbedding(ctx context.Context, db *gorm.DB, m meta, rowid int64) error {
+	pool, err := activePool(db)
+	if err != nil {
+		return err
+	}
+	stmt := fmt.Sprintf("DELETE FROM %s WHERE rowid = ?", quoteIdent(m.Table))
+	if _, err := pool.ExecContext(ctx, stmt, rowid); err != nil {
+		return fmt.Errorf("vecgorm: delete from %s: %w", m.Table, err)
+	}
+	return nil
+}
+
+// insertStmt builds the INSERT for a single sidecar row, with or without
+// the soft-delete metadata column.
+func insertStmt(m meta) string {
+	if m.SoftDelete {
+		return fmt.Sprintf(
+			"INSERT INTO %s (rowid, %s, deleted) VALUES (?, %s, 0)",
+			quoteIdent(m.Table), quoteIdent(m.Column), m.Encoding.Placeholder(),
+		)
+	}
+	return fmt.Sprintf(
+		"INSERT INTO %s (rowid, %s) VALUES (?, %s)",
+		quoteIdent(m.Table), quoteIdent(m.Column), m.Encoding.Placeholder(),
+	)
+}
+
+// insertArgs returns the bound arguments for insertStmt in declaration
+// order: (rowid, embedding-blob/json).
+func insertArgs(m meta, it vec.Row) []any {
+	return []any{it.Rowid, m.Encoding.Encode(it.Embedding)}
+}
+
+// joinTxErr attaches a rollback error to the original failure so neither
+// is silently dropped. errors.Join skips nil values, so passing rbErr=nil
+// returns the underlying err unchanged.
+func joinTxErr(err error, rbErr error) error {
+	if rbErr == nil {
+		return err
+	}
+	return errors.Join(err, fmt.Errorf("vecgorm: rollback after error failed: %w", rbErr))
 }
 
 // isSoftDelete reports whether the active UPDATE statement is gorm's
@@ -91,11 +202,6 @@ func isSoftDelete(db *gorm.DB) bool {
 	if db.Statement.Schema.LookUpField("DeletedAt") == nil {
 		return false
 	}
-	// gorm puts a custom clause name "soft_delete_enabled" on the
-	// Statement when running its soft-delete callback. Older versions
-	// just emit SET deleted_at = ... — we cover both by sniffing the
-	// statement's SQL after build. The safest signal is checking if
-	// any Set expression touches deleted_at.
 	for _, set := range db.Statement.Clauses {
 		if strings.EqualFold(set.Name, "soft_delete_enabled") {
 			return true
@@ -104,17 +210,10 @@ func isSoftDelete(db *gorm.DB) bool {
 	return false
 }
 
-// softDeleteSidecar resyncs the sidecar's `deleted` metadata column
-// from the source table's deleted_at, *after* gorm's soft-delete UPDATE
-// has committed. The expression
-//
-//	deleted = (deleted_at IS NOT NULL on source)
-//
-// is correct for any subset of rows gorm just touched and doesn't
-// require us to re-parse gorm's WHERE clause. The statement re-syncs
-// all rows; for tables of modest size (where vec-indexing is usually
-// applied) this is fine, and SQLite's row scan is cheap when the
-// source has an index on the PK (which it always does — PK is rowid).
+// softDeleteSidecar resyncs the sidecar's `deleted` metadata column from
+// the source table's deleted_at, *after* gorm's soft-delete UPDATE has
+// run on the source. Issued through db.Exec so the write participates in
+// any active gorm.Transaction.
 func softDeleteSidecar(db *gorm.DB, mm modelMeta, m meta) error {
 	pkColumn := quoteIdent(mm.PKField.DBName)
 	stmt := fmt.Sprintf(
@@ -137,9 +236,7 @@ func softDeleteSidecar(db *gorm.DB, mm modelMeta, m meta) error {
 // value (e.g. db.Where("status = ?", 'archived').Delete(&Model{})) so
 // we cannot enumerate affected PKs from db.Statement.ReflectValue.
 //
-// Runs after gorm's source DELETE commits; orphaned sidecar rows
-// are precisely those whose rowid is no longer present in the
-// source PK column. Single statement, no WHERE re-parse.
+// Routes through db.Exec so it joins the active transaction.
 func deleteByWhere(ctx context.Context, db *gorm.DB, mm modelMeta, m meta, _ *vec.Table) error {
 	stmt := fmt.Sprintf(
 		"DELETE FROM %s WHERE rowid NOT IN (SELECT %s FROM %s)",

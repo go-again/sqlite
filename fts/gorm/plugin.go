@@ -195,17 +195,30 @@ func helperContext(db *gorm.DB) context.Context {
 	return context.Background()
 }
 
-// extractSQLDB pulls a *sql.DB from a *gorm.DB. Mirrors vec/gorm's
-// helper of the same name.
-func extractSQLDB(db *gorm.DB) (*sql.DB, error) {
-	if db.Statement != nil {
-		if p, ok := db.Statement.ConnPool.(*sql.DB); ok {
+// execPool is the subset of gorm.ConnPool we need to issue FTS5
+// statements. Both *sql.DB and *sql.Tx satisfy it; using this interface
+// in callbacks and Search lets writes and reads participate in an
+// active gorm.Transaction rather than auto-committing through the
+// parent *sql.DB.
+type execPool interface {
+	PrepareContext(ctx context.Context, query string) (*sql.Stmt, error)
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+// activePool returns the connection pool the gorm.DB is currently using.
+// Inside a gorm transaction (db.Transaction / db.Begin) this is the
+// active *sql.Tx, so FTS5 writes commit or roll back with the parent.
+// Outside a transaction it is the underlying *sql.DB.
+func activePool(db *gorm.DB) (execPool, error) {
+	if db.Statement != nil && db.Statement.ConnPool != nil {
+		if p, ok := db.Statement.ConnPool.(execPool); ok {
 			return p, nil
 		}
 	}
 	sqlDB, err := db.DB()
 	if err != nil {
-		return nil, fmt.Errorf("ftsgorm: unable to obtain *sql.DB: %w", err)
+		return nil, fmt.Errorf("ftsgorm: unable to obtain ConnPool: %w", err)
 	}
 	return sqlDB, nil
 }

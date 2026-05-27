@@ -64,7 +64,7 @@ func (p *plugin) afterDelete(db *gorm.DB) {
 // SQLite's bind for raw INSERTs into virtual tables — bypassing it
 // keeps the args in declaration order.
 func syncInsert(db *gorm.DB, mm *modelMeta, rows []reflect.Value) error {
-	sqlDB, err := extractSQLDB(db)
+	pool, err := activePool(db)
 	if err != nil {
 		return err
 	}
@@ -99,7 +99,7 @@ func syncInsert(db *gorm.DB, mm *modelMeta, rows []reflect.Value) error {
 			)
 		}
 		args := append([]any{rowid}, vals...)
-		if _, err := sqlDB.ExecContext(ctx, stmt, args...); err != nil {
+		if _, err := pool.ExecContext(ctx, stmt, args...); err != nil {
 			return fmt.Errorf("ftsgorm: insert into %s: %w", mm.Table, err)
 		}
 	}
@@ -109,7 +109,7 @@ func syncInsert(db *gorm.DB, mm *modelMeta, rows []reflect.Value) error {
 // syncUpdate refreshes a row's text in the FTS5 table. We use FTS5's
 // 'delete' + INSERT idiom which works for all non-external modes.
 func syncUpdate(db *gorm.DB, mm *modelMeta, rows []reflect.Value) error {
-	sqlDB, err := extractSQLDB(db)
+	pool, err := activePool(db)
 	if err != nil {
 		return err
 	}
@@ -119,7 +119,7 @@ func syncUpdate(db *gorm.DB, mm *modelMeta, rows []reflect.Value) error {
 		if !ok {
 			continue
 		}
-		if _, err := sqlDB.ExecContext(ctx,
+		if _, err := pool.ExecContext(ctx,
 			fmt.Sprintf("DELETE FROM %s WHERE rowid = ?", quoteIdent(mm.Table)),
 			rowid,
 		); err != nil {
@@ -129,7 +129,7 @@ func syncUpdate(db *gorm.DB, mm *modelMeta, rows []reflect.Value) error {
 			return err
 		}
 		if mm.SoftDelete && isSoftDeleted(mm, row) {
-			if _, err := sqlDB.ExecContext(ctx,
+			if _, err := pool.ExecContext(ctx,
 				fmt.Sprintf("UPDATE %s SET deleted = 1 WHERE rowid = ?", quoteIdent(mm.Table)),
 				rowid,
 			); err != nil {
@@ -145,7 +145,7 @@ func syncUpdate(db *gorm.DB, mm *modelMeta, rows []reflect.Value) error {
 // for both paths (soft-delete's underlying SQL is an UPDATE, but the
 // callback chain is gorm:delete).
 func syncDelete(db *gorm.DB, mm *modelMeta, rows []reflect.Value) error {
-	sqlDB, err := extractSQLDB(db)
+	pool, err := activePool(db)
 	if err != nil {
 		return err
 	}
@@ -156,7 +156,7 @@ func syncDelete(db *gorm.DB, mm *modelMeta, rows []reflect.Value) error {
 			if !ok {
 				continue
 			}
-			if _, err := sqlDB.ExecContext(ctx,
+			if _, err := pool.ExecContext(ctx,
 				fmt.Sprintf("UPDATE %s SET deleted = 1 WHERE rowid = ?", quoteIdent(mm.Table)),
 				rowid,
 			); err != nil {
@@ -170,7 +170,7 @@ func syncDelete(db *gorm.DB, mm *modelMeta, rows []reflect.Value) error {
 		if !ok {
 			continue
 		}
-		if _, err := sqlDB.ExecContext(ctx,
+		if _, err := pool.ExecContext(ctx,
 			fmt.Sprintf("DELETE FROM %s WHERE rowid = ?", quoteIdent(mm.Table)),
 			rowid,
 		); err != nil {

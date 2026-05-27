@@ -10,13 +10,20 @@ import (
 	"gorm.io/gorm"
 )
 
-// Result pairs a typed gorm model with the vec distance returned by KNN.
+// Hit pairs a typed gorm model with the vec distance returned by KNN.
 // Distance is in the metric declared on the field tag (L2 squared,
 // cosine, or L1).
-type Result[T any] struct {
+type Hit[T any] struct {
 	Model    T
 	Distance float64
 }
+
+// Result is the previous name of [Hit] and remains as a generic type
+// alias so existing call sites (`vecgorm.Result[Model]`) keep
+// compiling. New code should use [Hit].
+//
+// Deprecated: use [Hit].
+type Result[T any] = Hit[T]
 
 // options controls KNN behavior. See WithFilter and IncludeDeleted.
 type options struct {
@@ -61,7 +68,7 @@ func KNN[T any](
 	query []float32,
 	k int,
 	opts ...Option,
-) ([]Result[T], error) {
+) ([]Hit[T], error) {
 	if k <= 0 {
 		return nil, nil
 	}
@@ -111,7 +118,7 @@ func KNN[T any](
 		whereArgs = append(whereArgs, o.extraArgs...)
 	}
 	if len(whereParts) > 0 {
-		queryOpts = append(queryOpts, vec.WithWhere(strings.Join(whereParts, " AND "), whereArgs...))
+		queryOpts = append(queryOpts, vec.WithFilter(strings.Join(whereParts, " AND "), whereArgs...))
 	}
 
 	matches, err := tbl.KNNSlice(ctx, query, k, queryOpts...)
@@ -149,7 +156,7 @@ func KNN[T any](
 		indexed[pk] = row.Interface().(T)
 	}
 
-	results := make([]Result[T], 0, len(matches))
+	results := make([]Hit[T], 0, len(matches))
 	for _, mt := range matches {
 		model, ok := indexed[mt.Rowid]
 		if !ok {
@@ -158,7 +165,7 @@ func KNN[T any](
 			// sidecar wasn't cleaned up). Skip rather than panic.
 			continue
 		}
-		results = append(results, Result[T]{Model: model, Distance: mt.Distance})
+		results = append(results, Hit[T]{Model: model, Distance: mt.Distance})
 	}
 	return results, nil
 }

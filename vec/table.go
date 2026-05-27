@@ -151,16 +151,23 @@ func (t *Table) Insert(ctx context.Context, rowid int64, embedding []float32) er
 	return err
 }
 
-// Item is a single (rowid, embedding) pair consumed by BatchInsert.
-type Item struct {
+// Row is a single (rowid, embedding) pair consumed by BatchInsert.
+type Row struct {
 	Rowid     int64
 	Embedding []float32
 }
 
+// Item is the previous name of [Row] and remains as a type alias so
+// existing call sites (`vec.Item{Rowid: …, Embedding: …}`) keep
+// compiling. New code should use [Row].
+//
+// Deprecated: use [Row].
+type Item = Row
+
 // BatchInsert inserts every item in a single transaction. Each rowid must be
 // unique within the table; conflicts surface as errors (sqlite-vec's vec0
 // INSERT does not honor OR REPLACE).
-func (t *Table) BatchInsert(ctx context.Context, items []Item) error {
+func (t *Table) BatchInsert(ctx context.Context, items []Row) error {
 	tx, err := t.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -236,25 +243,34 @@ func metricKeyword(m Metric) string {
 	return "l2"
 }
 
-// Match is one row returned by KNN.
-type Match struct {
+// Neighbor is one row returned by KNN: the matched rowid and the
+// distance scored by the table's [Metric].
+type Neighbor struct {
 	Rowid    int64
 	Distance float64
 }
+
+// Match is the previous name of [Neighbor] and remains as a type alias
+// so existing call sites (`var m vec.Match` and `iter.Seq2[vec.Match,
+// error]`) keep compiling. New code should use [Neighbor].
+//
+// Deprecated: use [Neighbor].
+type Match = Neighbor
 
 // KNN issues an approximate k-nearest-neighbour query for the given vector
 // and returns an iter.Seq2 cursor over the results in ascending-distance
 // order. Yielding stops at k rows or on error.
 //
-// Optional QueryOptions filter the result set. WithWhere appends a custom
-// WHERE conjunct (e.g. "rowid IN (1, 2, 3)" to restrict to known IDs); see
-// vec.WithWhere for details.
+// Optional QueryOptions filter the result set. WithFilter appends a
+// custom WHERE conjunct (e.g. "rowid IN (1, 2, 3)" to restrict to known
+// IDs); see [WithFilter] for details. The older name [WithWhere] is kept
+// as a deprecated wrapper.
 //
 // The yielded error is always nil except for the final iteration after a
-// row-scan failure, where it carries the scan error and the Match is the
-// zero value. Iterating with `for m, err := range tbl.KNN(...)` follows the
-// idiomatic Go-1.23 range-over-func convention.
-func (t *Table) KNN(ctx context.Context, query []float32, k int, opts ...QueryOption) iter.Seq2[Match, error] {
+// row-scan failure, where it carries the scan error and the Neighbor is
+// the zero value. Iterating with `for m, err := range tbl.KNN(...)`
+// follows the idiomatic Go-1.23 range-over-func convention.
+func (t *Table) KNN(ctx context.Context, query []float32, k int, opts ...QueryOption) iter.Seq2[Neighbor, error] {
 	cfg := &queryConfig{}
 	for _, opt := range opts {
 		opt(cfg)

@@ -1,6 +1,7 @@
 package vecgorm
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -64,9 +65,10 @@ func Migrate(db *gorm.DB, models ...any) error {
 //
 // Sidecar schema includes the embedding column and, when the source
 // model uses gorm.DeletedAt, an additional `deleted INTEGER` metadata
-// column that the callbacks set to 0/1. KNN uses WithWhere on this
+// column that the callbacks set to 0/1. KNN uses WithFilter on this
 // column to exclude soft-deleted rows by default.
-func ensureSidecar(ctx interface{}, db *gorm.DB, _ any, _ modelMeta, m meta) error {
+func ensureSidecar(ctx context.Context, db *gorm.DB, _ any, _ modelMeta, m meta) error {
+	_ = ctx // reserved for future use; current statements run through gorm.
 	// vec0 doesn't accept quoted identifiers in its constructor; we
 	// validated the table/column names via isIdent at tag-parse time.
 	cols := []string{
@@ -137,16 +139,7 @@ func DropSidecar(db *gorm.DB, model any) error {
 	if err != nil {
 		return err
 	}
-	mm, err := p.registerSchema(db, model)
-	if err != nil {
-		return err
-	}
-	for _, m := range mm.Fields {
-		if err := db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", quoteIdent(m.Table))).Error; err != nil {
-			return err
-		}
-	}
-	return nil
+	return p.dropSidecar(db, model)
 }
 
 // DropTableHook implements the sqlite-go-again gorm dialector's hook
@@ -157,6 +150,13 @@ func DropSidecar(db *gorm.DB, model any) error {
 // Method is defined on *plugin so the gorm Plugin instance (which is
 // what gets stored in db.Config.Plugins) satisfies the interface.
 func (p *plugin) DropTableHook(db *gorm.DB, model any) error {
+	return p.dropSidecar(db, model)
+}
+
+// dropSidecar is the shared implementation behind DropSidecar (the
+// package-level helper) and DropTableHook (the gorm dialector hook).
+// Idempotent: each sidecar drop is `DROP TABLE IF EXISTS`.
+func (p *plugin) dropSidecar(db *gorm.DB, model any) error {
 	mm, err := p.registerSchema(db, model)
 	if err != nil {
 		return err

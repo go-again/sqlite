@@ -24,8 +24,9 @@ func (p *plugin) afterCreate(db *gorm.DB) {
 		return
 	}
 
+	ctx := helperContext(db)
 	for _, m := range mm.Fields {
-		items := make([]vec.Item, 0, len(rows))
+		items := make([]vec.Row, 0, len(rows))
 		for _, row := range rows {
 			rowid, ok := pkAsInt64(mm.PKField, row)
 			if !ok {
@@ -41,29 +42,13 @@ func (p *plugin) afterCreate(db *gorm.DB) {
 				// or NULL" convention.)
 				continue
 			}
-			items = append(items, vec.Item{Rowid: rowid, Embedding: emb})
+			items = append(items, vec.Row{Rowid: rowid, Embedding: emb})
 		}
 		if len(items) == 0 {
 			continue
 		}
-		if m.SoftDelete {
-			// vec0 INTEGER metadata columns reject NULL; the typed
-			// BatchInsert only writes (rowid, embedding) so the
-			// deleted column would be NULL. We do our own INSERT
-			// passing deleted=0 alongside.
-			if err := batchInsertWithSoftDelete(db, m, items); err != nil {
-				_ = db.AddError(err)
-				return
-			}
-			continue
-		}
-		tbl, err := openSidecar(db, m)
-		if err != nil {
+		if err := batchInsertEmbeddings(ctx, db, m, items); err != nil {
 			_ = db.AddError(err)
-			return
-		}
-		if err := tbl.BatchInsert(helperContext(db), items); err != nil {
-			_ = db.AddError(fmt.Errorf("vecgorm: BatchInsert into %s: %w", m.Table, err))
 			return
 		}
 	}
@@ -84,13 +69,8 @@ func (p *plugin) afterUpdate(db *gorm.DB) {
 		return
 	}
 
+	ctx := helperContext(db)
 	for _, m := range mm.Fields {
-		tbl, err := openSidecar(db, m)
-		if err != nil {
-			_ = db.AddError(err)
-			return
-		}
-
 		// Detect soft-delete: when gorm processed the row as a
 		// soft-delete, db.Statement.Schema.LookUpField("DeletedAt")
 		// has a value and the row's deleted_at is non-zero. We can't
@@ -105,7 +85,6 @@ func (p *plugin) afterUpdate(db *gorm.DB) {
 			continue
 		}
 
-		ctx := helperContext(db)
 		for _, row := range rows {
 			rowid, ok := pkAsInt64(mm.PKField, row)
 			if !ok {
@@ -115,8 +94,8 @@ func (p *plugin) afterUpdate(db *gorm.DB) {
 			if !ok || len(emb) == 0 {
 				continue
 			}
-			if err := tbl.Update(ctx, rowid, emb); err != nil {
-				_ = db.AddError(fmt.Errorf("vecgorm: Update on %s: %w", m.Table, err))
+			if err := updateEmbedding(ctx, db, m, rowid, emb); err != nil {
+				_ = db.AddError(err)
 				return
 			}
 		}
@@ -138,14 +117,8 @@ func (p *plugin) afterDelete(db *gorm.DB) {
 	}
 	rows := iterateRows(db.Statement.ReflectValue)
 
+	ctx := helperContext(db)
 	for _, m := range mm.Fields {
-		tbl, err := openSidecar(db, m)
-		if err != nil {
-			_ = db.AddError(err)
-			return
-		}
-		ctx := helperContext(db)
-
 		// Soft-delete-aware models: instead of DELETEing from the
 		// sidecar, sync the deleted flag from the source. The source
 		// already has deleted_at populated by gorm's prior UPDATE.
@@ -157,11 +130,7 @@ func (p *plugin) afterDelete(db *gorm.DB) {
 				_ = db.AddError(err)
 				return
 			}
-			// If this was a hard-delete (no longer present in source),
-			// the sync above would set deleted=0 via COALESCE default.
-			// Also GC orphans so the sidecar matches the source's row
-			// set.
-			if err := deleteByWhere(ctx, db, mm, m, tbl); err != nil {
+			if err := deleteByWhere(ctx, db, mm, m, nil); err != nil {
 				_ = db.AddError(err)
 				return
 			}
@@ -170,7 +139,7 @@ func (p *plugin) afterDelete(db *gorm.DB) {
 
 		// Non-soft-delete models: straight delete from sidecar.
 		if len(rows) == 0 {
-			if err := deleteByWhere(ctx, db, mm, m, tbl); err != nil {
+			if err := deleteByWhere(ctx, db, mm, m, nil); err != nil {
 				_ = db.AddError(err)
 				return
 			}
@@ -181,8 +150,8 @@ func (p *plugin) afterDelete(db *gorm.DB) {
 			if !ok {
 				continue
 			}
-			if err := tbl.Delete(ctx, rowid); err != nil {
-				_ = db.AddError(fmt.Errorf("vecgorm: Delete from %s: %w", m.Table, err))
+			if err := deleteEmbedding(ctx, db, m, rowid); err != nil {
+				_ = db.AddError(err)
 				return
 			}
 		}

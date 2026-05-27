@@ -31,7 +31,7 @@ func main() {
 	}
 
 	// Bulk-insert four toy embeddings inside one transaction.
-	corpus := []vec.Item{
+	corpus := []vec.Row{
 		{Rowid: 1, Embedding: []float32{1, 0, 0, 0}},
 		{Rowid: 2, Embedding: []float32{0.9, 0.1, 0, 0}},
 		{Rowid: 3, Embedding: []float32{0, 1, 0, 0}},
