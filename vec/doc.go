@@ -25,12 +25,54 @@
 //	WHERE  embedding MATCH '[0.5, 0.5, ...]'
 //	ORDER BY distance LIMIT 5;
 //
+// To bind embeddings as parameters instead of hard-coding them, use
+// [Encode] (or the methods on [Encoding]) so you get the right
+// placeholder fragment + value pair for the configured wire format:
+//
+//	ph, val := vec.Encode(query, vec.Binary)
+//	rows, _ := db.QueryContext(ctx,
+//	    "SELECT rowid, distance FROM docs WHERE embedding MATCH "+ph+
+//	        " ORDER BY distance LIMIT 5", val)
+//
 // # Typed Go API (option b)
 //
 // See Create, Open, and the Table type for an iter.Seq2-based KNN cursor and
 // typed Insert/BatchInsert/Delete helpers that handle JSON vs. binary
 // encoding for you. The typed API is built strictly on top of the raw SQL
 // layer above — anything you can do in SQL you can do in Go.
+//
+// # Filtered KNN
+//
+// [WithFilter] AND's a custom WHERE conjunct onto the MATCH clause.
+// Same trust contract as [gorm.DB.Where] — the fragment is interpolated
+// as-is; pass literals through args. Use it for per-tenant gating,
+// rowid sub-selection, or any other column-level filter on the vec0
+// table.
+//
+// # Custom projection / JOIN
+//
+// When you need to project additional columns or JOIN a companion
+// table (the common "sidecar to canonical row table" pattern), use
+// [Table.KNNSQL] with [WithSelect], [WithJoin], and [WithOrderBy] to
+// build the query, then execute it through `db.QueryContext` (or
+// `gorm.DB.Raw(sql, args...).Scan(&out)`):
+//
+//	sql, args, _ := tbl.KNNSQL(query, 10,
+//	    vec.WithSelect("items.id, items.title"),
+//	    vec.WithJoin("JOIN items ON items.id = items_vec.rowid"),
+//	    vec.WithFilter("items.tenant = ?", "acme"),
+//	)
+//	rows, _ := db.QueryContext(ctx, sql, args...)
+//
+// [Table.KNN] / [Table.KNNSlice] reject WithSelect / WithJoin because
+// they change the row shape the typed scanner expects.
+//
+// # Idempotent migrations
+//
+// [Create] errors with [ErrAlreadyExists] (wrapped) if the table
+// already exists. Pass [WithIfNotExists] to make the call a no-op on
+// subsequent runs — useful for migrate-on-startup. The existing
+// table's schema is NOT validated; use [Open] for strict matching.
 //
 // # Platform coverage
 //

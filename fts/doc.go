@@ -26,12 +26,50 @@
 //	    fmt.Println(m.Key, m.Value, m.Rank)
 //	}
 //
+// # Filtered search
+//
+// [WithFilter] AND's an arbitrary WHERE conjunct onto the MATCH
+// expression. Use this for per-tenant, per-user, or other column-level
+// filtering without dropping to raw SQL. Same trust contract as
+// [gorm.DB.Where] — the fragment is interpolated as-is; pass literals
+// through args.
+//
+// # Custom projection / JOIN
+//
+// When you need to project additional columns or JOIN a companion
+// table (the common "FTS5 sidecar to a canonical row table" pattern),
+// use [Index.SearchSQL] with [WithSelect], [WithJoin], and
+// [WithOrderBy] to build the query, then execute it through
+// `db.QueryContext` (or `gorm.DB.Raw(sql, args...).Scan(&out)`):
+//
+//	sql, args, _ := idx.SearchSQL(fts.Term("hello"),
+//	    fts.WithSelect("items.id, items.title"),
+//	    fts.WithJoin("JOIN items ON items.id = items_fts.rowid"),
+//	    fts.WithFilter("items.tenant = ?", "acme"),
+//	    fts.WithLimit(10),
+//	)
+//	rows, _ := db.QueryContext(ctx, sql, args...)
+//
+// [Index.Search] / [Index.SearchSlice] reject WithSelect / WithJoin
+// because they change the row shape the typed scanner expects.
+//
 // # Content-less / external-content tables
 //
-// Pass Options.External to back an FTS5 index by an existing table; updates
-// to the source table do not propagate automatically — call Index.Rebuild
-// when the underlying content changes. See https://www.sqlite.org/fts5.html
-// section 4.4 for details on FTS5's external-content mode.
+// Pass Options.External to back an FTS5 index by an existing table.
+// Set Options.External.SyncTriggers to [SyncAll] (or the bits you
+// want) to install AFTER-INSERT / AFTER-UPDATE / AFTER-DELETE
+// triggers on the source table — they keep the FTS5 index in sync
+// with no caller code. Without SyncTriggers the caller is responsible
+// for sync (manual triggers or [Index.Rebuild]). See
+// https://www.sqlite.org/fts5.html section 4.4 for details on FTS5's
+// external-content mode.
+//
+// # Idempotent migrations
+//
+// [New] errors with [ErrAlreadyExists] (wrapped) if the named table
+// already exists. Pass [WithIfNotExists] to make the call a no-op on
+// subsequent runs — useful for migrate-on-startup. The existing
+// table's schema is NOT validated; use [Open] for strict matching.
 //
 // # Observability
 //

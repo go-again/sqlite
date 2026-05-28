@@ -65,3 +65,28 @@ func (e Encoding) Placeholder() string {
 // should call the methods on Encoding directly.
 func encodeValue(v []float32, enc Encoding) any { return enc.Encode(v) }
 func matchPlaceholder(enc Encoding) string      { return enc.Placeholder() }
+
+// Encode is the package-function form of [Encoding.Placeholder] +
+// [Encoding.Encode]. Use it from raw-SQL escape hatches when you're
+// composing a query by hand and want the typed encoding pipeline
+// without going through [Table.KNN] / [Table.KNNSlice].
+//
+// Returns the SQL placeholder fragment (`?` for JSON, `vec_f32(?)` for
+// Binary) and the bind value that pairs with it (a string for JSON, a
+// []byte for Binary). The placeholder is meant for string
+// interpolation into your SQL; the value is passed as a parameter to
+// `db.Query` / `db.Exec`.
+//
+// Example:
+//
+//	ph, val := vec.Encode(embedding, vec.Binary)
+//	rows, err := db.QueryContext(ctx,
+//	    "SELECT rowid, distance FROM items_vec WHERE embedding MATCH "+ph+
+//	        " AND rowid IN (?, ?, ?) ORDER BY distance LIMIT 10",
+//	    val, id1, id2, id3)
+//
+// For the typed path (no manual SQL), use [Table.KNN] / [Table.KNNSlice]
+// instead.
+func Encode(embedding []float32, enc Encoding) (placeholder string, value any) {
+	return enc.Placeholder(), enc.Encode(embedding)
+}

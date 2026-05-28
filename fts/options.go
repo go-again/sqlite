@@ -39,7 +39,40 @@ const (
 type External struct {
 	ContentTable string
 	ContentRowid string // optional; defaults to "rowid"
+
+	// SyncTriggers selects which AFTER-INSERT / AFTER-UPDATE / AFTER-
+	// DELETE triggers New should install on ContentTable to keep the
+	// FTS5 index in sync. Zero (the default) installs no triggers — the
+	// caller is responsible for sync. SyncAll installs all three.
+	//
+	// Trigger names follow the convention "<contentTable>_<ftsName>_<ai|au|ad>",
+	// emitted with IF NOT EXISTS so re-running New (with WithIfNotExists)
+	// is idempotent.
+	//
+	// The columns the triggers reference come from Options.Columns and
+	// must exist on both the FTS5 table and the content table with the
+	// same names. Triggers expect ContentTable to be available at the
+	// time New is called.
+	SyncTriggers SyncMode
 }
+
+// SyncMode is a bitmask of which sync triggers to install on the
+// content table for an external-content FTS5 index.
+type SyncMode int
+
+const (
+	// SyncInsert installs an AFTER INSERT trigger that adds the new
+	// row to the FTS5 index.
+	SyncInsert SyncMode = 1 << iota
+	// SyncUpdate installs an AFTER UPDATE trigger that re-indexes
+	// changed rows via FTS5's 'delete'+INSERT idiom.
+	SyncUpdate
+	// SyncDelete installs an AFTER DELETE trigger that removes the
+	// row from the FTS5 index via the 'delete' magic-row insert.
+	SyncDelete
+	// SyncAll installs SyncInsert | SyncUpdate | SyncDelete.
+	SyncAll = SyncInsert | SyncUpdate | SyncDelete
+)
 
 // Options configures New. The zero value is valid and produces an FTS5 table
 // using unicode61 tokenization with a single "value" column keyed by an

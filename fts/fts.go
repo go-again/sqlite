@@ -59,12 +59,48 @@ type Index[K, V SQLType] struct {
 	ext     *External
 }
 
-// New creates an FTS5 virtual table named `name` configured by opts and
-// returns a typed Index handle. The CREATE VIRTUAL TABLE statement is
-// executed against db immediately.
+// ErrAlreadyExists wraps the error returned by New when the named FTS5
+// virtual table already exists and WithIfNotExists was not passed.
+// Match via errors.Is to branch between create-or-open without
+// duplicating the existence check.
 //
-// To re-attach to an existing table, use Open instead.
-func New[K, V SQLType](ctx context.Context, db *sql.DB, name string, opts Options) (*Index[K, V], error) {
+// Note that ErrAlreadyExists does NOT signal a schema mismatch — if
+// the existing table was created with different columns, a different
+// tokenizer, or in a different mode, you'll still get this error. Use
+// Open to verify the schema you expect.
+var ErrAlreadyExists = errors.New("fts: virtual table already exists")
+
+// CreateOption configures a single New call. Compose via the variadic
+// New(ctx, db, name, opts, createOpts...) tail.
+type CreateOption func(*createConfig)
+
+type createConfig struct {
+	ifNotExists bool
+}
+
+// WithIfNotExists makes New idempotent: if the table already exists,
+// New returns an Index handle for it instead of erroring with
+// ErrAlreadyExists. The existing table's schema is NOT validated
+// against the columns / tokenizer / mode you pass — if those differ
+// from what the table was created with, Insert / Search may surface
+// errors at runtime. Use Open instead when you want strict schema-
+// match semantics on an existing table.
+//
+// Typical use is migrate-on-startup where you want the create to be a
+// no-op on subsequent runs.
+func WithIfNotExists() CreateOption {
+	return func(c *createConfig) { c.ifNotExists = true }
+}
+
+// New creates an FTS5 virtual table named `name` configured by opts
+// and returns a typed Index handle. The CREATE VIRTUAL TABLE statement
+// is executed against db immediately.
+//
+// By default the call errors with [ErrAlreadyExists] (wrapped) if name
+// already exists; pass [WithIfNotExists] to make the call idempotent.
+// To re-attach to an existing table with full schema validation, use
+// [Open] instead.
+func New[K, V SQLType](ctx context.Context, db *sql.DB, name string, opts Options, createOpts ...CreateOption) (*Index[K, V], error) {
 	if !validIdent(name) {
 		return nil, fmt.Errorf("fts.New: %q is not a valid SQL identifier", name)
 	}
@@ -74,15 +110,13 @@ func New[K, V SQLType](ctx context.Context, db *sql.DB, name string, opts Option
 			return nil, fmt.Errorf("fts.New: column %q is not a valid SQL identifier", c)
 		}
 	}
+	cfg := &createConfig{}
+	for _, opt := range createOpts {
+		opt(cfg)
+	}
 
 	var parts []string
-	if opts.External != nil {
-		// External-content tables declare the user columns as UNINDEXED
-		// references — the content lives in the source table.
-		parts = append(parts, cols...)
-	} else {
-		parts = append(parts, cols...)
-	}
+	parts = append(parts, cols...)
 	for _, expr := range []string{
 		opts.tokenizerExpr(),
 		opts.prefixExpr(),
@@ -95,11 +129,41 @@ func New[K, V SQLType](ctx context.Context, db *sql.DB, name string, opts Option
 		}
 	}
 
-	stmt := fmt.Sprintf("CREATE VIRTUAL TABLE %s USING fts5(%s)", quote(name), strings.Join(parts, ", "))
+	ifNotExists := ""
+	if cfg.ifNotExists {
+		ifNotExists = "IF NOT EXISTS "
+	}
+	stmt := fmt.Sprintf("CREATE VIRTUAL TABLE %s%s USING fts5(%s)", ifNotExists, quote(name), strings.Join(parts, ", "))
 	if _, err := db.ExecContext(ctx, stmt); err != nil {
+		if isAlreadyExistsErr(err) {
+			return nil, fmt.Errorf("fts.New %q: %w", name, ErrAlreadyExists)
+		}
 		return nil, fmt.Errorf("fts.New %q: %w", name, err)
 	}
+
+	// External-content sync triggers, if requested. The columns the
+	// triggers reference are the FTS5 columns; they must exist on the
+	// content table with matching names.
+	if opts.External != nil && opts.External.SyncTriggers != 0 {
+		if err := installSyncTriggers(ctx, db, name,
+			opts.External.ContentTable, opts.External.ContentRowid,
+			cols, opts.External.SyncTriggers); err != nil {
+			return nil, fmt.Errorf("fts.New %q: %w", name, err)
+		}
+	}
+
 	return &Index[K, V]{db: db, name: name, columns: cols, ext: opts.External}, nil
+}
+
+// isAlreadyExistsErr reports whether err carries SQLite's "table X
+// already exists" signal. SQLite returns SQLITE_ERROR (no extended
+// code) for this; we string-match the engine's stable message
+// fragment. Lowercased for safety against future-version case changes.
+func isAlreadyExistsErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "already exists")
 }
 
 // Open returns a typed handle to an FTS5 table that already exists. It does
@@ -262,6 +326,11 @@ type searchConfig struct {
 	highlightBefore    string
 	highlightAfter     string
 	highlightRequested bool
+	whereSQL           string
+	whereArgs          []any
+	selectExtra        string
+	joinClause         string
+	orderByExpr        string
 }
 
 // WithLimit caps the number of returned rows. Zero or negative means no
@@ -300,6 +369,128 @@ func WithSnippet(column, before, after, ellipsis string, tokens int) SearchOptio
 	}
 }
 
+// WithFilter appends a custom WHERE conjunct to the FTS5 search. The SQL
+// fragment is AND'd with the MATCH clause; bind parameters in args bind
+// in declaration order. Use this for per-tenant, per-user, or other
+// column-level filtering without dropping to raw SQL.
+//
+// # Trust model
+//
+// The fragment is **caller-trusted raw SQL**, interpolated into the
+// query as-is. Values passed via args... are bound as parameters and
+// are safe; the fragment text is not validated and not escaped. Same
+// trust contract as [vec.WithFilter] and [gorm.DB.Where]. Callers
+// MUST:
+//
+//   - validate any identifier they interpolate into the fragment via
+//     [ValidIdent] before passing the fragment in,
+//   - route every literal through args... rather than building it into
+//     the fragment string,
+//   - never pass user-controlled SQL through here.
+//
+// The fragment must reference columns the FTS5 virtual table has —
+// rowid is always available; declared columns appear under their bare
+// names. External-content FTS5 tables CAN filter on their declared
+// columns (the column list mirrors the source), but filtering on
+// columns that exist ONLY on the source table requires JOINing — use
+// [SearchSQL] together with [WithJoin] for that pattern.
+//
+// Example:
+//
+//	idx.SearchSlice(ctx, fts.Term("hello"),
+//	    fts.WithFilter("tenant = ?", "acme"))
+//
+// The args slice is variadic; pass values inline.
+func WithFilter(sql string, args ...any) SearchOption {
+	return func(c *searchConfig) {
+		c.whereSQL = sql
+		c.whereArgs = args
+	}
+}
+
+// WithSelect appends extra projected columns to the SELECT list of a
+// Search query. The default projection is "rowid, <Options.Columns>"
+// plus any optional rank/snippet/highlight aliases. Pair with
+// [WithJoin] to source the extra columns from another table.
+//
+// # Trust model
+//
+// extraCols is **caller-trusted raw SQL** — interpolated as-is.
+// Validate identifiers via [ValidIdent] before interpolating. Same
+// contract as [WithFilter] / [WithJoin] / [WithOrderBy].
+//
+// IMPORTANT: WithSelect changes the row shape, so [Index.Search] and
+// [Index.SearchSlice] cannot scan the result. Use [Index.SearchSQL]
+// with [database/sql.DB.QueryContext] or gorm's `db.Raw(sql,
+// args...).Scan(&out)` to consume the projected shape. Calling
+// Search / SearchSlice with WithSelect set returns an error.
+func WithSelect(extraCols string) SearchOption {
+	return func(c *searchConfig) { c.selectExtra = extraCols }
+}
+
+// WithJoin inserts a JOIN clause after "FROM <fts table>". The
+// fragment must include the JOIN keyword and the ON predicate.
+//
+//	fts.WithJoin("JOIN items ON items.id = items_fts.rowid")
+//
+// # Trust model
+//
+// joinClause is **caller-trusted raw SQL** — interpolated as-is. Same
+// rules as [WithFilter] / [WithSelect] / [WithOrderBy].
+//
+// IMPORTANT: WithJoin (like WithSelect) is honored only by
+// [Index.SearchSQL]; passing it to [Index.Search] or
+// [Index.SearchSlice] returns an error.
+func WithJoin(joinClause string) SearchOption {
+	return func(c *searchConfig) { c.joinClause = joinClause }
+}
+
+// WithOrderBy replaces the default ORDER BY clause with the given
+// expression. Without WithOrderBy the query orders by the bm25 rank
+// (with [WithRanking]) or FTS5's internal rank otherwise.
+//
+// # Trust model
+//
+// expr is **caller-trusted raw SQL** — interpolated as-is. Validate
+// identifiers via [ValidIdent]. Same contract as [WithFilter] /
+// [WithSelect] / [WithJoin].
+//
+// IMPORTANT: WithOrderBy is honored by all three of [Index.Search],
+// [Index.SearchSlice], and [Index.SearchSQL] — it does not change the
+// row shape, only the order.
+func WithOrderBy(expr string) SearchOption {
+	return func(c *searchConfig) { c.orderByExpr = expr }
+}
+
+// SearchSQL returns the SQL statement and bound arguments that Search
+// would execute, without actually running it. Pair with
+// [database/sql.DB.QueryContext] or gorm's `db.Raw(sql, args...).Scan(&out)`
+// when you want to extend the projection (via [WithSelect]) or join
+// companion data (via [WithJoin]) and scan rows into a custom struct.
+//
+// The bound args appear in declaration order: any [WithRanking] /
+// [WithSnippet] / [WithHighlight] arguments first, then the MATCH
+// expression, then any [WithFilter] arguments.
+//
+// Example with WithJoin + WithSelect (mirrors the typical "join the
+// FTS5 table to the canonical row table" pattern):
+//
+//	sql, args, err := idx.SearchSQL(fts.Term("hello"),
+//	    fts.WithSelect("items.id, items.title"),
+//	    fts.WithJoin("JOIN items ON items.id = docs_fts.rowid"),
+//	    fts.WithFilter("items.tenant = ?", "acme"),
+//	    fts.WithLimit(10),
+//	)
+//	if err != nil { return err }
+//	rows, _ := db.QueryContext(ctx, sql, args...)
+func (i *Index[K, V]) SearchSQL(q Query, opts ...SearchOption) (string, []any, error) {
+	cfg := &searchConfig{}
+	for _, o := range opts {
+		o(cfg)
+	}
+	return i.buildSearchSQL(q, cfg)
+}
+
 // WithHighlight enables FTS5's highlight() function for the named column.
 // before/after wrap each matched term in the returned text.
 func WithHighlight(column, before, after string) SearchOption {
@@ -317,12 +508,24 @@ func WithHighlight(column, before, after string) SearchOption {
 // Hit.Rank is populated only when WithRanking is passed. Hit.Snippet
 // and Hit.Highlight are populated only when their respective options are
 // requested.
+//
+// WithSelect and WithJoin are not honored here — they change the row
+// shape and the typed Hit[K, V] scanner can't consume the result. Use
+// [Index.SearchSQL] instead for custom projections; calling Search
+// with WithSelect or WithJoin set surfaces an error on the first
+// iteration.
 func (i *Index[K, V]) Search(ctx context.Context, q Query, opts ...SearchOption) iter.Seq2[Hit[K, V], error] {
 	cfg := &searchConfig{}
 	for _, o := range opts {
 		o(cfg)
 	}
 	return func(yield func(Hit[K, V], error) bool) {
+		if cfg.selectExtra != "" || cfg.joinClause != "" {
+			yield(Hit[K, V]{}, errors.New(
+				"fts.Search: WithSelect / WithJoin change the row shape; use Index.SearchSQL "+
+					"with db.QueryContext (or gorm db.Raw(...).Scan) to consume custom projections"))
+			return
+		}
 		stmt, args, err := i.buildSearchSQL(q, cfg)
 		if err != nil {
 			yield(Hit[K, V]{}, err)
@@ -394,10 +597,25 @@ func (i *Index[K, V]) buildSearchSQL(q Query, cfg *searchConfig) (string, []any,
 	if q == nil {
 		return "", nil, errors.New("fts.Search: nil query")
 	}
+	// When a JOIN is in play, the SELECT list must qualify rowid (and
+	// the columns) so SQLite doesn't see ambiguity with the joined
+	// table's own rowid alias.
+	joining := cfg.joinClause != "" || cfg.selectExtra != ""
+	tableQuoted := quote(i.name)
 	var b strings.Builder
-	b.WriteString("SELECT rowid")
+	if joining {
+		b.WriteString("SELECT ")
+		b.WriteString(tableQuoted)
+		b.WriteString(".rowid")
+	} else {
+		b.WriteString("SELECT rowid")
+	}
 	for _, c := range i.columns {
 		b.WriteString(", ")
+		if joining {
+			b.WriteString(tableQuoted)
+			b.WriteString(".")
+		}
 		b.WriteString(c)
 	}
 	args := []any{}
@@ -445,16 +663,36 @@ func (i *Index[K, V]) buildSearchSQL(q Query, cfg *searchConfig) (string, []any,
 		args = append(args, cfg.highlightBefore, cfg.highlightAfter)
 	}
 
+	if cfg.selectExtra != "" {
+		b.WriteString(", ")
+		b.WriteString(cfg.selectExtra)
+	}
+
 	b.WriteString(" FROM ")
 	b.WriteString(quote(i.name))
+	if cfg.joinClause != "" {
+		b.WriteString(" ")
+		b.WriteString(cfg.joinClause)
+	}
 	b.WriteString(" WHERE ")
 	b.WriteString(quote(i.name))
 	b.WriteString(" MATCH ?")
 	args = append(args, q.Build())
 
-	if cfg.withRank {
+	if cfg.whereSQL != "" {
+		b.WriteString(" AND (")
+		b.WriteString(cfg.whereSQL)
+		b.WriteString(")")
+		args = append(args, cfg.whereArgs...)
+	}
+
+	switch {
+	case cfg.orderByExpr != "":
+		b.WriteString(" ORDER BY ")
+		b.WriteString(cfg.orderByExpr)
+	case cfg.withRank:
 		b.WriteString(" ORDER BY __rank")
-	} else {
+	default:
 		// Without explicit ranking, fall back to FTS5's internal rank order
 		// (which is rowid order for default indexes — still deterministic).
 		b.WriteString(" ORDER BY rank")
