@@ -205,3 +205,109 @@ func TestRegisterWindowFunction_NilConstructorRejected(t *testing.T) {
 		t.Errorf("error %q doesn't mention nil constructor", err.Error())
 	}
 }
+
+// noFinalSum is a three-method WindowAccumulator — no Final method,
+// no WindowFinalizer interface. Pins the contract that Final is
+// optional via a separate interface and the adapter must tolerate
+// accumulators that don't implement it.
+type noFinalSum struct{ total int64 }
+
+func (s *noFinalSum) Step(_ *FunctionContext, args []driver.Value) error {
+	s.total += args[0].(int64)
+	return nil
+}
+func (s *noFinalSum) Inverse(_ *FunctionContext, args []driver.Value) error {
+	s.total -= args[0].(int64)
+	return nil
+}
+func (s *noFinalSum) Value(_ *FunctionContext) (driver.Value, error) {
+	return s.total, nil
+}
+
+// TestRegisterWindowFunction_FinalIsOptional confirms an accumulator
+// without a Final method (only Step/Inverse/Value) registers and runs
+// successfully — the adapter's Final no-ops when the impl doesn't
+// satisfy WindowFinalizer.
+func TestRegisterWindowFunction_FinalIsOptional(t *testing.T) {
+	_, sc, c := withMattnConn(t, ":memory:")
+	if err := c.RegisterWindowFunction("nfsum", 1,
+		func() WindowAccumulator { return &noFinalSum{} }, true); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	ctx := context.Background()
+	if _, err := sc.ExecContext(ctx, `CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	for i, v := range []int64{1, 2, 3, 4} {
+		if _, err := sc.ExecContext(ctx, `INSERT INTO t VALUES (?, ?)`, i+1, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := sc.QueryContext(ctx,
+		`SELECT nfsum(v) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM t ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	want := []int64{1, 3, 6, 10}
+	for i := 0; rows.Next(); i++ {
+		var got int64
+		if err := rows.Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want[i] {
+			t.Errorf("row %d: got=%d, want=%d", i, got, want[i])
+		}
+	}
+}
+
+// finalizingSum is a four-method accumulator that records whether
+// Final was called. Used to confirm the adapter honors
+// WindowFinalizer when implemented.
+type finalizingSum struct {
+	total       int64
+	finalCalled *bool
+}
+
+func (s *finalizingSum) Step(_ *FunctionContext, args []driver.Value) error {
+	s.total += args[0].(int64)
+	return nil
+}
+func (s *finalizingSum) Inverse(_ *FunctionContext, args []driver.Value) error {
+	s.total -= args[0].(int64)
+	return nil
+}
+func (s *finalizingSum) Value(_ *FunctionContext) (driver.Value, error) {
+	return s.total, nil
+}
+func (s *finalizingSum) Final(_ *FunctionContext) { *s.finalCalled = true }
+
+// TestRegisterWindowFunction_FinalCalledWhenImplemented confirms the
+// adapter type-asserts and calls Final when the accumulator
+// implements WindowFinalizer.
+func TestRegisterWindowFunction_FinalCalledWhenImplemented(t *testing.T) {
+	_, sc, c := withMattnConn(t, ":memory:")
+	var called bool
+	if err := c.RegisterWindowFunction("fsum", 1,
+		func() WindowAccumulator { return &finalizingSum{finalCalled: &called} }, true); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	ctx := context.Background()
+	if _, err := sc.ExecContext(ctx, `CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sc.ExecContext(ctx, `INSERT INTO t VALUES (1, 5)`); err != nil {
+		t.Fatal(err)
+	}
+	// Use as a plain aggregate so Final fires at the end.
+	var got int64
+	if err := sc.QueryRowContext(ctx, `SELECT fsum(v) FROM t`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != 5 {
+		t.Errorf("sum=%d, want 5", got)
+	}
+	if !called {
+		t.Error("Final was not called on accumulator that implements WindowFinalizer")
+	}
+}

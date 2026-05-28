@@ -109,6 +109,59 @@ func TestRRF_WeightCountMismatch_Panics(t *testing.T) {
 	fusion.RRF([][]int64{{1}, {2}}, fusion.WithWeights(1.0))
 }
 
+// TestRRF_DeterministicTiebreak pins the tiebreak rule: when scores
+// collide, results sort by fmt.Sprint(Key) ascending. Without an
+// explicit tiebreak, Go's map iteration order would leak into the
+// final ordering, making a function callers depend on flake. Run the
+// same input multiple times and assert ordering is stable.
+func TestRRF_DeterministicTiebreak(t *testing.T) {
+	// Two slices producing many tied scores. Disjoint keys at the
+	// same rank tie by construction; we want lexicographic key order
+	// when that happens.
+	a := []int64{10, 20, 30}
+	b := []int64{40, 50, 60}
+	first := fusion.RRF([][]int64{a, b})
+	for i := range 16 {
+		got := fusion.RRF([][]int64{a, b})
+		if len(got) != len(first) {
+			t.Fatalf("run %d: len=%d, want %d", i, len(got), len(first))
+		}
+		for j := range got {
+			if got[j].Key != first[j].Key {
+				t.Errorf("run %d index %d: key=%d, want %d (ordering not stable)",
+					i, j, got[j].Key, first[j].Key)
+			}
+		}
+	}
+	// Within each rank tier the order should be ascending by key:
+	// rank-1 tier {10, 40} → 10 before 40; rank-2 tier {20, 50} → 20
+	// before 50; rank-3 tier {30, 60} → 30 before 60.
+	wantOrder := []int64{10, 40, 20, 50, 30, 60}
+	for i, k := range wantOrder {
+		if first[i].Key != k {
+			t.Errorf("position %d: key=%d, want %d", i, first[i].Key, k)
+		}
+	}
+}
+
+// TestRRF2_MatchesRRFTwoSlice confirms the two-slice convenience
+// produces output identical to the variadic form. Same inputs, same
+// options, same output ordering and scores.
+func TestRRF2_MatchesRRFTwoSlice(t *testing.T) {
+	a := []int64{1, 2, 3}
+	b := []int64{2, 3, 4}
+	via2 := fusion.RRF2(a, b, fusion.WithLimit(3))
+	viaN := fusion.RRF([][]int64{a, b}, fusion.WithLimit(3))
+	if len(via2) != len(viaN) {
+		t.Fatalf("len mismatch: RRF2=%d, RRF=%d", len(via2), len(viaN))
+	}
+	for i := range via2 {
+		if via2[i].Key != viaN[i].Key || !approxEq(via2[i].Score, viaN[i].Score) {
+			t.Errorf("idx %d: RRF2=%+v, RRF=%+v", i, via2[i], viaN[i])
+		}
+	}
+}
+
 // TestRRF_StringKeys exercises the generic over K with string-typed
 // keys to confirm the generic constraint is just `comparable`.
 func TestRRF_StringKeys(t *testing.T) {

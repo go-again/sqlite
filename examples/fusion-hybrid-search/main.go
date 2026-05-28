@@ -78,7 +78,7 @@ func main() {
 	fmt.Println("Vec ranking:", vecKeys)
 	fmt.Println("FTS ranking:", ftsKeys)
 
-	fused := fusion.RRF([][]int64{vecKeys, ftsKeys}, fusion.WithLimit(4))
+	fused := fusion.RRF2(vecKeys, ftsKeys, fusion.WithLimit(4))
 	fmt.Println("\nFused (RRF):")
 	for i, r := range fused {
 		fmt.Printf("  %d. rowid=%d score=%.5f\n", i+1, r.Key, r.Score)

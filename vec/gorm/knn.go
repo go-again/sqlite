@@ -67,9 +67,13 @@ func IncludeDeleted() Option {
 // sensitive, matching what gorm's schema parser sees.
 //
 // For models with exactly one vec-tagged field, WithField is
-// unnecessary and is ignored. For models with more than one,
-// WithField is required; without it KNN[T] errors with a clear
-// message naming the available fields.
+// unnecessary but still validated: an empty string or a name matching
+// the single field is fine, any other name errors with the available
+// names listed. Silently accepting wrong names would mask a typo as a
+// query against the wrong embedding.
+//
+// For models with more than one, WithField is required; without it
+// KNN[T] errors with a clear message naming the available fields.
 //
 // Multimodal models are the headline use case:
 //
@@ -119,14 +123,16 @@ func WithOrderBy(expr string) Option {
 }
 
 // pickField selects the meta for the field the caller wants to query.
-// Single-field models ignore fieldName entirely. Multi-field models
-// require an explicit fieldName and error loudly otherwise, listing
-// the available fields to make the recovery path obvious.
+// Single-field models accept an empty fieldName OR the single field's
+// name; any other name errors so a typo can't masquerade as a
+// successful query against the only available field. Multi-field
+// models require an explicit fieldName and error loudly otherwise,
+// listing the available fields to make the recovery path obvious.
 func pickField(fields []meta, fieldName string, zero any) (meta, error) {
-	if len(fields) == 1 {
+	if len(fields) == 1 && fieldName == "" {
 		return fields[0], nil
 	}
-	if fieldName == "" {
+	if len(fields) > 1 && fieldName == "" {
 		names := make([]string, len(fields))
 		for i, f := range fields {
 			names[i] = f.FieldName

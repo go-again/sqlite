@@ -1,7 +1,9 @@
 // window-function example: register a Go window-function on a
 // connection and use it inside SQL. The WindowAccumulator interface
-// has Step / Inverse / Value / Final — SQLite drives the four
-// callbacks as the engine moves through frames.
+// has Step / Inverse / Value — SQLite drives the three callbacks as
+// the engine moves through frames. Final is an optional
+// WindowFinalizer interface for accumulators that need cleanup; this
+// pure-math one doesn't.
 package main
 
 import (
@@ -31,7 +33,6 @@ func (s *runningSum) Inverse(_ *sqlite.FunctionContext, args []driver.Value) err
 func (s *runningSum) Value(_ *sqlite.FunctionContext) (driver.Value, error) {
 	return s.total, nil
 }
-func (s *runningSum) Final(_ *sqlite.FunctionContext) {}
 
 func toFloat(v driver.Value) float64 {
 	switch x := v.(type) {

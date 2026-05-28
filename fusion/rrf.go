@@ -1,6 +1,7 @@
 package fusion
 
 import (
+	"fmt"
 	"sort"
 )
 
@@ -57,6 +58,17 @@ func WithLimit(n int) Option {
 	return func(c *config) { c.limit = n }
 }
 
+// RRF2 fuses exactly two ranked slices — the headline hybrid-search
+// case: one slice from a vector KNN, one from an FTS5 lexical search.
+// Equivalent to RRF([][]K{a, b}, opts...) but reads cleaner at the
+// call site and avoids the [][]K wrapper most callers don't need.
+//
+// WithWeights still expects exactly two weights; passing any other
+// count panics, same as [RRF].
+func RRF2[K comparable](a, b []K, opts ...Option) []Result[K] {
+	return RRF([][]K{a, b}, opts...)
+}
+
 // RRF (Reciprocal Rank Fusion) merges ranked slices keyed by K. Each
 // input contributes weight * 1 / (k + rank) per appearance, where
 // rank is 1-indexed position within that slice. Duplicate keys across
@@ -96,13 +108,12 @@ func RRF[K comparable](slices [][]K, opts ...Option) []Result[K] {
 		if out[i].Score != out[j].Score {
 			return out[i].Score > out[j].Score
 		}
-		// Tiebreak deterministically when scores collide (rare with
-		// real ranker outputs, common in tests). Compare keys via the
-		// string form when possible — falls back to natural map order
-		// only when K isn't ordered, which is acceptable since the
-		// caller has no way to observe non-determinism without
-		// constructing a tie.
-		return false
+		// Tiebreak on the string form of the key so output is stable
+		// across runs even when scores collide. K is constrained only
+		// by `comparable`, so we can't use `<` directly; fmt.Sprint is
+		// the portable hammer (integers print numerically, strings
+		// print as themselves).
+		return fmt.Sprint(out[i].Key) < fmt.Sprint(out[j].Key)
 	})
 	if cfg.limit > 0 && len(out) > cfg.limit {
 		out = out[:cfg.limit]

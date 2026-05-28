@@ -8,14 +8,19 @@ import (
 // WindowAccumulator is the interface a window-function implementation
 // satisfies. SQLite calls Step as the engine moves forward through
 // rows, Inverse as the frame's trailing edge moves past a row (so the
-// row's contribution can be removed), Value to read the current frame
-// value, and Final after the last row.
+// row's contribution can be removed), and Value to read the current
+// frame value.
 //
-// All four methods receive a [FunctionContext]; values are not valid
+// All three methods receive a [FunctionContext]; values are not valid
 // past the return of each call. A fresh WindowAccumulator is created
 // per query via the constructor passed to [Conn.RegisterWindowFunction],
 // so per-instance state can be held on the receiver without external
 // synchronization.
+//
+// For per-instance cleanup at the end of an aggregation, implement
+// [WindowFinalizer] additionally — the adapter type-asserts and calls
+// Final when present. Implementations without resources to release
+// can omit it.
 //
 // For a non-window aggregate, implement Inverse as a no-op (or return
 // an error if the function is genuinely non-invertible — SQLite will
@@ -29,9 +34,16 @@ type WindowAccumulator interface {
 	// Value returns the current frame value. Called once per output
 	// row when the function is invoked as a window function.
 	Value(ctx *FunctionContext) (driver.Value, error)
-	// Final is called after the last row. SQLite uses Value to read
-	// the result; Final exists for any per-instance cleanup the Go
-	// implementation needs.
+}
+
+// WindowFinalizer is an optional companion interface a
+// [WindowAccumulator] can implement to receive a Final callback after
+// the last row of an aggregation. SQLite uses [WindowAccumulator.Value]
+// to read the result; Final exists for any per-instance cleanup. The
+// adapter calls Final only when the accumulator satisfies this
+// interface, so most accumulators (pure-math ones with no external
+// state) can leave it off.
+type WindowFinalizer interface {
 	Final(ctx *FunctionContext)
 }
 
@@ -49,7 +61,23 @@ type WindowAccumulator interface {
 // nArg is the number of arguments the SQL function takes; pass -1 for
 // variadic.
 //
-// Example: a running-sum window function.
+// # Why nArg is explicit (vs reflective like RegisterAggregator)
+//
+// [Conn.RegisterAggregator] infers argument count by reflecting over
+// the Step method's signature: it accepts a typed value (e.g.
+// *myAggregator with `Step(a, b float64)`), so the arity comes from
+// reflect.Type.NumIn(). RegisterWindowFunction can't do that — the
+// constructor returns a [WindowAccumulator] interface, whose Step
+// method has the fixed signature `Step(*FunctionContext, []driver.Value)`,
+// from which no per-arg information is recoverable. Callers therefore
+// pass nArg explicitly. This is intentional: window functions
+// frequently want variadic / multi-typed arg lists (which reflection
+// couldn't express anyway), and the explicit form keeps the API
+// honest about what SQLite needs.
+//
+// Example: a running-sum window function. Final is omitted — pure
+// math doesn't need cleanup, and the accumulator is GC'd along with
+// the rest of the query state.
 //
 //	type sumState struct{ total float64 }
 //
@@ -64,7 +92,6 @@ type WindowAccumulator interface {
 //	func (s *sumState) Value(_ *sqlite.FunctionContext) (driver.Value, error) {
 //	    return s.total, nil
 //	}
-//	func (s *sumState) Final(_ *sqlite.FunctionContext) {}
 //
 //	conn.RegisterWindowFunction("running_sum", 1,
 //	    func() sqlite.WindowAccumulator { return &sumState{} }, true)
@@ -98,5 +125,7 @@ func (a *windowAdapter) WindowValue(ctx *FunctionContext) (driver.Value, error) 
 }
 
 func (a *windowAdapter) Final(ctx *FunctionContext) {
-	a.impl.Final(ctx)
+	if f, ok := a.impl.(WindowFinalizer); ok {
+		f.Final(ctx)
+	}
 }

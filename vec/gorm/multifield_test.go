@@ -98,10 +98,10 @@ func TestMultiField_KNN_WithField_Unknown(t *testing.T) {
 	}
 }
 
-// TestSingleField_WithField_Ignored confirms that for single-field
-// models, passing WithField is a no-op (we don't want to require it
-// just because the caller wanted to be explicit).
-func TestSingleField_WithField_Ignored(t *testing.T) {
+// TestSingleField_WithField_Accepted confirms that for single-field
+// models, passing the field's own name still works — callers who want
+// to be explicit shouldn't be punished for it.
+func TestSingleField_WithField_Accepted(t *testing.T) {
 	db := openTestDB(t)
 	if err := vecgorm.Migrate(db, &Document{}); err != nil {
 		t.Fatal(err)
@@ -117,6 +117,30 @@ func TestSingleField_WithField_Ignored(t *testing.T) {
 	}
 	if len(hits) != 1 {
 		t.Errorf("WithField on single-field model: %d hits, want 1", len(hits))
+	}
+}
+
+// TestSingleField_WithField_RejectsWrongName confirms that a typo'd
+// field name on a single-field model is rejected loudly, not silently
+// ignored. Without this check a caller refactoring a multi-field
+// model down to one field could leave a stale WithField("Old") in
+// place and silently query the wrong embedding — bad bug to discover
+// in prod.
+func TestSingleField_WithField_RejectsWrongName(t *testing.T) {
+	db := openTestDB(t)
+	if err := vecgorm.Migrate(db, &Document{}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := vecgorm.KNN[Document](context.Background(), db, []float32{1, 0, 0, 0}, 1,
+		vecgorm.WithField("Nope"))
+	if err == nil {
+		t.Fatal("expected error on wrong field name (single-field model), got nil")
+	}
+	if !strings.Contains(err.Error(), `"Nope"`) {
+		t.Errorf("error %q does not echo the bad field name", err.Error())
+	}
+	if !strings.Contains(err.Error(), "Embedding") {
+		t.Errorf("error %q does not list the single available field", err.Error())
 	}
 }
 
