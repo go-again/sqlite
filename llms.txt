@@ -26,6 +26,7 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [vec/gorm/doc.go](vec/gorm/doc.go): tag-driven sqlite-vec sidecars (`vec:"dim=N;metric=…"`) on gorm models.
 - [fts/gorm/doc.go](fts/gorm/doc.go): tag-driven FTS5 sidecars (`fts5:"tokenize=…;external=…;contentless=…"`) on gorm models.
 - [vfs/doc.go](vfs/doc.go): expose any `fs.FS` (embed.FS, fstest.MapFS, zip-fs) as a read-only SQLite VFS.
+- [fusion/doc.go](fusion/doc.go): rank-fusion helpers — combine vec.KNN and fts.Search results via Reciprocal Rank Fusion (Cormack 2009).
 
 ## Examples (runnable)
 

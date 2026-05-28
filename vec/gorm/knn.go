@@ -18,11 +18,16 @@ type Hit[T any] struct {
 	Distance float64
 }
 
-// options controls KNN behavior. See WithFilter and IncludeDeleted.
+// options controls KNN behavior. See WithFilter, IncludeDeleted,
+// WithField, WithSelect, WithJoin, WithOrderBy.
 type options struct {
-	extraWhere string
-	extraArgs  []any
-	includeDel bool
+	extraWhere  string
+	extraArgs   []any
+	includeDel  bool
+	fieldName   string
+	selectExtra string
+	joinClause  string
+	orderByExpr string
 }
 
 // Option mutates options. Apply via the KNN(...opts) variadic.
@@ -54,6 +59,94 @@ func WithFilter(sqlFragment string, args ...any) Option {
 // effect on models without gorm.DeletedAt.
 func IncludeDeleted() Option {
 	return func(o *options) { o.includeDel = true }
+}
+
+// WithField selects which vec-tagged field on T to query against, for
+// models that declare more than one. fieldName must match the Go
+// struct field name (e.g. "Embedding", "ImageEmbedding") — case-
+// sensitive, matching what gorm's schema parser sees.
+//
+// For models with exactly one vec-tagged field, WithField is
+// unnecessary and is ignored. For models with more than one,
+// WithField is required; without it KNN[T] errors with a clear
+// message naming the available fields.
+//
+// Multimodal models are the headline use case:
+//
+//	type Document struct {
+//	    ID    uint              `gorm:"primaryKey"`
+//	    Text  vecgorm.Embedding `vec:"dim=384;metric=cosine"`
+//	    Image vecgorm.Embedding `vec:"dim=512;metric=cosine"`
+//	}
+//
+//	textHits, _  := vecgorm.KNN[Document](ctx, db, textVec,  10, vecgorm.WithField("Text"))
+//	imageHits, _ := vecgorm.KNN[Document](ctx, db, imageVec, 10, vecgorm.WithField("Image"))
+func WithField(fieldName string) Option {
+	return func(o *options) { o.fieldName = fieldName }
+}
+
+// WithSelect appends extra projected columns to the sidecar's SELECT
+// list. Pair with [WithJoin] to source the extra columns from another
+// table — typically the canonical row table the sidecar references by
+// rowid. Trust contract matches [vec.WithSelect] and [WithFilter].
+//
+// IMPORTANT: WithSelect is honored by [KNNSQL] only. [KNN] errors if
+// it sees WithSelect because the typed [Hit[T]] scanner can't consume
+// custom projections.
+func WithSelect(extraCols string) Option {
+	return func(o *options) { o.selectExtra = extraCols }
+}
+
+// WithJoin inserts a JOIN clause after "FROM <sidecar>" so callers can
+// project canonical-table columns alongside KNN distances in a single
+// query. Same trust contract as [vec.WithJoin].
+//
+// IMPORTANT: WithJoin is honored by [KNNSQL] only. [KNN] errors if it
+// sees WithJoin because the typed [Hit[T]] scanner can't consume rows
+// whose shape depends on the joined table.
+func WithJoin(joinClause string) Option {
+	return func(o *options) { o.joinClause = joinClause }
+}
+
+// WithOrderBy replaces the default "ORDER BY distance" with a custom
+// expression — useful when JOINing canonical data and sorting by one
+// of its columns. Honored by [KNN], [KNNSlice], and [KNNSQL]; does not
+// change the row shape.
+//
+// Same trust contract as [vec.WithOrderBy].
+func WithOrderBy(expr string) Option {
+	return func(o *options) { o.orderByExpr = expr }
+}
+
+// pickField selects the meta for the field the caller wants to query.
+// Single-field models ignore fieldName entirely. Multi-field models
+// require an explicit fieldName and error loudly otherwise, listing
+// the available fields to make the recovery path obvious.
+func pickField(fields []meta, fieldName string, zero any) (meta, error) {
+	if len(fields) == 1 {
+		return fields[0], nil
+	}
+	if fieldName == "" {
+		names := make([]string, len(fields))
+		for i, f := range fields {
+			names[i] = f.FieldName
+		}
+		return meta{}, fmt.Errorf(
+			"vecgorm: KNN: %T has %d vec-tagged fields (%s); pass vecgorm.WithField(\"<name>\") to pick one",
+			zero, len(fields), strings.Join(names, ", "))
+	}
+	for _, f := range fields {
+		if f.FieldName == fieldName {
+			return f, nil
+		}
+	}
+	names := make([]string, len(fields))
+	for i, f := range fields {
+		names[i] = f.FieldName
+	}
+	return meta{}, fmt.Errorf(
+		"vecgorm: KNN: %T has no vec-tagged field named %q (have %s)",
+		zero, fieldName, strings.Join(names, ", "))
 }
 
 // KNN performs a nearest-neighbour search against the sidecar for model
@@ -96,19 +189,21 @@ func KNN[T any](
 			"vecgorm: KNN: %T has no fields tagged with vec",
 			zero)
 	}
-	if len(mm.Fields) > 1 {
-		// Multi-embedding models exist in principle but KNN[T] doesn't
-		// disambiguate which one to query. Add a WithField option in
-		// v1.1; for now reject.
-		return nil, fmt.Errorf(
-			"vecgorm: KNN: %T has %d vec-tagged fields; multi-field KNN is not yet supported",
-			zero, len(mm.Fields))
-	}
-	m := mm.Fields[0]
 
 	var o options
 	for _, opt := range opts {
 		opt(&o)
+	}
+
+	m, err := pickField(mm.Fields, o.fieldName, zero)
+	if err != nil {
+		return nil, err
+	}
+
+	if o.selectExtra != "" || o.joinClause != "" {
+		return nil, fmt.Errorf(
+			"vecgorm.KNN: WithSelect / WithJoin change the row shape; use vecgorm.KNNSQL " +
+				"with gorm.DB.Raw(sql, args...).Scan(&out) to consume custom projections")
 	}
 
 	tbl, err := openSidecar(db, m)
@@ -116,20 +211,7 @@ func KNN[T any](
 		return nil, err
 	}
 
-	var queryOpts []vec.QueryOption
-	whereParts := []string{}
-	whereArgs := []any{}
-	if m.SoftDelete && !o.includeDel {
-		whereParts = append(whereParts, "deleted = 0")
-	}
-	if o.extraWhere != "" {
-		whereParts = append(whereParts, "("+o.extraWhere+")")
-		whereArgs = append(whereArgs, o.extraArgs...)
-	}
-	if len(whereParts) > 0 {
-		queryOpts = append(queryOpts, vec.WithFilter(strings.Join(whereParts, " AND "), whereArgs...))
-	}
-
+	queryOpts := buildVecQueryOpts(o, m)
 	matches, err := tbl.KNNSlice(ctx, query, k, queryOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("vecgorm: KNN %s: %w", m.Table, err)
@@ -177,4 +259,88 @@ func KNN[T any](
 		results = append(results, Hit[T]{Model: model, Distance: mt.Distance})
 	}
 	return results, nil
+}
+
+// KNNSQL returns the SQL statement and bound arguments the bridge
+// would execute, without running it. Use it to extend the projection
+// via [WithSelect] or join companion data via [WithJoin], then plug
+// the SQL into `gorm.DB.Raw(sql, args...).Scan(&customStruct)` (or
+// `db.QueryContext`) for a single round-trip.
+//
+// The sidecar's soft-delete filter (`deleted = 0`) is included when
+// the model uses gorm.DeletedAt, exactly as [KNN] would — pass
+// [IncludeDeleted] to disable it. [WithFilter] AND's in your own
+// conjunct.
+//
+// Unlike [KNN], KNNSQL is safe to call inside a gorm.Transaction
+// because it doesn't open a *vec.Table connection of its own; the
+// caller executes the SQL through whatever conn pool they choose.
+func KNNSQL[T any](
+	db *gorm.DB,
+	query []float32,
+	k int,
+	opts ...Option,
+) (string, []any, error) {
+	if k <= 0 {
+		return "", nil, nil
+	}
+	p, err := pluginFrom(db)
+	if err != nil {
+		return "", nil, err
+	}
+	var zero T
+	mm, err := p.registerSchema(db, &zero)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(mm.Fields) == 0 {
+		return "", nil, fmt.Errorf(
+			"vecgorm: KNNSQL: %T has no fields tagged with vec", zero)
+	}
+
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
+	m, err := pickField(mm.Fields, o.fieldName, zero)
+	if err != nil {
+		return "", nil, err
+	}
+
+	tbl, err := openSidecar(db, m)
+	if err != nil {
+		return "", nil, err
+	}
+	return tbl.KNNSQL(query, k, buildVecQueryOpts(o, m)...)
+}
+
+// buildVecQueryOpts translates bridge-level options into the raw
+// [vec.QueryOption] list. The soft-delete filter and the bridge's own
+// [WithFilter] are stacked into a single [vec.WithFilter] so the
+// generated SQL has at most one user-WHERE conjunct; [WithSelect],
+// [WithJoin], [WithOrderBy] pass through 1:1.
+func buildVecQueryOpts(o options, m meta) []vec.QueryOption {
+	var out []vec.QueryOption
+	whereParts := []string{}
+	whereArgs := []any{}
+	if m.SoftDelete && !o.includeDel {
+		whereParts = append(whereParts, "deleted = 0")
+	}
+	if o.extraWhere != "" {
+		whereParts = append(whereParts, "("+o.extraWhere+")")
+		whereArgs = append(whereArgs, o.extraArgs...)
+	}
+	if len(whereParts) > 0 {
+		out = append(out, vec.WithFilter(strings.Join(whereParts, " AND "), whereArgs...))
+	}
+	if o.selectExtra != "" {
+		out = append(out, vec.WithSelect(o.selectExtra))
+	}
+	if o.joinClause != "" {
+		out = append(out, vec.WithJoin(o.joinClause))
+	}
+	if o.orderByExpr != "" {
+		out = append(out, vec.WithOrderBy(o.orderByExpr))
+	}
+	return out
 }

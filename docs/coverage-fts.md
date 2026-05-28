@@ -19,13 +19,22 @@ Underlying FTS5 docs: https://www.sqlite.org/fts5.html
 
 `CREATE VIRTUAL TABLE name USING fts5(col1, col2, ..., option=value, ...)`.
 
+### Lifecycle
+
+| Feature | Status | Test | Notes |
+|---|---|---|---|
+| `fts.New[K, V](ctx, db, name, opts)` | ✓ typed | `TestNew_DefaultOptions` | Errors with `ErrAlreadyExists` (wrapped) when the table already exists. |
+| `fts.New(..., fts.WithIfNotExists())` idempotent | ✓ typed | `TestNew_WithIfNotExists_Succeeds` | Schema mismatch is NOT validated under WithIfNotExists. |
+| `fts.ErrAlreadyExists` sentinel for `errors.Is` | ✓ typed | `TestNew_DefaultFailsOnSecondCall` |
+| `fts.Open[K, V]` for an existing table | ✓ typed | `TestOpen_ExistingTable` | Caller asserts column list. |
+
 ### Column declaration
 
 | Feature | Status | Test | Notes |
 |---|---|---|---|
 | Single visible column (default `value`) | ✓ typed | `TestNew_DefaultOptions` | `fts.New[K, V](ctx, db, name, fts.Options{})`. |
 | Multiple visible columns via `Options.Columns` | ✓ typed | `TestIndex_MultiColumn`, `TestSearch_RankingWithColumnWeights` | `Match.Value` holds the first column; `Match.Extras[name]` holds the rest. |
-| `UNINDEXED` columns | ✓ raw | `TestRaw_UnindexedColumn` | FTS5 supports `col UNINDEXED` to skip a column from the index. Not in our typed `Options`. |
+| `UNINDEXED` columns via `Options.ColumnsRich []ColumnSpec` | ✓ typed | `TestColumnSpec_UnindexedAcceptedInCreate`, `TestColumnSpec_UnindexedFilterableViaWithFilter`, `TestColumnSpec_UnindexedNotMatchable`, `TestColumnSpec_BackwardCompat_StringList`, `TestColumnSpec_SyncTriggers_CopyUnindexed` | Per-column `Unindexed bool` flag. UNINDEXED columns are stored but not tokenized; reach them via `WithFilter` (matching skips them). |
 
 ### Index options
 
@@ -39,6 +48,7 @@ Underlying FTS5 docs: https://www.sqlite.org/fts5.html
 | `prefix='2 3 4'` | ✓ typed | covered transitively via `Options.Prefix` | Pre-computes prefix-match indexes for the listed lengths. |
 | `content='source_table'` (external content) | ✓ typed | `TestExternal_ContentTable` | `Options.External{ContentTable, ContentRowid}`. |
 | `content_rowid='col'` | ✓ typed | same | Maps the external rowid. |
+| External-content sync triggers (`SyncInsert\|SyncUpdate\|SyncDelete`) | ✓ typed | `TestExternal_SyncTriggers_Insert`, `_Update`, `_Delete`, `_PartialMode`, `_Idempotent` | `Options.External.SyncTriggers` auto-installs `CREATE TRIGGER IF NOT EXISTS` on the source table for the requested ops. Deterministic naming: `<source>_<fts>_{ai\|au\|ad}`. |
 | `content=''` (contentless) | ✓ typed | `TestContentless_RowidsOnly` | `Options.Contentless = true`. |
 | `contentless_delete=1` | ✓ typed | `TestContentless_DeleteSupported` | `Options.ContentlessDelete = true`. Requires SQLite ≥ 3.43. |
 | `detail=full` (default) | ✓ typed | — | `Options.Detail = fts.DetailFull` or zero. |
@@ -77,6 +87,9 @@ Applied via `Search(ctx, query, opts...)` and `SearchSlice(...)`.
 | `WithSnippet(col, before, after, ellipsis, tokens)` | ✓ typed | `TestSearch_SnippetAndHighlight` |
 | `WithHighlight(col, before, after)` | ✓ typed | `TestSearch_SnippetAndHighlight` |
 | Streaming iterator (`iter.Seq2`) with early-break | ✓ typed | `TestSearch_StreamingBreak` |
+| `WithFilter(sql, args...)` AND'd onto MATCH | ✓ typed | `TestSearch_WithFilter`, `TestSearch_WithFilter_AndRanking`, `TestSearch_WithFilter_WrongColumn`, `TestSearch_WithFilter_BindArgs` |
+| Custom projection / JOIN via `WithSelect` / `WithJoin` / `WithOrderBy` | ✓ typed | `TestSearchSQL_WithSelectJoinFilter`, `TestSearchSQL_WithOrderBy`, `TestSearch_RejectsWithSelect`, `TestSearch_RejectsWithJoin` | `Search` / `SearchSlice` reject these (row-shape mismatch); use `SearchSQL`. |
+| `SearchSQL` returns `(sql, args, err)` for the caller to execute | ✓ typed | `TestSearchSQL_BasicShape` |
 
 ## Auxiliary SQL functions
 

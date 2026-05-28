@@ -195,6 +195,37 @@ Tag keys: `tokenize`, `prefix`, `external` (default `true`), `detail`,
 **in-table** (`external=false`; FTS5 stores the text), **contentless**
 (`contentless=true`; index-only, snippet/highlight unavailable).
 
+## I want hybrid search (semantic + lexical)
+
+```go
+import "github.com/go-again/sqlite/fusion"
+
+vecHits, _ := tbl.KNNSlice(ctx, queryVec, 50)
+ftsHits, _ := idx.SearchSlice(ctx, fts.Term("brown fox"), fts.WithLimit(50))
+
+vecKeys := make([]int64, len(vecHits))
+for i, h := range vecHits { vecKeys[i] = h.Rowid }
+ftsKeys := make([]int64, len(ftsHits))
+for i, h := range ftsHits { ftsKeys[i] = h.Key }
+
+top := fusion.RRF([][]int64{vecKeys, ftsKeys}, fusion.WithLimit(20))
+```
+
+Reciprocal Rank Fusion (Cormack 2009) — pure Go, no SQL, no extension. `fusion.WithK(k)` tunes the rank-1-vs-rank-N spread; `fusion.WithWeights(w1, w2, …)` lets a ranker you trust more dominate. Works over any comparable key type, not just SQLite rowids.
+
+## I want a window function from Go
+
+```go
+sc, _ := db.Conn(ctx)
+sc.Raw(func(dc any) error {
+    c := dc.(*sqlite.Conn)
+    return c.RegisterWindowFunction("running_sum", 1,
+        func() sqlite.WindowAccumulator { return &sumState{} }, true)
+})
+```
+
+`WindowAccumulator` is an interface with `Step` / `Inverse` / `Value` / `Final`. Per-query state lives on the accumulator. SQL works as usual: `SELECT running_sum(v) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) FROM t`.
+
 ## I want to embed a SQLite file inside my binary
 
 ```go

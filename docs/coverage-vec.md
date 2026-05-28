@@ -22,6 +22,15 @@ Underlying SQLite extension docs: https://alexgarcia.xyz/sqlite-vec/
 
 The core construct. `CREATE VIRTUAL TABLE name USING vec0(...)`.
 
+### Lifecycle
+
+| Feature | Status | Test | Notes |
+|---|---|---|---|
+| `vec.Create(ctx, db, name, dim, opts)` | ✓ typed | `TestTyped_CreateInsertKNN_JSON` | Errors with `ErrAlreadyExists` (wrapped) when the table already exists. |
+| `vec.Create(..., vec.WithIfNotExists())` idempotent | ✓ typed | `TestCreate_WithIfNotExists_Succeeds`, `TestCreate_WithIfNotExists_DimMismatchUndetected` | Schema mismatch is NOT validated under WithIfNotExists. |
+| `vec.ErrAlreadyExists` sentinel for `errors.Is` | ✓ typed | `TestCreate_DefaultFailsOnSecondCall` |
+| `vec.Open` for an existing table | ✓ typed | `TestTyped_OpenExistingTable` | Strict schema match (caller asserts dim / metric). |
+
 ### Column options
 
 | Feature | Status | Test | Notes |
@@ -58,6 +67,8 @@ The core construct. `CREATE VIRTUAL TABLE name USING vec0(...)`.
 | Slice form (`KNNSlice`) | ✓ typed | `TestTyped_CreateInsertKNN_JSON` |
 | Filtered KNN via `WithFilter(sql, args...)` | ✓ typed | `TestQuery_WithFilter_RestrictsToRowidSubset`, `TestQuery_WithFilter_EmptyResult`, `TestQuery_WithFilter_InvalidSQLSurfaces` |
 | Filter on aux / metadata / partition columns | ✓ raw | `TestRaw_AuxColumn`, `TestRaw_MetadataColumn_FilteredKNN`, `TestRaw_PartitionKey` | Each variant exercised via raw SQL. Reachable through `WithFilter(...)` once you declare the columns. |
+| Custom projection / JOIN via `WithSelect` / `WithJoin` / `WithOrderBy` | ✓ typed | `TestKNNSQL_WithSelectJoinFilter`, `TestKNNSQL_WithOrderBy`, `TestKNN_RejectsWithSelect`, `TestKNN_RejectsWithJoin` | `KNN` / `KNNSlice` reject these (row-shape mismatch); use `KNNSQL`. |
+| `KNNSQL` returns `(sql, args, err)` for the caller to execute | ✓ typed | `TestKNNSQL_BasicShape` |
 
 ### Wire encoding
 
@@ -66,6 +77,7 @@ The core construct. `CREATE VIRTUAL TABLE name USING vec0(...)`.
 | JSON text `[v0, v1, ...]` | ✓ typed | `TestTyped_CreateInsertKNN_JSON` (default) |
 | Binary little-endian float32 BLOB (wrapped in `vec_f32(?)` bind) | ✓ typed | `TestTyped_BinaryEncoding` (parity check vs JSON) |
 | Cross-encoding round-trip | ✓ typed | `TestTyped_BinaryEncoding` asserts ranking matches the JSON baseline. |
+| `vec.Encode(v, enc)` raw-bind helper (placeholder + value) | ✓ typed | `TestEncode_JSON_RoundTrip`, `TestEncode_Binary_RoundTrip`, `TestEncode_PlaceholderShape` |
 
 ## SQL helper functions
 

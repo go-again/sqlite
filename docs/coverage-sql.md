@@ -101,6 +101,7 @@ Run locally with `go test ./tests/sql/...`.
 | Named window (WINDOW w AS) | ✓ typed | `TestWindow_NamedAndPartitioned` |
 | PARTITION BY | ✓ typed | `TestWindow_NamedAndPartitioned` |
 | EXCLUDE clause | ✓ typed | `TestWindow_ExcludeClause` |
+| User-defined window function from Go | ✓ typed | `TestRegisterWindowFunction_SlidingFrame`, `TestRegisterWindowFunction_PartitionBy`, `TestRegisterWindowFunction_StepErrorPropagates` |
 | FILTER inside OVER | ✓ typed | `TestWindow_FilterClause` |
 | GROUPS frame | ⚠ inherited | — |
 

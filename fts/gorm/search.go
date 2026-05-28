@@ -30,6 +30,10 @@ type options struct {
 	extraWhere string
 	extraArgs  []any
 
+	selectExtra string
+	joinClause  string
+	orderByExpr string
+
 	snippet *snippetCfg
 	hilite  *hiliteCfg
 }
@@ -101,6 +105,34 @@ func WithFilter(sqlFragment string, args ...any) Option {
 	}
 }
 
+// WithSelect appends extra projected columns to the FTS5 SELECT list.
+// Pair with [WithJoin] to source the extra columns from a canonical
+// row table the FTS5 index references by rowid. Same trust contract
+// as [fts.WithSelect].
+//
+// IMPORTANT: WithSelect is honored by [SearchSQL] only. [Search]
+// errors if it sees WithSelect because the typed [Hit[T]] scanner
+// can't consume custom projections.
+func WithSelect(extraCols string) Option {
+	return func(o *options) { o.selectExtra = extraCols }
+}
+
+// WithJoin inserts a JOIN clause after "FROM <fts table>". Same trust
+// contract as [fts.WithJoin].
+//
+// IMPORTANT: WithJoin is honored by [SearchSQL] only. [Search]
+// errors if it sees WithJoin.
+func WithJoin(joinClause string) Option {
+	return func(o *options) { o.joinClause = joinClause }
+}
+
+// WithOrderBy replaces the default rank-ordering with a custom
+// expression. Honored by [Search] and [SearchSQL]; does not change
+// the row shape. Same trust contract as [fts.WithOrderBy].
+func WithOrderBy(expr string) Option {
+	return func(o *options) { o.orderByExpr = expr }
+}
+
 // Search runs an FTS5 query against the model T's shared FTS5 table
 // and returns matching gorm models in rank order. Reads:
 //
@@ -135,6 +167,11 @@ func Search[T any](ctx context.Context, db *gorm.DB, q fts.Query, opts ...Option
 			"ftsgorm: %s uses contentless mode; snippet() and highlight() are unavailable — "+
 				"remove WithSnippet/WithHighlight or switch the model to external (default) or in-table mode",
 			mm.Table)
+	}
+	if o.selectExtra != "" || o.joinClause != "" {
+		return nil, fmt.Errorf(
+			"ftsgorm.Search: WithSelect / WithJoin change the row shape; use ftsgorm.SearchSQL " +
+				"with gorm.DB.Raw(sql, args...).Scan(&out) to consume custom projections")
 	}
 
 	pool, err := activePool(db)
@@ -268,6 +305,113 @@ func Search[T any](ctx context.Context, db *gorm.DB, q fts.Query, opts ...Option
 		})
 	}
 	return results, nil
+}
+
+// SearchSQL returns the SQL statement and bound arguments the bridge
+// would execute, without running it. Pair with
+// `gorm.DB.Raw(sql, args...).Scan(&out)` (or `db.QueryContext`) when
+// you want to extend the projection via [WithSelect] or join companion
+// data via [WithJoin] and scan into a custom struct shape.
+//
+// The bridge's defaults are preserved: the soft-delete filter is
+// included when the model uses gorm.DeletedAt; bridge [WithFilter] is
+// AND'd in; [WithLimit] / [WithOffset] / [WithRanking] all apply.
+// [WithSnippet] / [WithHighlight] map to the corresponding
+// [fts.WithSnippet] / [fts.WithHighlight] aliases on the raw API.
+//
+// Unlike [Search], SearchSQL is safe to call inside a gorm.Transaction
+// because it doesn't open a connection of its own; the caller
+// executes the SQL through whatever pool they choose.
+func SearchSQL[T any](db *gorm.DB, q fts.Query, opts ...Option) (string, []any, error) {
+	p, err := pluginFrom(db)
+	if err != nil {
+		return "", nil, err
+	}
+	var zero T
+	mm, err := p.registerSchema(db, &zero)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(mm.Fields) == 0 {
+		return "", nil, fmt.Errorf("ftsgorm: SearchSQL: %T has no fields tagged with fts5", zero)
+	}
+
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
+	if mm.Mode == ModeContentless && (o.snippet != nil || o.hilite != nil) {
+		return "", nil, fmt.Errorf(
+			"ftsgorm: %s uses contentless mode; snippet() and highlight() are unavailable", mm.Table)
+	}
+
+	// Re-use the raw-fts SQL builder by constructing an Index handle
+	// over the bridge's FTS5 table. The handle's db is nil because
+	// SearchSQL only builds — it doesn't execute.
+	cols := make([]string, len(mm.Fields))
+	for i, f := range mm.Fields {
+		cols[i] = f.Column
+	}
+	idx, err := fts.Open[int64, string](nil, mm.Table, cols...)
+	if err != nil {
+		return "", nil, err
+	}
+
+	ftsOpts := buildFTSSearchOpts(o, mm)
+	return idx.SearchSQL(q, ftsOpts...)
+}
+
+// buildFTSSearchOpts translates bridge options into the raw
+// [fts.SearchOption] list. Soft-delete + WithFilter stack into a
+// single [fts.WithFilter]; snippet / highlight / ranking / limit /
+// offset pass through; the v0.4 [WithSelect] / [WithJoin] /
+// [WithOrderBy] options pass through too.
+func buildFTSSearchOpts(o options, mm *modelMeta) []fts.SearchOption {
+	var out []fts.SearchOption
+
+	if len(o.weights) > 0 {
+		out = append(out, fts.WithRanking(o.weights...))
+	}
+	if o.snippet != nil {
+		out = append(out, fts.WithSnippet(o.snippet.column, o.snippet.before, o.snippet.after, o.snippet.ellipsis, o.snippet.tokens))
+	}
+	if o.hilite != nil {
+		out = append(out, fts.WithHighlight(o.hilite.column, o.hilite.before, o.hilite.after))
+	}
+	if o.limit > 0 {
+		out = append(out, fts.WithLimit(o.limit))
+	}
+	if o.offset > 0 {
+		out = append(out, fts.WithOffset(o.offset))
+	}
+
+	whereParts := []string{}
+	whereArgs := []any{}
+	if mm.SoftDelete && !o.includeDel {
+		if mm.Mode == ModeExternal {
+			whereParts = append(whereParts, "deleted_at IS NULL")
+		} else {
+			whereParts = append(whereParts, "deleted = 0")
+		}
+	}
+	if o.extraWhere != "" {
+		whereParts = append(whereParts, "("+o.extraWhere+")")
+		whereArgs = append(whereArgs, o.extraArgs...)
+	}
+	if len(whereParts) > 0 {
+		out = append(out, fts.WithFilter(strings.Join(whereParts, " AND "), whereArgs...))
+	}
+
+	if o.selectExtra != "" {
+		out = append(out, fts.WithSelect(o.selectExtra))
+	}
+	if o.joinClause != "" {
+		out = append(out, fts.WithJoin(o.joinClause))
+	}
+	if o.orderByExpr != "" {
+		out = append(out, fts.WithOrderBy(o.orderByExpr))
+	}
+	return out
 }
 
 // columnIndex returns the zero-based ordinal of an FTS5 column on the

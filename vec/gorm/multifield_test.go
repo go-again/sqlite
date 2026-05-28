@@ -19,21 +19,104 @@ type MultiEmbedDoc struct {
 	Image vecgorm.Embedding `vec:"dim=4;table=multi_embed_docs_image"`
 }
 
-// TestMultiField_KNNRejected asserts the explicit error when a caller
-// runs KNN against a model that has more than one vec-tagged field.
-// Without a WithField option there's no way to pick which sidecar to
-// query; the package errors loudly instead of guessing.
-func TestMultiField_KNNRejected(t *testing.T) {
+// TestMultiField_KNNRejected_NoField asserts the explicit error when a
+// caller runs KNN against a model that has more than one vec-tagged
+// field without picking which one. The error names the available
+// fields and points at vecgorm.WithField.
+func TestMultiField_KNNRejected_NoField(t *testing.T) {
 	db := openTestDB(t)
 	if err := vecgorm.Migrate(db, &MultiEmbedDoc{}); err != nil {
 		t.Fatal(err)
 	}
 	_, err := vecgorm.KNN[MultiEmbedDoc](context.Background(), db, []float32{1, 0, 0, 0}, 1)
 	if err == nil {
-		t.Fatal("expected error on multi-field KNN, got nil")
+		t.Fatal("expected error on multi-field KNN with no WithField, got nil")
 	}
-	if !strings.Contains(err.Error(), "multi-field KNN is not yet supported") {
-		t.Errorf("error %q does not mention multi-field limitation", err.Error())
+	if !strings.Contains(err.Error(), "vecgorm.WithField") {
+		t.Errorf("error %q does not point at vecgorm.WithField", err.Error())
+	}
+	if !strings.Contains(err.Error(), "Text") || !strings.Contains(err.Error(), "Image") {
+		t.Errorf("error %q does not name the available fields", err.Error())
+	}
+}
+
+// TestMultiField_KNN_WithField_PicksField confirms WithField actually
+// dispatches to the right sidecar. Insert distinct vectors per field;
+// querying with the matching field's exact vector returns its row at
+// distance ≈ 0.
+func TestMultiField_KNN_WithField_PicksField(t *testing.T) {
+	db := openTestDB(t)
+	if err := vecgorm.Migrate(db, &MultiEmbedDoc{}); err != nil {
+		t.Fatal(err)
+	}
+	doc := MultiEmbedDoc{
+		Title: "doc",
+		Text:  vecgorm.Embedding{1, 0, 0, 0},
+		Image: vecgorm.Embedding{0, 1, 0, 0},
+	}
+	if err := db.Create(&doc).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	textHits, err := vecgorm.KNN[MultiEmbedDoc](ctx, db, []float32{1, 0, 0, 0}, 1,
+		vecgorm.WithField("Text"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(textHits) != 1 || textHits[0].Distance > 0.0001 {
+		t.Errorf("Text KNN: %+v, want one hit at ~0 distance", textHits)
+	}
+
+	imageHits, err := vecgorm.KNN[MultiEmbedDoc](ctx, db, []float32{0, 1, 0, 0}, 1,
+		vecgorm.WithField("Image"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imageHits) != 1 || imageHits[0].Distance > 0.0001 {
+		t.Errorf("Image KNN: %+v, want one hit at ~0 distance", imageHits)
+	}
+}
+
+// TestMultiField_KNN_WithField_Unknown rejects a typo'd field name
+// with an error that names the actual fields.
+func TestMultiField_KNN_WithField_Unknown(t *testing.T) {
+	db := openTestDB(t)
+	if err := vecgorm.Migrate(db, &MultiEmbedDoc{}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := vecgorm.KNN[MultiEmbedDoc](context.Background(), db, []float32{1, 0, 0, 0}, 1,
+		vecgorm.WithField("Nope"))
+	if err == nil {
+		t.Fatal("expected error on unknown field name, got nil")
+	}
+	if !strings.Contains(err.Error(), `"Nope"`) {
+		t.Errorf("error %q does not echo the bad field name", err.Error())
+	}
+	if !strings.Contains(err.Error(), "Text") || !strings.Contains(err.Error(), "Image") {
+		t.Errorf("error %q does not list the available fields", err.Error())
+	}
+}
+
+// TestSingleField_WithField_Ignored confirms that for single-field
+// models, passing WithField is a no-op (we don't want to require it
+// just because the caller wanted to be explicit).
+func TestSingleField_WithField_Ignored(t *testing.T) {
+	db := openTestDB(t)
+	if err := vecgorm.Migrate(db, &Document{}); err != nil {
+		t.Fatal(err)
+	}
+	doc := Document{Title: "single", Embedding: []float32{1, 0, 0, 0}}
+	if err := db.Create(&doc).Error; err != nil {
+		t.Fatal(err)
+	}
+	hits, err := vecgorm.KNN[Document](context.Background(), db, []float32{1, 0, 0, 0}, 1,
+		vecgorm.WithField("Embedding"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 {
+		t.Errorf("WithField on single-field model: %d hits, want 1", len(hits))
 	}
 }
 

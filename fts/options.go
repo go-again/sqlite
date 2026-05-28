@@ -45,9 +45,12 @@ type External struct {
 	// FTS5 index in sync. Zero (the default) installs no triggers — the
 	// caller is responsible for sync. SyncAll installs all three.
 	//
-	// Trigger names follow the convention "<contentTable>_<ftsName>_<ai|au|ad>",
-	// emitted with IF NOT EXISTS so re-running New (with WithIfNotExists)
-	// is idempotent.
+	// Trigger names are "<ftsName>_<ai|au|ad>", emitted with
+	// IF NOT EXISTS so re-running New (with WithIfNotExists) is
+	// idempotent. The FTS5 table name is globally unique inside the
+	// SQLite schema, so the FTS5-name-only prefix is sufficient AND
+	// keeps trigger names readable under the universal `<content>_fts`
+	// naming convention.
 	//
 	// The columns the triggers reference come from Options.Columns and
 	// must exist on both the FTS5 table and the content table with the
@@ -74,6 +77,24 @@ const (
 	SyncAll = SyncInsert | SyncUpdate | SyncDelete
 )
 
+// ColumnSpec is the rich form of an FTS5 column declaration. The bare
+// []string form on Options.Columns is shorthand for []ColumnSpec with
+// Name set and Unindexed false.
+type ColumnSpec struct {
+	// Name is the column identifier. Validated against [ValidIdent].
+	Name string
+
+	// Unindexed marks the column as FTS5 UNINDEXED — values are stored
+	// in the FTS5 row but not added to the inverted index. Use this
+	// for metadata columns you want to filter on via [WithFilter]
+	// (tenant, status, kind) without paying tokenization cost. Search
+	// MATCH queries cannot find text inside an UNINDEXED column;
+	// WHERE-clause equality / range predicates can.
+	//
+	// See https://www.sqlite.org/fts5.html section 4.5.2.
+	Unindexed bool
+}
+
 // Options configures New. The zero value is valid and produces an FTS5 table
 // using unicode61 tokenization with a single "value" column keyed by an
 // integer rowid.
@@ -85,9 +106,18 @@ type Options struct {
 	// prefix-match indexes for 2-, 3- and 4-character prefixes).
 	Prefix []int
 
-	// Columns names the user-visible columns. Defaults to ["value"]. The
-	// "rowid" column is implicit and used as the primary key.
+	// Columns names the user-visible columns (all indexed). Defaults to
+	// ["value"]. The "rowid" column is implicit and used as the primary
+	// key. For per-column UNINDEXED control, use ColumnsRich instead;
+	// when both are non-empty, ColumnsRich wins and Columns is ignored.
 	Columns []string
+
+	// ColumnsRich is the per-column form: each entry can opt into
+	// FTS5's UNINDEXED storage. Use this for tables that mix indexed
+	// text columns with metadata-only filter columns (tenant, status,
+	// kind). When ColumnsRich is non-empty it takes precedence over
+	// Columns.
+	ColumnsRich []ColumnSpec
 
 	// External enables FTS5's external-content mode; see the External type.
 	// Mutually exclusive with Contentless.
@@ -112,13 +142,21 @@ type Options struct {
 	ContentlessDelete bool
 }
 
-// columnList returns the visible column names, defaulting to a single "value"
-// column for callers that don't customize.
-func (o Options) columnList() []string {
-	if len(o.Columns) > 0 {
-		return o.Columns
+// columnSpecs returns the normalized rich form: ColumnsRich if set,
+// otherwise the bare Columns promoted to []ColumnSpec with Unindexed
+// false. Default fallback is a single "value" column. Internal use.
+func (o Options) columnSpecs() []ColumnSpec {
+	if len(o.ColumnsRich) > 0 {
+		return o.ColumnsRich
 	}
-	return []string{"value"}
+	if len(o.Columns) > 0 {
+		out := make([]ColumnSpec, len(o.Columns))
+		for i, n := range o.Columns {
+			out[i] = ColumnSpec{Name: n}
+		}
+		return out
+	}
+	return []ColumnSpec{{Name: "value"}}
 }
 
 // tokenizerExpr returns the FTS5 `tokenize=...` fragment for this Options'

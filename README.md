@@ -111,6 +111,33 @@ unchanged.
 
 See [`examples/mattn-compat/`](examples/mattn-compat/main.go).
 
+### Coming from ncruces/go-sqlite3
+
+Partial migration only — not a one-line swap. `github.com/ncruces/go-sqlite3` is the other major CGo-free Go SQLite driver (WebAssembly via wazero, vs our ccgo-transpiled Go). Different architecture, different public API for everything beyond `database/sql`.
+
+What works after the import swap:
+
+```diff
+- import _ "github.com/ncruces/go-sqlite3/driver"
++ import _ "github.com/go-again/sqlite"
+```
+
+- `sql.Open("sqlite3", dsn)` — same driver name.
+- URI-form DSNs with repeatable `_pragma=…` — accepted verbatim. You additionally gain the mattn-style short forms (`_fk=1`, `_journal=WAL`, `_busy_timeout=N`, …) that ncruces doesn't support.
+- Standard `database/sql` — `db.Query`, `db.Exec`, `db.BeginTx`, prepared statements, all unchanged.
+
+What needs rewriting:
+
+- Anything that imports `github.com/ncruces/go-sqlite3` for type names (`sqlite3.Conn`, `sqlite3.Context`, `sqlite3.Value`, `sqlite3.ScalarFunction`) — those types don't exist here. Move per-conn work to `db.Conn(ctx)` + `conn.Raw(func(dc any) error { c := dc.(*sqlite.Conn); … })`.
+- `driver.Open(dsn, func(*sqlite3.Conn) error)` — no equivalent constructor. Use mattn-style `&sqlite.SQLiteDriver{ConnectHook: ...}` registration instead, or install hooks per-conn after `db.Conn(ctx)`.
+- UDF / aggregator / collation / window / hook callsites — map as `CreateFunction` → `Conn.RegisterFunc(name, fn, pure)`, `CreateAggregateFunction` → `Conn.RegisterAggregator`, `CreateWindowFunction` → `Conn.RegisterWindowFunction(name, nArg, ctor, pure)`, `CreateCollation` → `Conn.RegisterCollation`, `UpdateHook` → `RegisterUpdateHook`, `SetAuthorizer` → `RegisterAuthorizer`, `Trace` → `SetTrace`. Signatures differ — see [hooks.go](hooks.go), [compat_register.go](compat_register.go), and [windows.go](windows.go).
+- `gormlite.Open(dsn)` → `sqlitegorm.Open(dsn)` (textual swap, glebarez-compatible).
+- `vfs/readervfs.Create(...)` → `vfs.New(fs.FS) (name, *vfs.FS, error)` — different signature, same intent.
+- `ext/vec1` users — our `vec/` wraps [sqlite-vec](https://github.com/asg017/sqlite-vec) (asg017's), not vec1 (SQLite-org's). The vtab name and SQL surface differ; consumers rewrite SQL, not just imports.
+- Adiantum / XTS encryption VFSes — gap; we don't ship encryption-at-rest.
+
+If you're a pure-`database/sql` consumer with `_pragma=…` URI DSNs and no custom UDFs, this is a one-line swap. Otherwise budget for it as a per-call-site rewrite — same shape and amount of work as porting from any other Go SQLite driver to mattn.
+
 ### gorm
 
 ```go
@@ -165,6 +192,27 @@ matches, _ := idx.SearchSlice(ctx, fts.Term("fox"),
 ```
 
 See [`examples/fts-search/`](examples/fts-search/main.go).
+
+### Hybrid search (semantic + lexical) via fusion
+
+When you want the recall of a `vec.KNN` semantic match AND the precision of an `fts.Index.Search` lexical match, the `fusion` sub-package merges two ranked result sets into one via Reciprocal Rank Fusion (Cormack 2009). No SQL, no extension to load — just Go ranking.
+
+```go
+import "github.com/go-again/sqlite/fusion"
+
+vecHits, _ := tbl.KNNSlice(ctx, queryVec, 50)
+ftsHits, _ := idx.SearchSlice(ctx, fts.Term("brown fox"), fts.WithLimit(50))
+
+vecKeys := make([]int64, len(vecHits))
+for i, h := range vecHits { vecKeys[i] = h.Rowid }
+ftsKeys := make([]int64, len(ftsHits))
+for i, h := range ftsHits { ftsKeys[i] = h.Key }
+
+top := fusion.RRF([][]int64{vecKeys, ftsKeys}, fusion.WithLimit(20))
+for _, r := range top {
+    fmt.Println(r.Key, r.Score)
+}
+```
 
 ### Deep gorm integration — tag-driven vec & FTS5
 

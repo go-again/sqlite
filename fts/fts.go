@@ -104,11 +104,13 @@ func New[K, V SQLType](ctx context.Context, db *sql.DB, name string, opts Option
 	if !validIdent(name) {
 		return nil, fmt.Errorf("fts.New: %q is not a valid SQL identifier", name)
 	}
-	cols := opts.columnList()
-	for _, c := range cols {
-		if !validIdent(c) {
-			return nil, fmt.Errorf("fts.New: column %q is not a valid SQL identifier", c)
+	specs := opts.columnSpecs()
+	cols := make([]string, len(specs))
+	for i, c := range specs {
+		if !validIdent(c.Name) {
+			return nil, fmt.Errorf("fts.New: column %q is not a valid SQL identifier", c.Name)
 		}
+		cols[i] = c.Name
 	}
 	cfg := &createConfig{}
 	for _, opt := range createOpts {
@@ -116,7 +118,13 @@ func New[K, V SQLType](ctx context.Context, db *sql.DB, name string, opts Option
 	}
 
 	var parts []string
-	parts = append(parts, cols...)
+	for _, c := range specs {
+		if c.Unindexed {
+			parts = append(parts, c.Name+" UNINDEXED")
+		} else {
+			parts = append(parts, c.Name)
+		}
+	}
 	for _, expr := range []string{
 		opts.tokenizerExpr(),
 		opts.prefixExpr(),

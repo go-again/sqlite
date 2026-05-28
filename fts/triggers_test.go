@@ -108,6 +108,39 @@ func TestExternal_SyncTriggers_Delete(t *testing.T) {
 	}
 }
 
+// TestExternal_SyncTriggers_Naming pins the installed trigger names
+// against the documented convention `<ftsName>_<ai|au|ad>`. The FTS5
+// table name alone (not source_<fts>_…) is the prefix; this keeps
+// names short under the universal `<content>_fts` convention so the
+// triggers don't read like `items_items_fts_ai`.
+func TestExternal_SyncTriggers_Naming(t *testing.T) {
+	_, db, _ := setupExternalContent(t, fts.SyncAll)
+	ctx := context.Background()
+	rows, err := db.QueryContext(ctx,
+		`SELECT name FROM sqlite_master WHERE type='trigger' ORDER BY name`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, n)
+	}
+	want := []string{"docs_fts_ad", "docs_fts_ai", "docs_fts_au"}
+	if len(got) != len(want) {
+		t.Fatalf("triggers=%v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("trigger[%d]=%q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 // TestExternal_SyncTriggers_PartialMode confirms the bitmask is honored
 // individually: SyncInsert alone installs only the AFTER INSERT trigger,
 // so subsequent UPDATEs do NOT re-index.

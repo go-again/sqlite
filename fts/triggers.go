@@ -50,15 +50,23 @@ func installSyncTriggers(ctx context.Context, db *sql.DB, ftsName, contentTable,
 	// Update is delete-then-insert per the FTS5 manual.
 	updateBody := deleteMagic + insertBody
 
+	// Trigger names use the FTS5 table name as the prefix. The FTS5
+	// table name is already globally unique inside the schema (SQLite
+	// enforces this on CREATE VIRTUAL TABLE), so a `<ftsName>_<suffix>`
+	// scheme is enough for uniqueness AND keeps names short under the
+	// universal `<content>_fts` convention (e.g. `items_fts_ai` instead
+	// of `items_items_fts_ai`). Apps maintaining multiple FTS5 indexes
+	// over the same source table can disambiguate via their own ftsName
+	// choices.
 	triggers := []struct {
 		bit  SyncMode
 		name string
 		when string
 		body string
 	}{
-		{SyncInsert, contentTable + "_" + ftsName + "_ai", "AFTER INSERT", insertBody},
-		{SyncUpdate, contentTable + "_" + ftsName + "_au", "AFTER UPDATE", updateBody},
-		{SyncDelete, contentTable + "_" + ftsName + "_ad", "AFTER DELETE", deleteMagic},
+		{SyncInsert, ftsName + "_ai", "AFTER INSERT", insertBody},
+		{SyncUpdate, ftsName + "_au", "AFTER UPDATE", updateBody},
+		{SyncDelete, ftsName + "_ad", "AFTER DELETE", deleteMagic},
 	}
 	for _, t := range triggers {
 		if mode&t.bit == 0 {
