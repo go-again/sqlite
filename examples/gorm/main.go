@@ -1,8 +1,7 @@
 // gorm example: shows the minimal change to migrate from
-// github.com/Tryanks/gorm-sqlite (or glebarez/sqlite) to
-// github.com/go-again/sqlite/gorm. The sqlite.Open(dsn) call signature is
-// identical; the package name remains `sqlite` so the rest of your code
-// keeps compiling.
+// github.com/glebarez/sqlite to github.com/go-again/sqlite/gorm.
+// The sqlite.Open(dsn) call signature is identical; the package name
+// remains `sqlite` so the rest of your code keeps compiling.
 package main
 
 import (

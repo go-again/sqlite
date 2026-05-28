@@ -57,7 +57,7 @@ type Dialector struct {
 }
 
 // Open returns a gorm.Dialector for the given DSN, using the default driver
-// name. Equivalent to glebarez/Tryanks sqlite.Open.
+// name. Equivalent to glebarez/sqlite's sqlite.Open.
 func Open(dsn string) gorm.Dialector {
 	return &Dialector{DSN: dsn}
 }
