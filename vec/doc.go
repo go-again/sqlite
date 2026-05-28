@@ -67,6 +67,14 @@
 // [Table.KNN] / [Table.KNNSlice] reject WithSelect / WithJoin because
 // they change the row shape the typed scanner expects.
 //
+// Note: when a JOIN is in play, KNNSQL emits `k = N` as a literal
+// alongside the MATCH conjunct rather than relying on `LIMIT N`.
+// sqlite-vec's planner doesn't extract LIMIT through a join boundary,
+// but the `k = N` predicate is a vec0-recognized vtab hint that
+// survives. Callers writing raw SQL by hand against vec0 should follow
+// the same pattern — parameterizing `k` with a `?` placeholder will
+// silently return an unbounded scan.
+//
 // # Idempotent migrations
 //
 // [Create] errors with [ErrAlreadyExists] (wrapped) if the table

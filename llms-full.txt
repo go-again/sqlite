@@ -224,7 +224,7 @@ sc.Raw(func(dc any) error {
 })
 ```
 
-`WindowAccumulator` is an interface with `Step` / `Inverse` / `Value` / `Final`. Per-query state lives on the accumulator. SQL works as usual: `SELECT running_sum(v) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) FROM t`.
+`WindowAccumulator` is an interface with `Step` / `Inverse` / `Value`. Per-query state lives on the accumulator. Implement the optional `WindowFinalizer` interface (`Final`) only if you need per-instance cleanup. SQL works as usual: `SELECT running_sum(v) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) FROM t`.
 
 ## I want to embed a SQLite file inside my binary
 

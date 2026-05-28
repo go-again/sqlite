@@ -14,7 +14,12 @@ import (
 // columns into the FTS5 table; updates and deletes emit the
 // 'delete' magic-row insert first.
 //
-// Trigger names are deterministic: "<contentTable>_<ftsName>_<ai|au|ad>".
+// Trigger names are deterministic: "<ftsName>_<ai|au|ad>". The FTS5
+// table name alone is enough — SQLite enforces it as globally unique
+// on CREATE VIRTUAL TABLE, so a doubled "<contentTable>_<ftsName>_…"
+// prefix would just duplicate "items_items_fts_ai" under the universal
+// `<content>_fts` naming convention.
+//
 // IF NOT EXISTS makes the install idempotent — re-running New (with
 // WithIfNotExists) over an already-migrated database is a no-op.
 //
