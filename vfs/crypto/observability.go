@@ -2,6 +2,7 @@ package crypto
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -30,7 +31,7 @@ import (
 //     string-match dance.
 type Recorder interface {
 	// OnRead reports a completed read. kind is the file-kind tag (see
-	// fileKindMainDB etc.); off is the byte offset in the file; amt
+	// FileKindMainDB etc.); off is the byte offset in the file; amt
 	// is the byte count requested; rc is the SQLite result code.
 	OnRead(kind byte, off, amt int64, dur time.Duration, rc int32)
 	// OnWrite reports a completed write with the same field shape.
@@ -45,22 +46,30 @@ type Recorder interface {
 // byte stored on per-file state and surfaced through Recorder. Useful
 // when emitting metrics or logs without keeping the enum-to-string
 // table in caller code.
+//
+// Returns "unencrypted" only for kind 0 (the deliberate sentinel for
+// files this package forwards verbatim — currently only the WAL
+// `-shm` index). Any other unrecognized byte returns "kind_<n>" so a
+// future format break that introduces a new file-kind value doesn't
+// silently log as "unencrypted".
 func FileKindName(kind byte) string {
 	switch kind {
-	case fileKindMainDB:
+	case 0:
+		return "unencrypted"
+	case FileKindMainDB:
 		return "main_db"
-	case fileKindMainJournal:
+	case FileKindMainJournal:
 		return "main_journal"
-	case fileKindWAL:
+	case FileKindWAL:
 		return "wal"
-	case fileKindTempDB:
+	case FileKindTempDB:
 		return "temp_db"
-	case fileKindTempJournal:
+	case FileKindTempJournal:
 		return "temp_journal"
-	case fileKindSubJournal:
+	case FileKindSubJournal:
 		return "sub_journal"
 	default:
-		return "unencrypted"
+		return fmt.Sprintf("kind_%d", kind)
 	}
 }
 

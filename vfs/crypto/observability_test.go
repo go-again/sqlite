@@ -138,7 +138,12 @@ func TestFileKindName_Table(t *testing.T) {
 		{4, "temp_db"},
 		{5, "temp_journal"},
 		{6, "sub_journal"},
-		{255, "unencrypted"}, // unknown byte falls through to default
+		// Unrecognized values get a kind_N label so a future format
+		// break that adds a new kind doesn't quietly log as
+		// "unencrypted".
+		{7, "kind_7"},
+		{100, "kind_100"},
+		{255, "kind_255"},
 	}
 	for _, tc := range cases {
 		if got := crypto.FileKindName(tc.kind); got != tc.want {
@@ -147,11 +152,14 @@ func TestFileKindName_Table(t *testing.T) {
 	}
 }
 
-// TestRecorder_FailedReopen_RC fires the Recorder on a wrong-key
-// reopen and asserts it surfaces a non-zero rc. Documents that
-// downstream consumers can rely on rc != 0 to mean "decryption broke
-// or something else SQLite-internal went wrong".
-func TestRecorder_FailedReopen_RC(t *testing.T) {
+// TestRecorder_FiresAcrossFailure fires the Recorder on a wrong-key
+// reopen and asserts the recorder kept firing through the engine-
+// level failure. We don't pin a specific rc here because SQLite
+// forwards the 100-byte header read successfully (rc=OK or
+// SHORT_READ) before parsing the decrypted garbage and bailing —
+// the meaningful property is that the recorder remains live across
+// the failure boundary, not the specific rc surfaced.
+func TestRecorder_FiresAcrossFailure(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "wrongkey.db")
 
@@ -182,14 +190,23 @@ func TestRecorder_FailedReopen_RC(t *testing.T) {
 	t.Cleanup(func() { _ = dbB.Close() })
 
 	var v string
-	_ = dbB.QueryRow(`SELECT v FROM t`).Scan(&v) // expected to fail
+	queryErr := dbB.QueryRow(`SELECT v FROM t`).Scan(&v) // expected to fail
+	if queryErr == nil {
+		t.Fatalf("wrong-key SELECT returned %q with no error", v)
+	}
 
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
 	if len(rec.reads) == 0 {
-		t.Skip("no reads recorded — engine bailed earlier than this test assumes")
+		t.Fatal("recorder fired no OnRead events on wrong-key reopen — " +
+			"engine bailed before any IO reached our trampoline, which means " +
+			"the recorder surface doesn't see the failure path at all")
 	}
-	// Some reads will be OK (we forward header bytes successfully);
-	// the test passes as long as the recorder kept firing through
-	// the failure.
+	// The reads we forwarded successfully (SQLite's 100-byte header
+	// read against a freshly-opened file decrypts under the wrong
+	// key to garbage; SQLite then sees that as "not a database" and
+	// bails). We don't pin a specific rc here because the engine's
+	// reaction depends on which byte pattern emerges from the wrong-
+	// key decryption — what matters is the recorder kept firing
+	// across the failure boundary.
 }

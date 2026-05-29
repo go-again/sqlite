@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 	"testing"
 
 	_ "github.com/go-again/sqlite"
@@ -208,9 +209,9 @@ func TestNew_RejectsBadInputs(t *testing.T) {
 // TestWALMode_RoundTrip runs a transaction under WAL mode so the
 // engine creates a -wal sidecar and a -shm region. We confirm
 // CREATE / INSERT / COMMIT / SELECT round-trips, and that the -wal
-// file's bytes don't contain plaintext (it's also encrypted in
-// Phase 2). The -shm file is intentionally plaintext (xShmMap path),
-// see encryptedOpenFlags in vfs.go.
+// file's bytes don't contain plaintext. The -shm file is
+// intentionally plaintext (it's accessed via xShmMap, not
+// xRead/xWrite — see fileKindFor in vfs.go).
 func TestWALMode_RoundTrip(t *testing.T) {
 	key := freshKey(5)
 	name, fs, err := crypto.New(crypto.Options{Key: key})
@@ -315,6 +316,237 @@ func TestRollbackJournal_Encrypted(t *testing.T) {
 		if bytes.Contains(raw, []byte("journal-plaintext-marker")) {
 			t.Error("rollback journal contains plaintext row content")
 		}
+	}
+}
+
+// TestRollbackJournal_ReplaysCorrectly exercises the journal-replay-
+// decrypt path. The previous TestRollbackJournal_Encrypted commits
+// the tx so the journal is written and immediately deleted; rollback
+// is what triggers a journal replay (SQLite reads the original page
+// images out of the encrypted journal to restore the main DB).
+func TestRollbackJournal_ReplaysCorrectly(t *testing.T) {
+	key := freshKey(60)
+	name, fs, err := crypto.New(crypto.Options{Key: key})
+	if err != nil {
+		t.Fatalf("crypto.New: %v", err)
+	}
+	t.Cleanup(func() { _ = fs.Close() })
+
+	dbPath := filepath.Join(t.TempDir(), "rb.db")
+	dsn := fmt.Sprintf("file:%s?vfs=%s", dbPath, name)
+	db, _ := sql.Open("sqlite", dsn)
+	t.Cleanup(func() { _ = db.Close() })
+
+	if _, err := db.Exec(`CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)`); err != nil {
+		t.Fatalf("CREATE: %v", err)
+	}
+	for i := range 20 {
+		if _, err := db.Exec(`INSERT INTO t VALUES (?, ?)`, i, fmt.Sprintf("original-%d", i)); err != nil {
+			t.Fatalf("INSERT %d: %v", i, err)
+		}
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	if _, err := tx.Exec(`UPDATE t SET v = 'modified' WHERE id < 10`); err != nil {
+		t.Fatalf("UPDATE: %v", err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+
+	// The rollback walks the encrypted journal, decrypts page images,
+	// and restores the main DB. Verify the originals are intact.
+	for i := range 20 {
+		var v string
+		if err := db.QueryRow(`SELECT v FROM t WHERE id = ?`, i).Scan(&v); err != nil {
+			t.Fatalf("SELECT id=%d: %v", i, err)
+		}
+		want := fmt.Sprintf("original-%d", i)
+		if v != want {
+			t.Errorf("id=%d: v=%q, want %q (rollback didn't restore)", i, v, want)
+		}
+	}
+}
+
+// TestLargeBlob_SpansMultiplePages forces a single xWrite to span
+// multiple page-aligned encryption blocks. The encryptSpan /
+// decryptSpan loops in iomethods.go iterate per page; a single-page
+// payload wouldn't exercise the multi-iteration branch.
+func TestLargeBlob_SpansMultiplePages(t *testing.T) {
+	key := freshKey(61)
+	name, fs, err := crypto.New(crypto.Options{Key: key})
+	if err != nil {
+		t.Fatalf("crypto.New: %v", err)
+	}
+	t.Cleanup(func() { _ = fs.Close() })
+
+	dbPath := filepath.Join(t.TempDir(), "big.db")
+	dsn := fmt.Sprintf("file:%s?vfs=%s", dbPath, name)
+	db, _ := sql.Open("sqlite", dsn)
+	t.Cleanup(func() { _ = db.Close() })
+
+	if _, err := db.Exec(`CREATE TABLE t (id INTEGER PRIMARY KEY, b BLOB)`); err != nil {
+		t.Fatalf("CREATE: %v", err)
+	}
+	// 100 KiB blob — at default 4 KiB pages that's ~25 pages.
+	payload := make([]byte, 100*1024)
+	for i := range payload {
+		payload[i] = byte(i*7 + 13)
+	}
+	if _, err := db.Exec(`INSERT INTO t (id, b) VALUES (1, ?)`, payload); err != nil {
+		t.Fatalf("INSERT: %v", err)
+	}
+
+	var got []byte
+	if err := db.QueryRow(`SELECT b FROM t WHERE id = 1`).Scan(&got); err != nil {
+		t.Fatalf("SELECT: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Errorf("blob round-trip mismatch: got %d bytes, want %d; first diff at %d",
+			len(got), len(payload), firstDiff(got, payload))
+	}
+}
+
+func firstDiff(a, b []byte) int {
+	n := min(len(a), len(b))
+	for i := range n {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+	if len(a) != len(b) {
+		return n
+	}
+	return -1
+}
+
+// TestWAL_VacuumAndCheckpoint exercises VACUUM under WAL mode plus
+// an explicit checkpoint — a code path that combines whole-DB
+// rewriting (VACUUM) with WAL-frame flushing (checkpoint), both of
+// which go through our encrypted xWrite trampolines on different
+// file kinds.
+func TestWAL_VacuumAndCheckpoint(t *testing.T) {
+	key := freshKey(62)
+	name, fs, err := crypto.New(crypto.Options{Key: key})
+	if err != nil {
+		t.Fatalf("crypto.New: %v", err)
+	}
+	t.Cleanup(func() { _ = fs.Close() })
+
+	dbPath := filepath.Join(t.TempDir(), "wv.db")
+	dsn := fmt.Sprintf("file:%s?vfs=%s", dbPath, name)
+	db, _ := sql.Open("sqlite", dsn)
+	t.Cleanup(func() { _ = db.Close() })
+
+	if _, err := db.Exec(`PRAGMA journal_mode = WAL`); err != nil {
+		t.Fatalf("PRAGMA WAL: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)`); err != nil {
+		t.Fatalf("CREATE: %v", err)
+	}
+	tx, _ := db.Begin()
+	for i := range 100 {
+		if _, err := tx.Exec(`INSERT INTO t VALUES (?, ?)`, i, fmt.Sprintf("row-%d", i)); err != nil {
+			t.Fatalf("INSERT %d: %v", i, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM t WHERE id % 2 = 0`); err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	if _, err := db.Exec(`VACUUM`); err != nil {
+		t.Fatalf("VACUUM: %v", err)
+	}
+	if _, err := db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		t.Fatalf("wal_checkpoint: %v", err)
+	}
+	var result string
+	if err := db.QueryRow(`PRAGMA integrity_check`).Scan(&result); err != nil {
+		t.Fatalf("integrity_check: %v", err)
+	}
+	if result != "ok" {
+		t.Errorf("integrity_check = %q, want \"ok\"", result)
+	}
+}
+
+// TestConcurrentReadsWrites_NoCorruption stress-tests the full
+// trampoline path with multiple sql.Conns issuing concurrent I/O
+// against the same encrypted VFS. The package-wide -race skip
+// means TSan never sees this code; this test catches logic-level
+// races (like the Adiantum hashBuf race that motivated the cipher
+// mutex) at the SQL boundary instead.
+func TestConcurrentReadsWrites_NoCorruption(t *testing.T) {
+	key := freshKey(63)
+	name, fs, err := crypto.New(crypto.Options{Key: key})
+	if err != nil {
+		t.Fatalf("crypto.New: %v", err)
+	}
+	t.Cleanup(func() { _ = fs.Close() })
+
+	dbPath := filepath.Join(t.TempDir(), "stress.db")
+	// busy_timeout=5s gives SQLite room to serialize concurrent
+	// writers; without it WAL writes contend on the single-writer
+	// lock and surface SQLITE_BUSY immediately. This test cares
+	// about cipher-level correctness under concurrency, not lock
+	// fairness — let SQLite handle the queueing.
+	dsn := fmt.Sprintf("file:%s?vfs=%s&_pragma=busy_timeout(5000)", dbPath, name)
+	db, _ := sql.Open("sqlite", dsn)
+	t.Cleanup(func() { _ = db.Close() })
+	db.SetMaxOpenConns(8)
+
+	if _, err := db.Exec(`PRAGMA journal_mode = WAL`); err != nil {
+		t.Fatalf("PRAGMA WAL: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT NOT NULL)`); err != nil {
+		t.Fatalf("CREATE: %v", err)
+	}
+
+	const goroutines = 8
+	const iterations = 200
+	var wg sync.WaitGroup
+	errs := make(chan error, goroutines*iterations)
+	for g := range goroutines {
+		wg.Add(1)
+		go func(gID int) {
+			defer wg.Done()
+			for i := range iterations {
+				id := gID*iterations + i
+				if _, err := db.Exec(`INSERT INTO t (id, v) VALUES (?, ?)`,
+					id, fmt.Sprintf("g%d-i%d", gID, i)); err != nil {
+					errs <- fmt.Errorf("INSERT %d: %w", id, err)
+					return
+				}
+				var v string
+				if err := db.QueryRow(`SELECT v FROM t WHERE id = ?`, id).Scan(&v); err != nil {
+					errs <- fmt.Errorf("SELECT %d: %w", id, err)
+					return
+				}
+				want := fmt.Sprintf("g%d-i%d", gID, i)
+				if v != want {
+					errs <- fmt.Errorf("id=%d: v=%q, want %q", id, v, want)
+					return
+				}
+			}
+		}(g)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+
+	// Final integrity check after the storm.
+	var result string
+	if err := db.QueryRow(`PRAGMA integrity_check`).Scan(&result); err != nil {
+		t.Fatalf("integrity_check: %v", err)
+	}
+	if result != "ok" {
+		t.Errorf("integrity_check after concurrent storm = %q, want \"ok\"", result)
 	}
 }
 
@@ -437,7 +669,7 @@ func TestPageSizeMismatch_FailsLoudly(t *testing.T) {
 	t.Logf("page-size mismatch (expected): %v", err)
 }
 
-// TestSHM_StaysPlaintext pins encryptedOpenFlags' deliberate omission
+// TestSHM_StaysPlaintext pins fileKindFor's deliberate omission
 // of SQLITE_OPEN_MAIN_DB's -shm companion. The -shm file is a memory-
 // mapped WAL index (no row data), accessed via xShmMap rather than
 // xRead/xWrite, and SQLite expects to find specific magic bytes at
@@ -535,6 +767,46 @@ func TestIntegrityCheck(t *testing.T) {
 	}
 	if result != "ok" {
 		t.Errorf("integrity_check = %q, want \"ok\"", result)
+	}
+}
+
+// TestNew_DefensiveCopiesKey pins the Options.Key docstring
+// guarantee: callers are free to zero or mutate the slice as soon as
+// New returns. lukechampine.com/adiantum's chachaStream keeps a
+// reference to its input key and dereferences it on every Encrypt
+// call, so without the defensive copy this test would fail
+// catastrophically — every read/write after the zero would scramble.
+func TestNew_DefensiveCopiesKey(t *testing.T) {
+	key := freshKey(50)
+	name, fs, err := crypto.New(crypto.Options{Key: key})
+	if err != nil {
+		t.Fatalf("crypto.New: %v", err)
+	}
+	t.Cleanup(func() { _ = fs.Close() })
+
+	// Zero the caller's key before any I/O. If New took the key by
+	// reference, subsequent operations would silently corrupt.
+	for i := range key {
+		key[i] = 0
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "defcopy.db")
+	dsn := fmt.Sprintf("file:%s?vfs=%s", dbPath, name)
+	db, _ := sql.Open("sqlite", dsn)
+	t.Cleanup(func() { _ = db.Close() })
+
+	if _, err := db.Exec(`CREATE TABLE t (v TEXT)`); err != nil {
+		t.Fatalf("CREATE after key zero: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO t VALUES ('survived')`); err != nil {
+		t.Fatalf("INSERT after key zero: %v", err)
+	}
+	var v string
+	if err := db.QueryRow(`SELECT v FROM t`).Scan(&v); err != nil {
+		t.Fatalf("SELECT after key zero: %v", err)
+	}
+	if v != "survived" {
+		t.Errorf("v=%q, want 'survived'", v)
 	}
 }
 

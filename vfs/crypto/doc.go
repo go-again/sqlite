@@ -12,6 +12,23 @@
 // wide-block construction from lukechampine.com/adiantum) or
 // AES-XTS-256 (64-byte key = two AES-256 keys, golang.org/x/crypto/xts).
 // Both modes encrypt in place; on-disk file size matches plaintext.
+// Pick AES-XTS only when a compliance regime requires AES; otherwise
+// Adiantum is the better default — wide-block (full-page corruption
+// on tamper), faster on CPUs without AES-NI, no AES side-channel
+// surface to reason about.
+//
+// # Lifecycle
+//
+// Call [New] once per process per encryption configuration. The
+// returned *FS owns the cipher state and an underlying libc TLS;
+// call [FS.Close] only AFTER every sql.DB / sql.Conn that opened
+// against this VFS has been closed. Closing the VFS while a query
+// is still in flight is undefined behavior — the io-method
+// trampolines hold a reference to the cipher that the GC won't
+// reclaim until the FS itself becomes unreachable, but the unregister
+// call invalidates the VFS slot in SQLite's global table, so the next
+// trampoline invocation against this VFS will see corrupted struct
+// pointers. Order shutdowns: drain DBs first, then Close the FS.
 //
 // # Crypto contract
 //
@@ -22,15 +39,33 @@
 //     flip ciphertext bytes; SQLite sees corruption (page checksum
 //     failure, header parse error). Pair with disk-level integrity
 //     (LUKS dm-integrity, ZFS checksums) if active tampering is in scope.
-//   - Cross-file substitution IS detected at the cipher level: the
-//     tweak includes the file kind (main DB / journal / WAL / temp /
-//     sub-journal), so a ciphertext block from one file kind does not
-//     decrypt cleanly when copied into another at the same offset.
-//     See cipher.go's file-kind enum for the wire values.
+//   - Cross-file substitution between distinct file KINDS is detected:
+//     the tweak includes the file-kind tag (main DB / journal / WAL /
+//     temp / sub-journal), so a ciphertext block from one file kind
+//     does not decrypt cleanly when copied into another at the same
+//     offset. See cipher.go's file-kind enum for the wire values.
+//   - Within-kind substitution between distinct files of the SAME
+//     kind is undetected. SQLite can open multiple concurrent temp
+//     DBs / sub-journals (e.g. during a query with multiple sort
+//     spills), all sharing the same kind byte and the same key — so
+//     a tweak `(kind, pageNum)` repeats across the temp-class files.
+//     Cross-temp swap by an offline attacker decrypts cleanly. Within
+//     the engine SQLite is strict about file-handle identity, so
+//     runtime confusion is not a concern; this matters only for
+//     forensic-byte-swap attackers.
 //   - Within-file replay IS undetected: an older `-wal` byte range
 //     swapped over a newer one at the same offset (same file kind,
 //     same page number) decrypts cleanly. Inherent to length-
 //     preserving disk encryption with no authenticated counter.
+//   - Adiantum vs AES-XTS corruption granularity: a single ciphertext
+//     bit flip under Adiantum (wide-block) garbles the entire
+//     decrypted page — SQLite's header parser fails fast. The same
+//     flip under AES-XTS (narrow 16-byte blocks) corrupts only the
+//     affected XTS block; the rest of the page decrypts intact and
+//     may be accepted by SQLite if the corruption lands outside the
+//     header / checksum region. Pair AES-XTS with disk-level
+//     integrity (LUKS dm-integrity, ZFS) if active tampering is in
+//     scope.
 //   - Key is the caller's problem. We treat the byte slice as opaque
 //     and derive nothing from it. Use argon2id / scrypt for passphrase
 //     derivation; we don't ship one.
@@ -56,7 +91,7 @@
 // every block looks like uniform random data to an attacker without
 // the key. The tweak fed to the cipher mixes the page number with a
 // 1-byte file-kind tag (main DB / journal / WAL / temp / sub-journal;
-// see the fileKind* constants in cipher.go) so a ciphertext page
+// see the FileKind* constants in cipher.go) so a ciphertext page
 // from -wal does not decrypt to the same plaintext when copied into
 // the main DB at the same offset.
 //
@@ -85,6 +120,24 @@
 //     [Options.Key] as opaque material; how you get it there and
 //     dispose of it is your concern.
 //
+// # Key rotation recipe
+//
+// We don't ship a rotation API because rotation is a row-level
+// operation under the covers, not a cipher one. The portable recipe:
+//
+//  1. Open the source DB with [New] using the old key.
+//  2. Open a fresh destination DB with [New] using the new key.
+//  3. Stream rows from source to destination (`INSERT INTO dest …
+//     SELECT … FROM source`, in a single transaction per table, or
+//     via the standard sqlite3 `.dump` / `.read` if you prefer SQL).
+//  4. Close both, atomically rename the destination over the source
+//     (`os.Rename` is atomic on the same filesystem).
+//  5. Have all consumers reopen with the new key.
+//
+// This pattern also works for cipher rotation (e.g. Adiantum →
+// AES-XTS) and for migrating from a pre-format-break encrypted DB
+// to the current file-kind-tweaked format.
+//
 // # Observability
 //
 // Pass a [Recorder] via [Options.Recorder] to receive one event per
@@ -108,6 +161,7 @@
 // # See also
 //
 //   - examples/vfs-crypto — runnable end-to-end demo.
-//   - plan-vfs-crypto.md — architecture rationale and phase plan.
-//   - plan-audit-vfs-crypto.md — outstanding follow-up work.
+//   - [github.com/go-again/sqlite/vec] / [github.com/go-again/sqlite/fts]
+//     — both compose with this VFS transparently. The same Recorder-
+//     shaped observability surface is parallel across all three.
 package crypto

@@ -34,7 +34,7 @@ type perFileState struct {
 
 	// fileKind tags the file as main DB / journal / WAL / temp /
 	// sub-journal so the cipher can domain-separate the tweak. See
-	// cipher.go's fileKind* constants. Zero means "unencrypted" and
+	// cipher.go's FileKind* constants. Zero means "unencrypted" and
 	// pairs with fsToken == 0.
 	fileKind byte
 
@@ -146,17 +146,17 @@ func xOpenTrampoline(tls *libc.TLS, pVfs, zName, pFile uintptr, flags int32, pOu
 func fileKindFor(flags int32) byte {
 	switch {
 	case flags&sqlite3.SQLITE_OPEN_MAIN_DB != 0:
-		return fileKindMainDB
+		return FileKindMainDB
 	case flags&sqlite3.SQLITE_OPEN_MAIN_JOURNAL != 0:
-		return fileKindMainJournal
+		return FileKindMainJournal
 	case flags&sqlite3.SQLITE_OPEN_WAL != 0:
-		return fileKindWAL
+		return FileKindWAL
 	case flags&sqlite3.SQLITE_OPEN_TEMP_DB != 0:
-		return fileKindTempDB
+		return FileKindTempDB
 	case flags&sqlite3.SQLITE_OPEN_TEMP_JOURNAL != 0:
-		return fileKindTempJournal
+		return FileKindTempJournal
 	case flags&sqlite3.SQLITE_OPEN_SUBJOURNAL != 0:
-		return fileKindSubJournal
+		return FileKindSubJournal
 	default:
 		return 0
 	}

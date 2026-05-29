@@ -352,6 +352,9 @@ Each sub-package has a small reusable fixture function in its test files:
 - `gorm/integration_test.go::openInMemory` returns a gorm DB
 - `vec/table_test.go::openDB` + `fixture` corpus + `fixtureQuery`
 - `fts/fts_test.go::openDB` + `fixtureCorpus`
+- `vfs/crypto/crypto_test.go::freshKey(i)` + `integration_test.go::openEncryptedDB(t, dir, k)`
+- `tests/sql/helper_test.go::openDB` for SQL-conformance lane
+- `fusion/` has no fixture — pure Go, no DB involved.
 
 Reuse these rather than inventing new fixtures.
 
@@ -415,6 +418,12 @@ Ask first: **does the typed API or the raw SQL path own this?**
 - **Observability** sits as `Wrap(...)` decorators in `vec/` and `fts/`;
   the parallel pattern there is intentional (the `Recorder` interfaces
   differ per sub-package because the recorded fields differ).
+  `vfs/crypto/` diverges shape-wise — `Options.Recorder` is set at
+  registration time (VFS registers once at boot, not per-handle), and
+  the method signatures drop `ctx` and use `rc int32` instead of `err`
+  because the io-method trampolines fire from transpiled C with no
+  Go-side ctx in scope and SQLite returns result codes. Divergence
+  documented in `vfs/crypto/observability.go::Recorder`.
 
 Always:
 1. Add tests in the same package's `*_test.go`. Prefer integration tests

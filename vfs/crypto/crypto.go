@@ -29,7 +29,9 @@ const (
 // Options configures [New].
 type Options struct {
 	// Key is the raw cipher key. Length depends on Cipher: 32 bytes
-	// for Adiantum, 64 bytes for AES-XTS-256.
+	// for Adiantum, 64 bytes for AES-XTS-256. New() takes a
+	// defensive copy, so the caller is free to zero or reuse the
+	// slice as soon as New returns.
 	Key []byte
 
 	// Cipher picks the mode. Defaults to Adiantum.
@@ -104,9 +106,9 @@ func unregisterFS(tok uintptr) {
 // New registers an encryption VFS and returns its name (slot into a
 // DSN as `?vfs=<name>`), a handle for cleanup, and any error.
 //
-// Each call registers a distinct VFS — safe to call concurrently.
-// Adiantum is the only mode currently wired; passing [AESXTS]
-// returns an error until Phase 3 lands.
+// Each call registers a distinct VFS. Calls from multiple goroutines
+// are safe — a package-level mutex serializes them. Adiantum
+// (default) and AES-XTS-256 are both supported.
 func New(opts Options) (name string, fs *FS, err error) {
 	pageSize := opts.PageSize
 	if pageSize == 0 {
@@ -193,6 +195,12 @@ func New(opts Options) (name string, fs *FS, err error) {
 	return name, fs, nil
 }
 
+// Name returns the registered VFS name, the same string returned as
+// the first value from [New]. Useful when a caller wants to thread
+// just the *FS around (e.g. via dependency injection) and build the
+// DSN at the point of sql.Open.
+func (f *FS) Name() string { return f.name }
+
 // Close unregisters the VFS and frees its libc allocations. Idempotent.
 func (f *FS) Close() error {
 	if f.closed.Swap(true) {
@@ -206,6 +214,15 @@ func (f *FS) Close() error {
 	libc.Xfree(f.tls, f.cvfs)
 	libc.Xfree(f.tls, f.cname)
 	f.tls.Close()
+	// NOTE: we deliberately do NOT zero out f.cipher here. A previous
+	// version did, motivated by "shorten the GC window before the key
+	// bytes become reclaimable", but it opened a race: a trampoline
+	// that resolved its *FS via fsFor() just before Close ran would
+	// later dereference fs.cipher inside readEncrypted / writeEncrypted
+	// and hit a nil-receiver panic. The threat model already excludes
+	// live-memory attacks (see doc.go); the GC reclaims the cipher
+	// (and the defensive-copied key inside it) when the *FS itself
+	// becomes unreachable, which is good enough.
 	if rc != sqlite3.SQLITE_OK {
 		return fmt.Errorf("crypto: Xsqlite3_vfs_unregister rc=%d", rc)
 	}

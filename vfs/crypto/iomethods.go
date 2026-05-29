@@ -47,8 +47,9 @@ func putScratch(bp *[]byte) {
 // iomethods.go — the wrapping io-method trampolines.
 //
 // Encryption-flavored methods (xRead, xWrite, xTruncate) consult the
-// per-file fsToken: if zero, the file is unencrypted (Phase 2 will
-// extend coverage) and the call forwards 1:1 to the default methods.
+// per-file fsToken: if zero, the file is one fileKindFor returns 0
+// for (only the WAL `-shm` index in practice today) and the call
+// forwards 1:1 to the default methods.
 // All other methods always forward unchanged — locking, sync, file
 // control, sector size are orthogonal to crypto.
 
@@ -304,6 +305,10 @@ func callXFileSize(tls *libc.TLS, fp, pFile, pSize uintptr) int32 {
 	return asFunc[func(*libc.TLS, uintptr, uintptr) int32](fp)(tls, pFile, pSize)
 }
 
+// callXLock is shared by both xLock and xUnlock trampolines: the two
+// C signatures are identical (tls, pFile, level → int32) so one
+// helper covers both. xCheckReservedLock has a different shape
+// (tls, pFile, *int → int32) and uses callXFileSize.
 func callXLock(tls *libc.TLS, fp, pFile uintptr, level int32) int32 {
 	return asFunc[func(*libc.TLS, uintptr, int32) int32](fp)(tls, pFile, level)
 }

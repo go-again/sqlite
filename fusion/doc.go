@@ -56,4 +56,11 @@
 // element range; the merged output is bounded by N+M. The package
 // makes no claim about scaling to millions of input elements per
 // slice — pre-truncate via WithLimit on the vec/fts side first.
+//
+// # See also
+//
+//   - [github.com/go-again/sqlite/vec.KNNSlice] / [github.com/go-again/sqlite/fts.SearchSlice]
+//     — the typical input producers.
+//   - examples/fusion-hybrid-search — runnable end-to-end demo that
+//     wires a vec.KNN ranking and an fts.Search ranking through RRF2.
 package fusion
