@@ -8,6 +8,8 @@ import (
 
 	"modernc.org/libc"
 	sqlite3 "modernc.org/sqlite/lib"
+
+	"github.com/go-again/sqlite/internal/cabi"
 )
 
 // Cipher selects the encryption mode.
@@ -38,6 +40,11 @@ type Options struct {
 	// created with a non-default page size. Must be a power of two
 	// between 512 and 65536 inclusive.
 	PageSize int
+
+	// Recorder, if non-nil, receives one OnRead / OnWrite event per
+	// xRead / xWrite trampoline invocation. See [Recorder] and
+	// [NewSlogRecorder]. Nil means no recording.
+	Recorder Recorder
 }
 
 // FS is a registered encryption VFS. Each [New] returns a distinct
@@ -49,7 +56,8 @@ type FS struct {
 	tls      *libc.TLS
 	cipher   pageCipher
 	pageSize int32
-	token    uintptr // registry handle, stored in pVfs->FpAppData
+	recorder Recorder // optional; nil = no observability
+	token    uintptr  // registry handle, stored in pVfs->FpAppData
 	closed   atomic.Bool
 }
 
@@ -145,6 +153,7 @@ func New(opts Options) (name string, fs *FS, err error) {
 		tls:      tls,
 		cipher:   cipher,
 		pageSize: int32(pageSize),
+		recorder: opts.Recorder,
 	}
 	fs.token = registerFS(fs)
 
@@ -156,7 +165,7 @@ func New(opts Options) (name string, fs *FS, err error) {
 		FpNext:             0,
 		FzName:             cname,
 		FpAppData:          fs.token,
-		FxOpen:             cFuncPointer(xOpenTrampoline),
+		FxOpen:             cabi.FuncPointer(xOpenTrampoline),
 		FxDelete:           defaultVfs.FxDelete,
 		FxAccess:           defaultVfs.FxAccess,
 		FxFullPathname:     defaultVfs.FxFullPathname,

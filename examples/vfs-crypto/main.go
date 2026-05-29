@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -27,7 +28,14 @@ func main() {
 
 	// Register the encrypting VFS. New returns a name to slot into
 	// the DSN. The *FS handle owns libc allocations; defer Close.
-	name, fs, err := crypto.New(crypto.Options{Key: key})
+	// Recorder is optional; the slog one below emits a structured
+	// event per io-method invocation tagged with the file kind
+	// (main_db / journal / wal / temp / sub_journal).
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	name, fs, err := crypto.New(crypto.Options{
+		Key:      key,
+		Recorder: crypto.NewSlogRecorder(logger),
+	})
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -115,4 +115,8 @@
 //     the gorm bridge.
 //   - docs/coverage-vec.md — every documented sqlite-vec feature
 //     with its current status (typed / raw / inherited).
+//   - github.com/go-again/sqlite/vfs/crypto — pure-Go encryption at
+//     rest. Composes with vec0 — encrypted vector databases work
+//     end-to-end through the same wrapping VFS. Same Recorder-shaped
+//     observability surface, opted in via Options.Recorder.
 package vec

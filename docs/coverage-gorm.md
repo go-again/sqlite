@@ -160,8 +160,8 @@ gap.
 ## Upstream suite
 
 Beyond the per-method matrix above, the full `gorm.io/gorm/tests`
-integration suite (the "12k tests" colloquially) runs against this
-dialector via a thin shim, pinned to the same gorm version go.mod
+integration suite runs against this dialector via a thin shim,
+pinned to the same gorm version go.mod
 depends on. The setup, reproduction recipe, and reasoning for each
 shim flag live in [gorm-upstream.md](gorm-upstream.md). The same
 recipe is enforced by the `gorm-upstream` CI job.

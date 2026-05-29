@@ -41,8 +41,10 @@
 //	ftsKeys := make([]int64, len(ftsHits))
 //	for i, h := range ftsHits { ftsKeys[i] = h.Key }
 //
-//	// Fuse and take the top 20.
-//	merged := fusion.RRF(vecKeys, ftsKeys, fusion.WithLimit(20))
+//	// Fuse and take the top 20. RRF2 is the convenience for the
+//	// two-slice case; the variadic RRF([][]K{a, b, c, ...}, ...) form
+//	// is there when you have three or more rankers.
+//	merged := fusion.RRF2(vecKeys, ftsKeys, fusion.WithLimit(20))
 //	for _, r := range merged {
 //	    fmt.Println(r.Key, r.Score)
 //	}

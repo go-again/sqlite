@@ -26,6 +26,8 @@ import (
 	"modernc.org/libc"
 	"modernc.org/libc/sys/types"
 	sqlite3 "modernc.org/sqlite/lib"
+
+	"github.com/go-again/sqlite/internal/cabi"
 )
 
 var (
@@ -812,21 +814,11 @@ func makeAggregate(tls *libc.TLS, ctx uintptr) (AggregateFunction, uintptr) {
 	return f, *aggCtx
 }
 
-// cFuncPointer converts a function defined by a function declaration to a C pointer.
-// The result of using cFuncPointer on closures is undefined.
-func cFuncPointer[T any](f T) uintptr {
-	// This assumes the memory representation described in https://golang.org/s/go11func.
-	//
-	// cFuncPointer does its conversion by doing the following in order:
-	// 1) Create a Go struct containing a pointer to a pointer to
-	//    the function. It is assumed that the pointer to the function will be
-	//    stored in the read-only data section and thus will not move.
-	// 2) Convert the pointer to the Go struct to a pointer to uintptr through
-	//    unsafe.Pointer. This is permitted via Rule #1 of unsafe.Pointer.
-	// 3) Dereference the pointer to uintptr to obtain the function value as a
-	//    uintptr. This is safe as long as function values are passed as pointers.
-	return *(*uintptr)(unsafe.Pointer(&struct{ f T }{f}))
-}
+// cFuncPointer is a local alias for internal/cabi.FuncPointer kept so
+// existing call sites in this package don't have to change. Both root
+// and vfs/crypto share the implementation through that internal
+// package; touching either should touch the other.
+func cFuncPointer[T any](f T) uintptr { return cabi.FuncPointer(f) }
 
 func funcTrampoline(tls *libc.TLS, ctx uintptr, argc int32, argv uintptr) {
 	id := sqlite3.Xsqlite3_user_data(tls, ctx)

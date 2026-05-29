@@ -7,6 +7,8 @@ import (
 
 	"modernc.org/libc"
 	sqlite3 "modernc.org/sqlite/lib"
+
+	"github.com/go-again/sqlite/internal/cabi"
 )
 
 // perFileState lives at the tail of each Tsqlite3_file allocation
@@ -65,18 +67,18 @@ func initFromDefault(def *sqlite3.Tsqlite3_vfs) {
 	defaultVfsPtr.Store(uintptr(unsafe.Pointer(def)))
 	ourIoMethods = sqlite3.Tsqlite3_io_methods{
 		FiVersion:               1,
-		FxClose:                 cFuncPointer(xCloseTrampoline),
-		FxRead:                  cFuncPointer(xReadTrampoline),
-		FxWrite:                 cFuncPointer(xWriteTrampoline),
-		FxTruncate:              cFuncPointer(xTruncateTrampoline),
-		FxSync:                  cFuncPointer(xSyncTrampoline),
-		FxFileSize:              cFuncPointer(xFileSizeTrampoline),
-		FxLock:                  cFuncPointer(xLockTrampoline),
-		FxUnlock:                cFuncPointer(xUnlockTrampoline),
-		FxCheckReservedLock:     cFuncPointer(xCheckReservedLockTrampoline),
-		FxFileControl:           cFuncPointer(xFileControlTrampoline),
-		FxSectorSize:            cFuncPointer(xSectorSizeTrampoline),
-		FxDeviceCharacteristics: cFuncPointer(xDeviceCharacteristicsTrampoline),
+		FxClose:                 cabi.FuncPointer(xCloseTrampoline),
+		FxRead:                  cabi.FuncPointer(xReadTrampoline),
+		FxWrite:                 cabi.FuncPointer(xWriteTrampoline),
+		FxTruncate:              cabi.FuncPointer(xTruncateTrampoline),
+		FxSync:                  cabi.FuncPointer(xSyncTrampoline),
+		FxFileSize:              cabi.FuncPointer(xFileSizeTrampoline),
+		FxLock:                  cabi.FuncPointer(xLockTrampoline),
+		FxUnlock:                cabi.FuncPointer(xUnlockTrampoline),
+		FxCheckReservedLock:     cabi.FuncPointer(xCheckReservedLockTrampoline),
+		FxFileControl:           cabi.FuncPointer(xFileControlTrampoline),
+		FxSectorSize:            cabi.FuncPointer(xSectorSizeTrampoline),
+		FxDeviceCharacteristics: cabi.FuncPointer(xDeviceCharacteristicsTrampoline),
 	}
 	ourIoMethodsPtr.Store(uintptr(unsafe.Pointer(&ourIoMethods)))
 }
@@ -161,6 +163,5 @@ func fileKindFor(flags int32) byte {
 }
 
 func callXOpen(tls *libc.TLS, fp, pVfs, zName, pFile uintptr, flags int32, pOutFlags uintptr) int32 {
-	return (*(*func(*libc.TLS, uintptr, uintptr, uintptr, int32, uintptr) int32)(
-		unsafe.Pointer(&struct{ uintptr }{fp})))(tls, pVfs, zName, pFile, flags, pOutFlags)
+	return asFunc[func(*libc.TLS, uintptr, uintptr, uintptr, int32, uintptr) int32](fp)(tls, pVfs, zName, pFile, flags, pOutFlags)
 }

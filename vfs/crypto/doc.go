@@ -49,6 +49,27 @@
 // transpiling may require fixing field assignments in crypto.go's
 // [New].
 //
+// # On-disk format
+//
+// Length-preserving page-level encryption. No header, no magic bytes,
+// no per-page IV or MAC: the on-disk byte count equals plaintext, and
+// every block looks like uniform random data to an attacker without
+// the key. The tweak fed to the cipher mixes the page number with a
+// 1-byte file-kind tag (main DB / journal / WAL / temp / sub-journal;
+// see the fileKind* constants in cipher.go) so a ciphertext page
+// from -wal does not decrypt to the same plaintext when copied into
+// the main DB at the same offset.
+//
+// The file-kind byte is part of the on-disk format. Databases
+// written by a build that predates the file-kind tweak (the
+// pre-v0.5 development series before this format break landed) are
+// not readable by this package, and vice versa. There's no version
+// banner in the file itself — SQLite reports "file is not a
+// database" when the cipher decrypts garbage. If you have an
+// archived pre-format-break encrypted DB, decrypt it with the older
+// package version into plaintext first and re-encrypt with the
+// current one.
+//
 // # Threat model boundaries
 //
 // In scope:
@@ -63,6 +84,26 @@
 //   - Key derivation / rotation / storage. The package treats
 //     [Options.Key] as opaque material; how you get it there and
 //     dispose of it is your concern.
+//
+// # Observability
+//
+// Pass a [Recorder] via [Options.Recorder] to receive one event per
+// xRead / xWrite trampoline invocation, tagged with the file kind so
+// dashboards can split metrics per main-DB / journal / WAL / temp.
+// [NewSlogRecorder] is the built-in recorder that emits one slog
+// record per op (Debug-level for normal-path ops and SHORT_READ;
+// Warn-level for anything else). [FileKindName] turns the file-kind
+// byte into a stable human-readable string for log/metric labels.
+//
+// Shape difference from [github.com/go-again/sqlite/vec.Recorder] and
+// [github.com/go-again/sqlite/fts.Recorder]: those packages expose
+// Recorder via a `Wrap(table, WithRecorder(...))` decorator because
+// callers wrap individual Table / Index handles. vfs/crypto registers
+// a VFS once at boot, so Recorder lives on Options instead. The
+// Recorder method shape also drops the ctx argument (VFS trampolines
+// fire from transpiled C with no Go-side ctx in scope) and surfaces
+// an int32 rc instead of a Go error (SQLite returns result codes,
+// not Go errors). Both differences are intentional, not divergence.
 //
 // # See also
 //

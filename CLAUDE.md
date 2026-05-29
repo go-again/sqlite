@@ -149,12 +149,16 @@ github.com/go-again/sqlite/
 │   ├── doc.go
 │   ├── vfs.go              # thin re-export of modernc.org/sqlite/vfs (fs.FS → VFS)
 │   └── crypto/             # pure-Go encryption-at-rest VFS
-│       ├── doc.go          # crypto contract + threat model + drift discipline
+│       ├── doc.go          # crypto contract + threat model + drift discipline + observability
 │       ├── crypto.go       # New(), Options, Cipher constants, *FS handle
 │       ├── vfs.go          # registration, xOpen, perFileState, struct layout
-│       ├── iomethods.go    # 12 io-method trampolines (xRead/xWrite encrypt page-aligned spans)
-│       ├── cipher.go       # pageCipher interface + Adiantum/AESXTS bindings
-│       └── funcptr.go      # local cFuncPointer dup (vfs/crypto stays self-contained)
+│       ├── iomethods.go    # 12 io-method trampolines + sync.Pool scratch
+│       ├── cipher.go       # pageCipher interface + Adiantum/AESXTS bindings + file-kind tweak
+│       └── observability.go # Recorder interface, NewSlogRecorder, FileKindName
+│
+├── internal/
+│   └── cabi/               # shared Go↔C ABI helpers (only this module can import)
+│       └── funcptr.go      # FuncPointer[T]: producer side of the modernc-trampoline trick
 │
 ├── tests/
 │   └── sql/                # SQL conformance suite (per SQLite Language Reference)
@@ -218,6 +222,20 @@ The forked wrapper does this everywhere. `go vet` flags it as `unsafeptr`;
 we silence the warning via `-unsafeptr=false` (justfile/CI/`.golangci.yml`).
 **Do not** try to "fix" these casts. The pattern is the contract for
 talking to `modernc.org/sqlite/lib`.
+
+The producer-side dance — turning a Go function value into a uintptr
+SQLite can store in a function-pointer slot and later invoke — is
+consolidated at `internal/cabi/FuncPointer[T]` (`internal/cabi/funcptr.go`).
+`sqlite.go`'s `cFuncPointer` is a thin generic alias delegating there
+so existing call sites don't churn. Both root and `vfs/crypto/` consume
+the helper; touching one means touching the other. The Go runtime's
+function-value memory layout (see https://golang.org/s/go11func) is the
+unstated assumption — if a Go release ever changes it, the cabi
+helper is the single point of repair.
+
+The consumer side (calling a stored uintptr back from Go) lives at
+`vfs/crypto/iomethods.go::asFunc[F]`. No other package needs it today
+so it stays local; promote it to cabi if a third consumer appears.
 
 **The same coupling extends to `vfs/crypto/`.** That sub-package reaches
 into the same lib-level exported struct types (`Tsqlite3_vfs`,
@@ -457,6 +475,9 @@ let `go mod tidy` resolve the transitive set.
 | How does a DSN flag get translated? | `dsn.go::translateMattnDSN` |
 | How does `RegisterFunc` work? | `compat_register.go::RegisterFunc` and `compat_convert.go` |
 | Where are trampolines from C callbacks to Go? | `hooks.go`, `pre_update_hook.go`, `vtab.go` |
+| Producer side of the Go→C function-pointer dance? | `internal/cabi/funcptr.go::FuncPointer` (root + vfs/crypto delegate here) |
+| Consumer side (calling a stored uintptr back from Go)? | `vfs/crypto/iomethods.go::asFunc[F]` (local; promote to cabi if a second consumer arrives) |
+| Where does encryption-at-rest live? | `vfs/crypto/`, see also `vfs/crypto/doc.go` for the on-disk format + threat model |
 | What's the prepared-statement cache? | `stmt_cache.go` + the `stmts` field on `conn` |
 | Where's the gorm Dialector? | `gorm/sqlite.go::Dialector` |
 | Where does AutoMigrate logic live? | `gorm/migrator.go::recreateTable` (DDL-parse → mutate → CREATE-INSERT-DROP-RENAME) |

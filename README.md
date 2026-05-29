@@ -312,7 +312,7 @@ defer fs.Close()
 db, _ := sql.Open("sqlite", "file:secret.db?vfs="+name)
 ```
 
-Pure-Go page-level encryption — Adiantum (default, 32-byte key) or AES-XTS-256 (64-byte key). The main DB file, rollback journal, WAL frames, and temp files are all encrypted; the WAL `-shm` index stays plaintext (it's memory-mapped, not disk-resident in practice). No SQLCipher format compatibility, no MAC — confidentiality only. See [`examples/vfs-crypto/`](examples/vfs-crypto/main.go) and [`vfs/crypto/doc.go`](vfs/crypto/doc.go).
+Pure-Go page-level encryption — Adiantum (default, 32-byte key) or AES-XTS-256 (64-byte key). The main DB file, rollback journal, WAL frames, and temp files are all encrypted; the WAL `-shm` index stays plaintext (it's memory-mapped, not disk-resident in practice). No SQLCipher format compatibility, no MAC — confidentiality only. Add `Options.Recorder = crypto.NewSlogRecorder(slog.Default())` (or any custom `crypto.Recorder`) for per-IO observability. See [`examples/vfs-crypto/`](examples/vfs-crypto/main.go) and [`vfs/crypto/doc.go`](vfs/crypto/doc.go).
 
 ## Migration table
 

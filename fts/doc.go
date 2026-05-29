@@ -89,4 +89,8 @@
 //     gorm bridge.
 //   - docs/coverage-fts.md — every documented FTS5 feature with its
 //     current status (typed / raw / inherited).
+//   - github.com/go-again/sqlite/vfs/crypto — pure-Go encryption at
+//     rest. Composes with FTS5 — encrypted full-text databases work
+//     end-to-end through the same wrapping VFS. Same Recorder-shaped
+//     observability surface, opted in via Options.Recorder.
 package fts

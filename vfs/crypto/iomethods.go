@@ -1,11 +1,48 @@
 package crypto
 
 import (
+	"sync"
+	"time"
 	"unsafe"
 
 	"modernc.org/libc"
 	sqlite3 "modernc.org/sqlite/lib"
 )
+
+// scratchPool reuses encrypt/decrypt scratch buffers across calls.
+// xRead and xWrite allocate pageSize-multiples per invocation; on a
+// hot SELECT path that's a measurable GC source. We pool by capacity
+// rather than by exact size — most reads are a single page, so the
+// pool effectively caches one pageSize-sized buffer per goroutine.
+//
+// The pool stores *[]byte to keep the type alloc-free; clearing the
+// length before put lets the next caller resize without resetting
+// elements (encryption overwrites anyway).
+var scratchPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 0, 4096)
+		return &b
+	},
+}
+
+func getScratch(n int64) *[]byte {
+	bp := scratchPool.Get().(*[]byte)
+	if int64(cap(*bp)) < n {
+		// Pool's buffer was too small. Return it to the pool so the
+		// next caller can reuse it instead of dropping it on the
+		// floor — otherwise repeated grow-paths drain the pool.
+		scratchPool.Put(bp)
+		buf := make([]byte, n)
+		return &buf
+	}
+	*bp = (*bp)[:n]
+	return bp
+}
+
+func putScratch(bp *[]byte) {
+	*bp = (*bp)[:0]
+	scratchPool.Put(bp)
+}
 
 // iomethods.go — the wrapping io-method trampolines.
 //
@@ -32,7 +69,15 @@ func xReadTrampoline(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.T
 	if fs == nil {
 		return callXRead(tls, defaultMethodsFor(pFile).FxRead, pFile, buf, amt, off)
 	}
-	return readEncrypted(tls, pFile, buf, amt, off, fs)
+	var start time.Time
+	if fs.recorder != nil {
+		start = time.Now()
+	}
+	rc := readEncrypted(tls, pFile, buf, amt, off, fs)
+	if fs.recorder != nil {
+		fs.recorder.OnRead(perFileStateOf(pFile).fileKind, int64(off), int64(amt), time.Since(start), rc)
+	}
+	return rc
 }
 
 // xWriteTrampoline writes `amt` bytes from `buf` at `off`. For
@@ -43,7 +88,15 @@ func xWriteTrampoline(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.
 	if fs == nil {
 		return callXWrite(tls, defaultMethodsFor(pFile).FxWrite, pFile, buf, amt, off)
 	}
-	return writeEncrypted(tls, pFile, buf, amt, off, fs)
+	var start time.Time
+	if fs.recorder != nil {
+		start = time.Now()
+	}
+	rc := writeEncrypted(tls, pFile, buf, amt, off, fs)
+	if fs.recorder != nil {
+		fs.recorder.OnWrite(perFileStateOf(pFile).fileKind, int64(off), int64(amt), time.Since(start), rc)
+	}
+	return rc
 }
 
 func xTruncateTrampoline(tls *libc.TLS, pFile uintptr, size sqlite3.Tsqlite3_int64) int32 {
@@ -55,7 +108,14 @@ func xTruncateTrampoline(tls *libc.TLS, pFile uintptr, size sqlite3.Tsqlite3_int
 }
 
 func xSyncTrampoline(tls *libc.TLS, pFile uintptr, flags int32) int32 {
-	return callXSync(tls, defaultMethodsFor(pFile).FxSync, pFile, flags)
+	fs := fsFor(pFile)
+	if fs == nil || fs.recorder == nil {
+		return callXSync(tls, defaultMethodsFor(pFile).FxSync, pFile, flags)
+	}
+	start := time.Now()
+	rc := callXSync(tls, defaultMethodsFor(pFile).FxSync, pFile, flags)
+	fs.recorder.OnSync(perFileStateOf(pFile).fileKind, time.Since(start), rc)
+	return rc
 }
 
 func xFileSizeTrampoline(tls *libc.TLS, pFile, pSize uintptr) int32 {
@@ -107,7 +167,9 @@ func readEncrypted(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Tsq
 	pageEnd := (int64(off) + int64(amt) + ps - 1) / ps * ps
 	span := pageEnd - pageStart
 
-	scratch := make([]byte, span)
+	bp := getScratch(span)
+	defer putScratch(bp)
+	scratch := *bp
 	scratchPtr := uintptr(unsafe.Pointer(&scratch[0]))
 	rc := callXRead(tls, defaultMethodsFor(pFile).FxRead, pFile, scratchPtr, int32(span), sqlite3.Tsqlite3_int64(pageStart))
 
@@ -150,7 +212,9 @@ func writeEncrypted(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Ts
 	pageEnd := (int64(off) + int64(amt) + ps - 1) / ps * ps
 	span := pageEnd - pageStart
 
-	scratch := make([]byte, span)
+	bp := getScratch(span)
+	defer putScratch(bp)
+	scratch := *bp
 	srcSlice := (*libc.RawMem)(unsafe.Pointer(buf))[:amt:amt]
 
 	if int64(off) == pageStart && int64(amt) == span {
@@ -195,49 +259,59 @@ func decryptSpan(fs *FS, span []byte, baseOffset int64, pageSize int64, kind byt
 	}
 }
 
-// --- Consumer-side function-pointer casts. One per distinct signature ---
+// --- Consumer-side function-pointer casts ---
+//
+// asFunc converts a uintptr (which the transpiled SQLite C code uses
+// to store a function pointer in struct slots like FxRead) into a
+// callable Go function value with the requested signature. Inverse
+// of cabi.FuncPointer.
+//
+// The pattern is the one modernc's transpiled code uses internally
+// (see _sqlite3OsRead in modernc.org/sqlite/lib for an example):
+// wrap the uintptr in a struct, take its address, cast through
+// unsafe.Pointer to a *func(...) of the right shape, and deref to
+// get the function value.
+//
+// Each call site below specializes asFunc on a distinct signature.
+// One generic helper instead of 9 verbatim casts; the read-out at
+// the call site names what's being invoked, so the loss of "one
+// function per signature" doc value is small.
+func asFunc[F any](fp uintptr) F {
+	return *(*F)(unsafe.Pointer(&struct{ uintptr }{fp}))
+}
 
 func callXClose(tls *libc.TLS, fp, pFile uintptr) int32 {
-	return (*(*func(*libc.TLS, uintptr) int32)(
-		unsafe.Pointer(&struct{ uintptr }{fp})))(tls, pFile)
+	return asFunc[func(*libc.TLS, uintptr) int32](fp)(tls, pFile)
 }
 
 func callXRead(tls *libc.TLS, fp, pFile, buf uintptr, amt int32, off sqlite3.Tsqlite3_int64) int32 {
-	return (*(*func(*libc.TLS, uintptr, uintptr, int32, sqlite3.Tsqlite3_int64) int32)(
-		unsafe.Pointer(&struct{ uintptr }{fp})))(tls, pFile, buf, amt, off)
+	return asFunc[func(*libc.TLS, uintptr, uintptr, int32, sqlite3.Tsqlite3_int64) int32](fp)(tls, pFile, buf, amt, off)
 }
 
 func callXWrite(tls *libc.TLS, fp, pFile, buf uintptr, amt int32, off sqlite3.Tsqlite3_int64) int32 {
-	return (*(*func(*libc.TLS, uintptr, uintptr, int32, sqlite3.Tsqlite3_int64) int32)(
-		unsafe.Pointer(&struct{ uintptr }{fp})))(tls, pFile, buf, amt, off)
+	return asFunc[func(*libc.TLS, uintptr, uintptr, int32, sqlite3.Tsqlite3_int64) int32](fp)(tls, pFile, buf, amt, off)
 }
 
 func callXTruncate(tls *libc.TLS, fp, pFile uintptr, size sqlite3.Tsqlite3_int64) int32 {
-	return (*(*func(*libc.TLS, uintptr, sqlite3.Tsqlite3_int64) int32)(
-		unsafe.Pointer(&struct{ uintptr }{fp})))(tls, pFile, size)
+	return asFunc[func(*libc.TLS, uintptr, sqlite3.Tsqlite3_int64) int32](fp)(tls, pFile, size)
 }
 
 func callXSync(tls *libc.TLS, fp, pFile uintptr, flags int32) int32 {
-	return (*(*func(*libc.TLS, uintptr, int32) int32)(
-		unsafe.Pointer(&struct{ uintptr }{fp})))(tls, pFile, flags)
+	return asFunc[func(*libc.TLS, uintptr, int32) int32](fp)(tls, pFile, flags)
 }
 
 func callXFileSize(tls *libc.TLS, fp, pFile, pSize uintptr) int32 {
-	return (*(*func(*libc.TLS, uintptr, uintptr) int32)(
-		unsafe.Pointer(&struct{ uintptr }{fp})))(tls, pFile, pSize)
+	return asFunc[func(*libc.TLS, uintptr, uintptr) int32](fp)(tls, pFile, pSize)
 }
 
 func callXLock(tls *libc.TLS, fp, pFile uintptr, level int32) int32 {
-	return (*(*func(*libc.TLS, uintptr, int32) int32)(
-		unsafe.Pointer(&struct{ uintptr }{fp})))(tls, pFile, level)
+	return asFunc[func(*libc.TLS, uintptr, int32) int32](fp)(tls, pFile, level)
 }
 
 func callXFileControl(tls *libc.TLS, fp, pFile uintptr, op int32, pArg uintptr) int32 {
-	return (*(*func(*libc.TLS, uintptr, int32, uintptr) int32)(
-		unsafe.Pointer(&struct{ uintptr }{fp})))(tls, pFile, op, pArg)
+	return asFunc[func(*libc.TLS, uintptr, int32, uintptr) int32](fp)(tls, pFile, op, pArg)
 }
 
 func callXSectorSize(tls *libc.TLS, fp, pFile uintptr) int32 {
-	return (*(*func(*libc.TLS, uintptr) int32)(
-		unsafe.Pointer(&struct{ uintptr }{fp})))(tls, pFile)
+	return asFunc[func(*libc.TLS, uintptr) int32](fp)(tls, pFile)
 }
