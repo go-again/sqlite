@@ -116,8 +116,14 @@
 //   - github.com/go-again/sqlite/fts/gorm — tag-driven FTS5 indexes
 //     wired into gorm models (external / in-table / contentless
 //     modes).
+//   - github.com/go-again/sqlite/fusion — rank-fusion helpers
+//     (Reciprocal Rank Fusion) for combining vec.KNN and fts.Search
+//     results into a single hybrid-search ranking.
 //   - github.com/go-again/sqlite/vfs — io/fs.FS-backed read-only
 //     databases (e.g. opening a SQLite file out of an embed.FS).
+//   - github.com/go-again/sqlite/vfs/crypto — pure-Go encryption-at-rest
+//     VFS (Adiantum or AES-XTS-256, transparent page-level encryption
+//     of main DB + journal + WAL + temp files).
 //
 // # SQLite version, libc pin
 //

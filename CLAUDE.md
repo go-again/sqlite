@@ -123,11 +123,11 @@ github.com/go-again/sqlite/
 │       ├── migrate.go      # Migrate / DropSidecar helpers + dim-mismatch warn
 │       ├── callbacks.go    # AfterCreate / AfterUpdate / AfterDelete sync
 │       ├── sidecar.go      # soft-delete batch INSERT (vec0 metadata column)
-│       └── knn.go          # KNN[T] / Result[T] / WithFilter / IncludeDeleted
+│       └── knn.go          # KNN[T] / KNNSQL[T] / Hit[T] / WithFilter / WithField / IncludeDeleted
 │
 ├── fts/                    # FTS5 typed API (generics-based)
 │   ├── doc.go
-│   ├── fts.go              # Index[K, V SQLType], Search, SearchSlice, Match, Attr
+│   ├── fts.go              # Index[K, V SQLType], Search, SearchSlice, Hit, Attr
 │   ├── options.go          # Options, External, Detail, SQLType constraint
 │   ├── tokenizer.go        # Unicode61, Ascii, Porter, Trigram
 │   ├── query.go            # Term/Phrase/Prefix/And/Or/Not/Near/Column/Raw + Build()
@@ -139,10 +139,22 @@ github.com/go-again/sqlite/
 │       ├── migrate.go      # Migrate / DropSidecar helpers (per-mode)
 │       ├── triggers.go     # AFTER INSERT/UPDATE/DELETE source triggers (external mode)
 │       ├── callbacks.go    # Row-level sync for in-table / contentless modes
-│       └── search.go       # Search[T] / Result[T] / WithRanking/Snippet/Highlight
+│       └── search.go       # Search[T] / SearchSQL[T] / Hit[T] / WithRanking/Snippet/Highlight
+│
+├── fusion/                 # rank-fusion helpers for hybrid search
+│   ├── doc.go
+│   └── rrf.go              # RRF / RRF2 — Reciprocal Rank Fusion (Cormack 2009)
 │
 ├── vfs/
-│   └── vfs.go              # thin re-export of modernc.org/sqlite/vfs (fs.FS → VFS)
+│   ├── doc.go
+│   ├── vfs.go              # thin re-export of modernc.org/sqlite/vfs (fs.FS → VFS)
+│   └── crypto/             # pure-Go encryption-at-rest VFS
+│       ├── doc.go          # crypto contract + threat model + drift discipline
+│       ├── crypto.go       # New(), Options, Cipher constants, *FS handle
+│       ├── vfs.go          # registration, xOpen, perFileState, struct layout
+│       ├── iomethods.go    # 12 io-method trampolines (xRead/xWrite encrypt page-aligned spans)
+│       ├── cipher.go       # pageCipher interface + Adiantum/AESXTS bindings
+│       └── funcptr.go      # local cFuncPointer dup (vfs/crypto stays self-contained)
 │
 ├── tests/
 │   └── sql/                # SQL conformance suite (per SQLite Language Reference)
@@ -158,6 +170,9 @@ github.com/go-again/sqlite/
     ├── gorm-fts-tagged/    # gorm + fts via fts/gorm tag-driven plugin
     ├── vec-search/         # typed vec.Table
     ├── fts-search/         # typed fts.Index
+    ├── window-function/    # Conn.RegisterWindowFunction demo
+    ├── fusion-hybrid-search/ # vec.KNN + fts.Search fused via fusion.RRF2
+    ├── vfs-crypto/         # pure-Go encryption-at-rest VFS (Adiantum / AES-XTS-256)
     └── vfs-embed/          # bundling a DB inside a fs.FS
 ```
 
@@ -203,6 +218,15 @@ The forked wrapper does this everywhere. `go vet` flags it as `unsafeptr`;
 we silence the warning via `-unsafeptr=false` (justfile/CI/`.golangci.yml`).
 **Do not** try to "fix" these casts. The pattern is the contract for
 talking to `modernc.org/sqlite/lib`.
+
+**The same coupling extends to `vfs/crypto/`.** That sub-package reaches
+into the same lib-level exported struct types (`Tsqlite3_vfs`,
+`Tsqlite3_io_methods`) via field-by-field copies — never memcpy — so a
+modernc bump that reorders fields fails to compile rather than silently
+scrambling layout. When `just bump-modernc` runs, `vfs/crypto/crypto.go`
+joins `conn.go`, `vtab.go`, `hooks.go`, `pre_update_hook.go`, and the
+other root-level modernc-derived files on the list of places that may
+need fixing. Same drift discipline; same `-unsafeptr=false` exemption.
 
 ### 4. database/sql connection pool semantics
 
@@ -360,6 +384,14 @@ Ask first: **does the typed API or the raw SQL path own this?**
 - **gorm** features (dialector / Migrator behavior) go in `gorm/`.
   Cross-cutting hooks the bridge packages register against (like
   `DropTableHook`) are also defined here.
+- **Rank fusion / hybrid search** helpers go in `fusion/` — small pure-Go
+  package, no SQLite dependency, used by callers stitching `vec.KNN` and
+  `fts.Search` rankings together (e.g. `fusion.RRF2(vecKeys, ftsKeys)`).
+- **Encryption-at-rest** features go in `vfs/crypto/`. Do not patch the
+  modernc transpilation pipeline. The package reaches into `lib/`'s
+  exported `Tsqlite3_vfs` / `Tsqlite3_io_methods` structs via field-by-
+  field copies — same drift discipline as the root modernc-derived
+  files (see "Fragile invariants").
 - **SQL conformance / raw-SQL feature tests** go in `tests/sql/`,
   organized by SQLite Language Reference category, not by Go package.
 - **Observability** sits as `Wrap(...)` decorators in `vec/` and `fts/`;

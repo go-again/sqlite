@@ -26,6 +26,7 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [vec/gorm/doc.go](vec/gorm/doc.go): tag-driven sqlite-vec sidecars (`vec:"dim=N;metric=…"`) on gorm models.
 - [fts/gorm/doc.go](fts/gorm/doc.go): tag-driven FTS5 sidecars (`fts5:"tokenize=…;external=…;contentless=…"`) on gorm models.
 - [vfs/doc.go](vfs/doc.go): expose any `fs.FS` (embed.FS, fstest.MapFS, zip-fs) as a read-only SQLite VFS.
+- [vfs/crypto/doc.go](vfs/crypto/doc.go): pure-Go encryption-at-rest VFS — Adiantum / AES-XTS-256, transparent page-level encryption of main DB + journal + WAL + temp files.
 - [fusion/doc.go](fusion/doc.go): rank-fusion helpers — combine vec.KNN and fts.Search results via Reciprocal Rank Fusion (Cormack 2009).
 
 ## Examples (runnable)
@@ -38,6 +39,7 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [examples/vec-search](examples/vec-search/main.go): raw `vec.Table` API.
 - [examples/fts-search](examples/fts-search/main.go): raw `fts.Index` API.
 - [examples/vfs-embed](examples/vfs-embed/main.go): bundle a `.db` inside `embed.FS`.
+- [examples/vfs-crypto](examples/vfs-crypto/main.go): encryption at rest via vfs/crypto (Adiantum / AES-XTS-256, pure Go).
 
 ## Feature coverage matrices
 

@@ -3,7 +3,9 @@ module github.com/go-again/sqlite
 go 1.25.0
 
 require (
+	golang.org/x/crypto v0.23.0
 	gorm.io/gorm v1.31.1
+	lukechampine.com/adiantum v1.1.1
 	modernc.org/libc v1.72.3
 	modernc.org/sqlite v1.50.1
 )

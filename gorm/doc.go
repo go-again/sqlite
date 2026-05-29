@@ -71,9 +71,9 @@
 //
 // # Compatibility surface
 //
-// The gorm.io/gorm/tests integration suite (the "12k tests") runs
-// against this dialector on every CI push via a thin shim re-exporting
-// our types under gorm.io/driver/sqlite. See docs/gorm-upstream.md
+// The gorm.io/gorm/tests integration suite runs against this dialector
+// on every CI push via a thin shim re-exporting our types under
+// gorm.io/driver/sqlite. See docs/gorm-upstream.md
 // in the repo for the reproduction recipe.
 //
 // # See also

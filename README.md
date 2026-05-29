@@ -90,8 +90,12 @@ The cost: a constant-factor perf gap on hot UDF / per-row callback paths
 | `github.com/go-again/sqlite` | The driver. Registers `"sqlite"` and `"sqlite3"` names. |
 | `github.com/go-again/sqlite/gorm` | `gorm.Dialector` for gorm.io/gorm. |
 | `github.com/go-again/sqlite/vec` | sqlite-vec extension + typed `Table` API. |
+| `github.com/go-again/sqlite/vec/gorm` | Tag-driven sqlite-vec sidecars on gorm models. |
 | `github.com/go-again/sqlite/fts` | Typed FTS5 `Index[K, V]` with tokenizers, query builder, snippet/highlight. |
+| `github.com/go-again/sqlite/fts/gorm` | Tag-driven FTS5 sidecars on gorm models. |
+| `github.com/go-again/sqlite/fusion` | Rank-fusion helpers — combine `vec.KNN` and `fts.Search` results via Reciprocal Rank Fusion. |
 | `github.com/go-again/sqlite/vfs` | Expose any `io/fs.FS` (incl. `embed.FS`) as a read-only SQLite VFS. |
+| `github.com/go-again/sqlite/vfs/crypto` | Pure-Go encryption-at-rest VFS — Adiantum or AES-XTS-256, transparent page-level encryption of main DB + journal + WAL + temp files. |
 
 ## Quick starts
 
@@ -134,7 +138,7 @@ What needs rewriting:
 - `gormlite.Open(dsn)` → `sqlitegorm.Open(dsn)` (textual swap, glebarez-compatible).
 - `vfs/readervfs.Create(...)` → `vfs.New(fs.FS) (name, *vfs.FS, error)` — different signature, same intent.
 - `ext/vec1` users — our `vec/` wraps [sqlite-vec](https://github.com/asg017/sqlite-vec) (asg017's), not vec1 (SQLite-org's). The vtab name and SQL surface differ; consumers rewrite SQL, not just imports.
-- Adiantum / XTS encryption VFSes — gap; we don't ship encryption-at-rest.
+- Adiantum / XTS encryption VFSes — different package shape. ncruces exposes `vfs/adiantum` and `vfs/xts`; ours is `vfs/crypto` with both ciphers behind a single `New(Options{Cipher: …})` constructor. Same threat model (confidentiality at rest, no MAC).
 
 If you're a pure-`database/sql` consumer with `_pragma=…` URI DSNs and no custom UDFs, this is a one-line swap. Otherwise budget for it as a per-call-site rewrite — same shape and amount of work as porting from any other Go SQLite driver to mattn.
 
@@ -295,6 +299,20 @@ db, _ := sql.Open("sqlite3", "file:seed.db?vfs="+name+"&mode=ro")
 ```
 
 See [`examples/vfs-embed/`](examples/vfs-embed/main.go).
+
+### Encryption at rest
+
+```go
+import "github.com/go-again/sqlite/vfs/crypto"
+
+key := make([]byte, 32) // derive from passphrase / keyring / HSM
+name, fs, _ := crypto.New(crypto.Options{Key: key})
+defer fs.Close()
+
+db, _ := sql.Open("sqlite", "file:secret.db?vfs="+name)
+```
+
+Pure-Go page-level encryption — Adiantum (default, 32-byte key) or AES-XTS-256 (64-byte key). The main DB file, rollback journal, WAL frames, and temp files are all encrypted; the WAL `-shm` index stays plaintext (it's memory-mapped, not disk-resident in practice). No SQLCipher format compatibility, no MAC — confidentiality only. See [`examples/vfs-crypto/`](examples/vfs-crypto/main.go) and [`vfs/crypto/doc.go`](vfs/crypto/doc.go).
 
 ## Migration table
 

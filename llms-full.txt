@@ -248,6 +248,20 @@ Read-only by design (the `fs.FS` contract doesn't allow writes). Append
 `&mode=ro` so SQLite rejects writes at open time with a clear error
 rather than mid-query.
 
+## I want encryption at rest
+
+```go
+import "github.com/go-again/sqlite/vfs/crypto"
+
+key := make([]byte, 32)             // derived from passphrase, keyring, HSM, etc.
+name, fs, _ := crypto.New(crypto.Options{Key: key})
+defer fs.Close()
+
+db, _ := sql.Open("sqlite", "file:secret.db?vfs="+name)
+```
+
+Pure-Go page-level encryption — Adiantum default (32-byte key) or AES-XTS-256 (64-byte key, `crypto.Options{Cipher: crypto.AESXTS}`). The main DB, rollback journal, WAL frames, temp files, and sub-journals are all encrypted; the `-shm` WAL index stays plaintext (memory-mapped, not user data). Length-preserving on disk: zero overhead per page. No MAC, no SQLCipher format compatibility — confidentiality only; pair with disk-level integrity (LUKS dm-integrity, ZFS) if active tampering is in scope. Key management (derivation, rotation, storage) is the caller's responsibility — we treat the key bytes as opaque.
+
 # Pitfalls
 
 These bite at runtime and aren't obvious from the API surface. Read
@@ -347,8 +361,10 @@ For fts/gorm, external mode mirrors source's `deleted_at` as a
 ## What's not supported
 
 - **Userauth** (`_auth*` DSN flags): dropped upstream by modernc.
-- **Server-side encryption** (SQLCipher / SEE / ROOT-LSM3): modernc
-  transpiles plain-vanilla SQLite; encryption isn't shipped.
+- **SQLCipher on-disk format**: we don't read or write SQLCipher's page
+  layout (per-page IV + HMAC + KDF salt). Encryption at rest is
+  available via `vfs/crypto` but it's a different on-disk format —
+  see the "I want encryption at rest" recipe above.
 - **`_mutex=no`**: modernc doesn't expose the unsafe single-threaded
   mode.
 
