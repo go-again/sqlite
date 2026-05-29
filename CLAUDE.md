@@ -98,6 +98,8 @@ github.com/go-again/sqlite/
 ├── compat_convert.go       # reflection-driven Go ↔ driver.Value conversion
 ├── stmt_cache.go           # per-conn prepared-stmt LRU
 ├── internal_alloc.go       # libc.CString helpers for backup/serialize
+├── config.go               # sqlite.Config / Pragmas / Encryption / Cipher (modern Go-typed open)
+├── open_config.go          # sqlite.Open(Config) → *DB; BuildDSN; ApplyPragmas
 │
 ├── gorm/                   # gorm sub-package (ported verbatim from glebarez)
 │   ├── sqlite.go           # Dialector
@@ -154,7 +156,8 @@ github.com/go-again/sqlite/
 │       ├── vfs.go          # registration, xOpen, perFileState, struct layout
 │       ├── iomethods.go    # 12 io-method trampolines + sync.Pool scratch
 │       ├── cipher.go       # pageCipher interface + Adiantum/AESXTS bindings + file-kind tweak
-│       └── observability.go # Recorder interface, NewSlogRecorder, FileKindName
+│       ├── observability.go # Recorder interface, NewSlogRecorder, FileKindName
+│       └── derive_key.go    # DeriveKey: Argon2id passphrase + salt → cipher-sized key
 │
 ├── internal/
 │   └── cabi/               # shared Go↔C ABI helpers (only this module can import)
@@ -176,7 +179,10 @@ github.com/go-again/sqlite/
     ├── fts-search/         # typed fts.Index
     ├── window-function/    # Conn.RegisterWindowFunction demo
     ├── fusion-hybrid-search/ # vec.KNN + fts.Search fused via fusion.RRF2
+    ├── sqlite-config/      # modern Go-typed sqlite.Config for plain *sql.DB
+    ├── gorm-config/        # sqlite.Config routed via sqlitegorm.OpenConfig
     ├── vfs-crypto/         # pure-Go encryption-at-rest VFS (Adiantum / AES-XTS-256)
+    ├── gorm-crypto/        # comprehensive gorm + crypto + vec + fts + fusion stack
     └── vfs-embed/          # bundling a DB inside a fs.FS
 ```
 

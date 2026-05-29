@@ -65,8 +65,14 @@ var (
 func initFromDefault(def *sqlite3.Tsqlite3_vfs) {
 	defaultSzOsFile.Store(def.FszOsFile)
 	defaultVfsPtr.Store(uintptr(unsafe.Pointer(def)))
+	// iVersion=2 + FxShmMap non-zero is what SQLite checks before it
+	// will switch to WAL journaling (see lib's _walModeCheck at the
+	// FxShmMap-presence test). xShmMap/Lock/Barrier/Unmap forward
+	// 1:1 to the default unix VFS — the WAL `-shm` index file is
+	// memory-mapped shared state, not user-row data, so it stays
+	// plaintext on disk (see [Recorder] docstring and doc.go).
 	ourIoMethods = sqlite3.Tsqlite3_io_methods{
-		FiVersion:               1,
+		FiVersion:               2,
 		FxClose:                 cabi.FuncPointer(xCloseTrampoline),
 		FxRead:                  cabi.FuncPointer(xReadTrampoline),
 		FxWrite:                 cabi.FuncPointer(xWriteTrampoline),
@@ -79,6 +85,10 @@ func initFromDefault(def *sqlite3.Tsqlite3_vfs) {
 		FxFileControl:           cabi.FuncPointer(xFileControlTrampoline),
 		FxSectorSize:            cabi.FuncPointer(xSectorSizeTrampoline),
 		FxDeviceCharacteristics: cabi.FuncPointer(xDeviceCharacteristicsTrampoline),
+		FxShmMap:                cabi.FuncPointer(xShmMapTrampoline),
+		FxShmLock:               cabi.FuncPointer(xShmLockTrampoline),
+		FxShmBarrier:            cabi.FuncPointer(xShmBarrierTrampoline),
+		FxShmUnmap:              cabi.FuncPointer(xShmUnmapTrampoline),
 	}
 	ourIoMethodsPtr.Store(uintptr(unsafe.Pointer(&ourIoMethods)))
 }

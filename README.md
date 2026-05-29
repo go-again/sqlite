@@ -99,6 +99,43 @@ The cost: a constant-factor perf gap on hot UDF / per-row callback paths
 
 ## Quick starts
 
+### Modern Go config (no DSN strings)
+
+The structured `sqlite.Config` covers Pragmas, encryption, connection pool knobs, and VFS routing in one Go value. Same Config shape feeds both raw `database/sql` and gorm — no per-layer duplication.
+
+```go
+import sqlite "github.com/go-again/sqlite"
+
+db, err := sqlite.Open(sqlite.Config{
+    Path:    "myapp.db",
+    Pragmas: sqlite.RecommendedPragmas(), // WAL + busy_timeout=5s + foreign_keys
+    Encryption: &sqlite.Encryption{       // optional
+        Key: key,                          // 32 bytes for Adiantum
+    },
+    MaxOpenConns: 8,
+})
+if err != nil { ... }
+defer db.Close() // drains *sql.DB AND unregisters the encryption VFS
+```
+
+For gorm, the same `Config` shape via `sqlitegorm.OpenConfig`:
+
+```go
+import (
+    sqlite "github.com/go-again/sqlite"
+    sqlitegorm "github.com/go-again/sqlite/gorm"
+)
+
+db, err := sqlitegorm.OpenConfig(sqlite.Config{
+    Path:    "myapp.db",
+    Pragmas: sqlite.RecommendedPragmas(),
+})
+defer db.Close()
+db.AutoMigrate(&MyModel{}) // *gorm.DB methods, unchanged
+```
+
+The legacy DSN entries (`sql.Open("sqlite", "file:...")`, `sqlitegorm.Open(dsn)`, `sqlitegorm.New(Config{DSN: dsn})`) keep working unchanged.
+
 ### Mattn drop-in
 
 Change one line:

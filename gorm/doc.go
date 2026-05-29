@@ -13,16 +13,19 @@
 // with no other source changes — the exported names (Open, New,
 // Config, Dialector, DriverName) match.
 //
-// # Quick start
+// # Quick start (recommended — Go-typed Config, no DSN)
 //
 //	import (
-//	    "gorm.io/gorm"
-//	    sqlite "github.com/go-again/sqlite/gorm"
+//	    sqlite "github.com/go-again/sqlite"
+//	    sqlitegorm "github.com/go-again/sqlite/gorm"
 //	)
 //
-//	db, err := gorm.Open(sqlite.Open("file:app.db?_pragma=foreign_keys(1)"),
-//	    &gorm.Config{TranslateError: true})
+//	db, err := sqlitegorm.OpenConfig(sqlite.Config{
+//	    Path:    "app.db",
+//	    Pragmas: sqlite.RecommendedPragmas(), // WAL + busy_timeout=5s + foreign_keys
+//	})
 //	if err != nil { ... }
+//	defer db.Close() // drains gorm pool AND unregisters any encryption VFS
 //
 //	type User struct {
 //	    gorm.Model
@@ -30,6 +33,16 @@
 //	}
 //	db.AutoMigrate(&User{})
 //	db.Create(&User{Email: "a@example.com"})
+//
+// Same [sqlite.Config] type the root package exposes — set
+// [sqlite.Encryption] for transparent encryption at rest, or
+// MaxOpenConns / MaxIdleConns / ConnMaxLifetime to tune the pool.
+// See examples/gorm-config for the plain + encrypted demos.
+//
+// # Quick start (legacy DSN, still supported)
+//
+//	db, err := gorm.Open(sqlitegorm.Open("file:app.db?_pragma=foreign_keys(1)"),
+//	    &gorm.Config{TranslateError: true})
 //
 // # What this package implements
 //
@@ -53,14 +66,18 @@
 //
 // # Configuration knobs
 //
-//   - sqlite.Open(dsn): the gorm-standard constructor. dsn is passed
+//   - sqlitegorm.OpenConfig(sqlite.Config, ...*gorm.Config): the modern
+//     Go-typed entry. Pragmas, Encryption, pool knobs, and VFS routing
+//     are struct fields — no DSN string assembly. Returns a *DB that
+//     embeds *gorm.DB and bundles the encryption VFS lifecycle.
+//   - sqlitegorm.Open(dsn): the gorm-standard constructor. dsn is passed
 //     verbatim to the driver, so every DSN flag the underlying
 //     github.com/go-again/sqlite supports is available
 //     (_foreign_keys, _busy_timeout, _journal_mode, _pragma, _txlock,
 //     _time_format, _texttotime, _stmt_cache_size, …).
-//   - sqlite.New(sqlite.Config{...}): for callers who want to inject
-//     a custom DriverName (e.g. one with pre-registered UDFs) or
-//     reuse an existing gorm.ConnPool.
+//   - sqlitegorm.New(sqlitegorm.Config{...}): for callers who want to
+//     inject a custom DriverName (e.g. one with pre-registered UDFs)
+//     or reuse an existing gorm.ConnPool.
 //
 // On every open, the dialector injects _texttotime=1 into the DSN if
 // the caller hasn't already specified it. This makes ColumnTypeScanType

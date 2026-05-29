@@ -58,7 +58,68 @@ project changes nothing; it's purely cosmetic. The `Driver{}` struct
 literal (mattn's `&SQLiteDriver{Extensions: …, ConnectHook: …}`) is
 available under both type aliases.
 
-# DSN flags
+# Configuring the connection
+
+There are two ways to configure a connection. Reach for the structured Go-typed `sqlite.Config` first; the DSN flags are documented for the compat surface and for callers integrating with DSN-only tools.
+
+## Modern: sqlite.Config (Go-typed, recommended)
+
+```go
+import sqlite "github.com/go-again/sqlite"
+
+db, err := sqlite.Open(sqlite.Config{
+    Path:    "myapp.db",
+    Pragmas: sqlite.RecommendedPragmas(), // WAL + busy_timeout=5s + foreign_keys
+    MaxOpenConns: 8,
+})
+if err != nil { ... }
+defer db.Close()
+```
+
+The returned `*sqlite.DB` embeds `*sql.DB`, so every `database/sql` method works unchanged. PRAGMAs ride in as DSN `_pragma=` URL flags under the hood — the driver applies them on every new connection in the pool, not just the one `database/sql` happens to pick for the first Exec. A single `defer db.Close()` drains the pool AND releases any encryption VFS the open registered.
+
+The `Pragmas` struct: `JournalMode`, `BusyTimeout`, `Synchronous`, `ForeignKeys`, `CacheSize`, `TempStore`, plus `Extra map[string]string` as an escape hatch for everything else. Empty / zero fields are "leave SQLite at its default."
+
+Encryption at rest uses the same Config shape:
+
+```go
+import "github.com/go-again/sqlite/vfs/crypto"
+
+key := crypto.DeriveKey(passphrase, salt, sqlite.Adiantum) // Argon2id
+db, _ := sqlite.Open(sqlite.Config{
+    Path:    "secret.db",
+    Pragmas: sqlite.RecommendedPragmas(),
+    Encryption: &sqlite.Encryption{
+        Key:    key,
+        Cipher: sqlite.Adiantum, // or sqlite.AESXTS (64-byte key)
+    },
+})
+```
+
+For gorm, the same Config type via `sqlitegorm.OpenConfig`:
+
+```go
+import (
+    sqlite     "github.com/go-again/sqlite"
+    sqlitegorm "github.com/go-again/sqlite/gorm"
+)
+
+db, err := sqlitegorm.OpenConfig(sqlite.Config{
+    Path:    "myapp.db",
+    Pragmas: sqlite.RecommendedPragmas(),
+})
+defer db.Close()
+db.AutoMigrate(&MyModel{}) // *gorm.DB methods, unchanged
+```
+
+Runnable end-to-end demos: [examples/sqlite-config](examples/sqlite-config/main.go) (plain `database/sql`) and [examples/gorm-config](examples/gorm-config/main.go) (gorm). The encrypted variants in both verify the on-disk file is opaque (SQLite header not visible).
+
+## Escape hatches for legacy DSN callers
+
+- `sqlite.BuildDSN(Config) string` renders the full DSN the modern entry would build, including `_pragma=` URL flags. Useful if you have a third-party tool that only takes a DSN string.
+- `sqlite.ApplyPragmas(db *sql.DB, p Pragmas) error` applies the typed PRAGMAs to a pool you opened via the bare `sql.Open("sqlite", dsn)` path. Best-effort for per-connection PRAGMAs (the Exec only hits whichever idle conn the pool picks); for pool-wide correctness, use `sqlite.Open(Config)` instead.
+
+## DSN flags
 
 Accepted (subset of mattn's `_*` flags, translated to modernc's
 parameter names):
@@ -93,21 +154,33 @@ Reach for the smallest sub-package that solves your problem.
 ## I just want SQL
 
 ```go
-import _ "github.com/go-again/sqlite"
-db, _ := sql.Open("sqlite", "file:app.db?_journal=WAL&_foreign_keys=on")
+import sqlite "github.com/go-again/sqlite"
+
+db, _ := sqlite.Open(sqlite.Config{
+    Path:    "app.db",
+    Pragmas: sqlite.RecommendedPragmas(),
+})
+defer db.Close()
 ```
 
-Nothing else. Use `database/sql` as normal.
+Use `database/sql` methods on `db` as normal (it embeds `*sql.DB`). The legacy DSN form `sql.Open("sqlite", "file:app.db?_journal=WAL&_foreign_keys=on")` still works for callers who already wired it up.
 
 ## I want gorm
 
 ```go
 import (
+    sqlite     "github.com/go-again/sqlite"
     sqlitegorm "github.com/go-again/sqlite/gorm"
-    "gorm.io/gorm"
 )
-db, _ := gorm.Open(sqlitegorm.Open("file:app.db"), &gorm.Config{})
+
+db, _ := sqlitegorm.OpenConfig(sqlite.Config{
+    Path:    "app.db",
+    Pragmas: sqlite.RecommendedPragmas(),
+})
+defer db.Close()
 ```
+
+Use `*gorm.DB` methods on `db` as normal (it embeds the gorm DB). The legacy DSN form `gorm.Open(sqlitegorm.Open("file:app.db"), &gorm.Config{})` still works.
 
 `sqlitegorm.Open` is a drop-in for `glebarez/sqlite.Open` and
 `gorm.io/driver/sqlite.Open`. The dialector implements

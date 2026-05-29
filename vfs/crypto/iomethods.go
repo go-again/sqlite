@@ -147,6 +147,32 @@ func xDeviceCharacteristicsTrampoline(tls *libc.TLS, pFile uintptr) int32 {
 	return callXSectorSize(tls, defaultMethodsFor(pFile).FxDeviceCharacteristics, pFile)
 }
 
+// xShm* trampolines forward 1:1 to the default unix VFS. The WAL
+// shared-memory region (`-shm` file) is the WAL index — process-
+// internal coordination state, not row data — and stays plaintext
+// on disk. Including these methods (and bumping iVersion to 2 on
+// the methods table) is what unlocks PRAGMA journal_mode = WAL.
+
+func xShmMapTrampoline(tls *libc.TLS, pFile uintptr, iPage, pgsz, bExtend int32, pp uintptr) int32 {
+	return asFunc[func(*libc.TLS, uintptr, int32, int32, int32, uintptr) int32](
+		defaultMethodsFor(pFile).FxShmMap)(tls, pFile, iPage, pgsz, bExtend, pp)
+}
+
+func xShmLockTrampoline(tls *libc.TLS, pFile uintptr, offset, n, flags int32) int32 {
+	return asFunc[func(*libc.TLS, uintptr, int32, int32, int32) int32](
+		defaultMethodsFor(pFile).FxShmLock)(tls, pFile, offset, n, flags)
+}
+
+func xShmBarrierTrampoline(tls *libc.TLS, pFile uintptr) {
+	asFunc[func(*libc.TLS, uintptr)](
+		defaultMethodsFor(pFile).FxShmBarrier)(tls, pFile)
+}
+
+func xShmUnmapTrampoline(tls *libc.TLS, pFile uintptr, deleteFlag int32) int32 {
+	return asFunc[func(*libc.TLS, uintptr, int32) int32](
+		defaultMethodsFor(pFile).FxShmUnmap)(tls, pFile, deleteFlag)
+}
+
 // --- Page-level encryption helpers ---
 
 // readEncrypted reads decrypted bytes from offset for an encrypted

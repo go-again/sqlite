@@ -4,7 +4,52 @@
 // upstream CGo-free wrapper this fork is built on top of), and serves
 // as the dialector source for the sibling gorm package.
 //
-// # Driver registration
+// # Modern Go-typed open (recommended)
+//
+// New code should reach for the structured [Config] entry. No DSN
+// string assembly, no `_pragma=` URL flags to memorize, and a single
+// defer Close that bundles the connection pool AND any encryption
+// VFS lifecycle:
+//
+//	import sqlite "github.com/go-again/sqlite"
+//
+//	db, err := sqlite.Open(sqlite.Config{
+//	    Path:    "myapp.db",
+//	    Pragmas: sqlite.RecommendedPragmas(), // WAL + busy_timeout=5s + foreign_keys
+//	    MaxOpenConns: 8,
+//	})
+//	if err != nil { ... }
+//	defer db.Close()
+//
+//	rows, _ := db.Query("SELECT ...") // *sql.DB methods, embedded
+//
+// PRAGMAs ride in via DSN `_pragma=` URL flags under the hood, so the
+// driver applies them on every new connection in the pool — not just
+// the one [database/sql] happens to pick for the first Exec.
+//
+// Encryption at rest takes the same Config shape, with one extra
+// field:
+//
+//	db, _ := sqlite.Open(sqlite.Config{
+//	    Path:    "secret.db",
+//	    Pragmas: sqlite.RecommendedPragmas(),
+//	    Encryption: &sqlite.Encryption{
+//	        Key:    key,                // 32 bytes for [Adiantum]
+//	        Cipher: sqlite.Adiantum,
+//	    },
+//	})
+//
+// Use [crypto.DeriveKey] from the [vfs/crypto] sub-package to turn a
+// passphrase + salt into the right key length. The returned [*DB]
+// embeds *sql.DB, so every database/sql method works unchanged; the
+// wrapper exists to release the pool AND unregister the encryption
+// VFS in the right order on Close.
+//
+// See [examples/sqlite-config] for the full plain + encrypted demo,
+// and the [gorm] sub-package's [OpenConfig] for the gorm flavor
+// (same [Config] type, *gorm.DB return).
+//
+// # Driver registration (DSN form, still supported)
 //
 // Importing the package for side effects registers the driver under
 // both names at once, so existing code using either keeps working:

@@ -22,7 +22,8 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [doc.go](doc.go): root `package sqlite` — driver registration, hooks, mattn-compat surface.
 - [vec/doc.go](vec/doc.go): typed sqlite-vec vector search (`Table`, `KNN`, `Neighbor`, `Row`, `WithFilter`).
 - [fts/doc.go](fts/doc.go): typed FTS5 full-text search (`Index[K,V]`, `Hit[K,V]`, query builder, ranking, snippet, highlight).
-- [gorm/doc.go](gorm/doc.go): gorm dialector — drop-in for glebarez/sqlite and gorm.io/driver/sqlite.
+- Root `sqlite` package: modern Go-typed Config in `config.go` + `open_config.go` — `sqlite.Open(sqlite.Config{Path, Pragmas, Encryption, ...}) (*sqlite.DB, error)`. Backward-compatible with `sql.Open("sqlite", dsn)`.
+- [gorm/doc.go](gorm/doc.go): gorm dialector — drop-in for glebarez/sqlite and gorm.io/driver/sqlite. Also exposes `sqlitegorm.OpenConfig(sqlite.Config, ...gorm.Config) (*sqlitegorm.DB, error)` for the modern Go-typed entry.
 - [vec/gorm/doc.go](vec/gorm/doc.go): tag-driven sqlite-vec sidecars (`vec:"dim=N;metric=…"`) on gorm models.
 - [fts/gorm/doc.go](fts/gorm/doc.go): tag-driven FTS5 sidecars (`fts5:"tokenize=…;external=…;contentless=…"`) on gorm models.
 - [vfs/doc.go](vfs/doc.go): expose any `fs.FS` (embed.FS, fstest.MapFS, zip-fs) as a read-only SQLite VFS.
@@ -44,7 +45,10 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [examples/fusion-hybrid-search](examples/fusion-hybrid-search/main.go): combine vec.KNN + fts.Search rankings via fusion.RRF2.
 - [examples/window-function](examples/window-function/main.go): Conn.RegisterWindowFunction demo.
 - [examples/vfs-embed](examples/vfs-embed/main.go): bundle a `.db` inside `embed.FS`.
+- [examples/sqlite-config](examples/sqlite-config/main.go): modern Go-typed `sqlite.Config` for plain *sql.DB — plain + encrypted variants, no DSN strings.
+- [examples/gorm-config](examples/gorm-config/main.go): same `sqlite.Config` routed through gorm via `sqlitegorm.OpenConfig`.
 - [examples/vfs-crypto](examples/vfs-crypto/main.go): encryption at rest via vfs/crypto (Adiantum / AES-XTS-256, pure Go).
+- [examples/gorm-crypto](examples/gorm-crypto/main.go): gorm + vfs/crypto + vec/gorm + fts/gorm + fusion — encrypted DB with embedding sidecars, FTS5 search, hybrid ranking via RRF, argon2id key derivation, slog Recorder, WAL + busy_timeout.
 
 ## Feature coverage matrices
 

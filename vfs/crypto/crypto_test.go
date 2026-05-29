@@ -224,8 +224,15 @@ func TestWALMode_RoundTrip(t *testing.T) {
 	dsn := fmt.Sprintf("file:%s?vfs=%s", dbPath, name)
 	db, _ := sql.Open("sqlite", dsn)
 
-	if _, err := db.Exec(`PRAGMA journal_mode = WAL`); err != nil {
+	// PRAGMA journal_mode = WAL returns the new mode as a row; SQLite
+	// silently falls back to DELETE if the VFS doesn't support the
+	// xShm methods. Scan the return to make sure we actually got WAL.
+	var newMode string
+	if err := db.QueryRow(`PRAGMA journal_mode = WAL`).Scan(&newMode); err != nil {
 		t.Fatalf("PRAGMA journal_mode=WAL: %v", err)
+	}
+	if newMode != "wal" {
+		t.Fatalf("journal_mode=%q after WAL pragma, want \"wal\" (VFS xShm methods missing?)", newMode)
 	}
 	if _, err := db.Exec(`CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)`); err != nil {
 		t.Fatalf("CREATE: %v", err)
