@@ -193,6 +193,8 @@ github.com/go-again/sqlite/
     ├── ext-hash/           # cryptographic hash SQL functions
     ├── ext-ipaddr/         # IP / CIDR helpers via net/netip
     ├── ext-zorder/         # Z-order curve encoding
+    ├── ext-stats/          # variance / percentile / regr_* / median / mode aggregates + windows
+    ├── ext-unicode/        # Unicode-aware case mappings, normalize, unaccent, locale collations
     └── vfs-embed/          # bundling a DB inside a fs.FS
 ```
 

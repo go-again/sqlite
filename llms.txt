@@ -56,6 +56,8 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [examples/ext-hash](examples/ext-hash/main.go): md5/sha1/sha2/sha3/blake2b digests + sha3 size variants.
 - [examples/ext-ipaddr](examples/ext-ipaddr/main.go): ipcontains/ipfamily/ipnetwork over an events table with mixed IPv4 / IPv6 sources.
 - [examples/ext-zorder](examples/ext-zorder/main.go): 2D Morton encoding round-trip + locality property demo.
+- [examples/ext-stats](examples/ext-stats/main.go): PostgreSQL-style aggregates (variance, percentile, regr_*, median, mode, every) plus a windowed regr_slope demo over a small employees table.
+- [examples/ext-unicode](examples/ext-unicode/main.go): Unicode-aware case mapping (with locale-tagged forms for Turkish / German), normalize, unaccent, NOCASE_UNICODE / NOCASE_ACCENT preset collations, plus a Swedish-locale collation that sorts `å` after `z`.
 
 ## Feature coverage matrices
 

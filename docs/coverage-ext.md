@@ -39,8 +39,10 @@ Status legend:
 
 | ext | LoC (est) | Upstream | Status | Entry | Test pin |
 |---|---|---|---|---|---|
-| stats | ~900 | [ncruces/ext/stats](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/stats) | ✗ deferred | `ext/stats` | — |
-| unicode | ~310 | [ncruces/ext/unicode](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/unicode) | ✗ deferred | `ext/unicode` | — |
+| stats | ~960 | [ncruces/ext/stats](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/stats) | ✓ landed | `ext/stats` + `ext/stats/auto` | `ext/stats/stats_test.go` |
+| unicode | ~280 | [ncruces/ext/unicode](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/unicode) | ⚠ partial | `ext/unicode` + `ext/unicode/auto` | `ext/unicode/unicode_test.go` |
+
+`unicode` is ⚠ partial because the REGEXP override is intentionally not registered (would conflict with `ext/regexp`'s richer surface) and the `icu_load_collation` SQL-side helper isn't exposed (collations register through Go-side [unicode.RegisterLocaleCollation] instead). Auto-registration intentionally leaves SQLite's LIKE built-in alone to preserve the LIKE optimization; opt in via [unicode.RegisterLike] = true or [unicode.RegisterLikeOnly].
 
 ## Skipped (overlap with existing surface)
 

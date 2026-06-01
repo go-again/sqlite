@@ -321,6 +321,36 @@ Read-only by design (the `fs.FS` contract doesn't allow writes). Append
 `&mode=ro` so SQLite rejects writes at open time with a clear error
 rather than mid-query.
 
+## I want loadable Go extensions (regexp, uuid, hash, stats, unicode, …)
+
+The `ext/` umbrella ships opt-in SQL functions and vtab modules as Go-native ports of the ncruces/go-sqlite3 extension lineup. Each sub-package is independent; pick what you need and leave the rest off your import graph.
+
+```go
+import (
+    sqlite "github.com/go-again/sqlite"
+    _ "github.com/go-again/sqlite/ext/regexp/auto"  // REGEXP + regexp_*
+    _ "github.com/go-again/sqlite/ext/uuid/auto"    // uuid() + gen_random_uuid + parse/format
+    _ "github.com/go-again/sqlite/ext/hash/auto"    // md5/sha2/sha3/blake2/...
+    _ "github.com/go-again/sqlite/ext/stats/auto"   // var_pop, percentile, regr_*, median, mode, ...
+    _ "github.com/go-again/sqlite/ext/unicode/auto" // upper/lower locale-aware, normalize, unaccent, collations
+)
+```
+
+Each `<name>/auto` sub-package wires the extension via a `Driver.ConnectHook` so every new connection auto-registers. For per-connection control (or to bypass the auto's defaults), call `<name>.Register(c)` on a pinned `*sqlite.Conn` instead.
+
+The full lineup:
+
+- **`array`** — eponymous vtab that exposes a bound Go slice as a single-column SQL table. Use `array.Bind(c, slice) → token, release()` then `SELECT value FROM array(?)`.
+- **`regexp`** — `regexp_like`, `regexp_count`, `regexp_instr`, `regexp_substr`, `regexp_replace`, and the binary `REGEXP` operator over Go's `regexp` (RE2 syntax).
+- **`uuid`** — `uuid([ver, ns, data])`, `gen_random_uuid`, `uuid_str/blob/extract_*` over `github.com/google/uuid`. Covers v1/v3/v4/v5/v6/v7 (DCE Security v2 not implemented).
+- **`hash`** — `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `sha3`, `blake2s`, `blake2b`, `md4`, `ripemd160`. Each function registers only if the underlying `crypto.Hash` is `Available()`. Size variants (`sha256(x, 224)`, `sha3(x, 512)`, etc.) match nalgeon/sqlean.
+- **`ipaddr`** — `ipcontains`, `ipoverlaps`, `ipfamily`, `iphost`, `ipmasklen`, `ipnetwork` over `net/netip`. Fixes the upstream `ipoverlaps` self-referential bug.
+- **`zorder`** — `zorder(d1, …, dN)` / `unzorder(z, N, i)` Morton encoding for a tunable 2–24 dimensions.
+- **`stats`** — variance / stddev / skewness / kurtosis / covariance / correlation / regr_* / percentile / median / mode / every / some, all working as both aggregates and window functions (streaming Welford + Kahan + Terriberry). Plus `cbrt` and `cot` scalars.
+- **`unicode`** — Unicode-aware `upper` / `lower` / `initcap` (with optional locale tag), `casefold`, `normalize` (NFC/NFD/NFKC/NFKD), `unaccent`. Preset collations `NOCASE_UNICODE` and `NOCASE_ACCENT` register automatically; `unicode.RegisterLocaleCollation(c, "sv", "SV")` installs language-tagged collations. The Unicode-aware `LIKE` override is gated on `unicode.RegisterLike = true` — default off, because overriding `LIKE` disables SQLite's LIKE optimization.
+
+See `docs/coverage-ext.md` for the full matrix (status, upstream reference, test pin per extension) and `examples/ext-<name>/` for runnable demos.
+
 ## I want encryption at rest
 
 ```go
