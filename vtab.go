@@ -673,7 +673,7 @@ func lookupGoModule(id uintptr) *goModule {
 
 func extractVtabArgs(tls *libc.TLS, argc int32, argv uintptr) []string {
 	args := make([]string, argc)
-	for i := int32(0); i < argc; i++ {
+	for i := range int(argc) {
 		cstr := *(*uintptr)(unsafe.Pointer(argv + uintptr(i)*unsafe.Sizeof(uintptr(0))))
 		args[i] = libc.GoString(cstr)
 	}

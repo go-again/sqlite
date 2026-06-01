@@ -58,6 +58,7 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [examples/ext-zorder](examples/ext-zorder/main.go): 2D Morton encoding round-trip + locality property demo.
 - [examples/ext-stats](examples/ext-stats/main.go): PostgreSQL-style aggregates (variance, percentile, regr_*, median, mode, every) plus a windowed regr_slope demo over a small employees table.
 - [examples/ext-unicode](examples/ext-unicode/main.go): Unicode-aware case mapping (with locale-tagged forms for Turkish / German), normalize, unaccent, NOCASE_UNICODE / NOCASE_ACCENT preset collations, plus a Swedish-locale collation that sorts `å` after `z`.
+- [examples/ext-csv](examples/ext-csv/main.go): SELECT directly from CSV files via the `ext/csv` vtab. Shows GROUP BY + SUM with type affinity, plus a JOIN across two CSV files sandboxed in an `fstest.MapFS`.
 
 ## Feature coverage matrices
 

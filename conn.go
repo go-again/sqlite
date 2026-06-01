@@ -509,6 +509,10 @@ func (c *conn) bind(pstmt uintptr, n int, args []driver.NamedValue) (allocs []ui
 			if p, err = c.bindNull(pstmt, i); err != nil {
 				return allocs, err
 			}
+		case *pointerArg:
+			if err := c.bindPointerValue(pstmt, i, x); err != nil {
+				return allocs, err
+			}
 		default:
 			return allocs, fmt.Errorf("sqlite: invalid driver.Value type %T", x)
 		}
@@ -1252,4 +1256,22 @@ func (c *conn) IsReadOnly(schema string) (bool, error) {
 	default:
 		return false, fmt.Errorf("unexpected sqlite3_db_readonly(%q) return value: %v", schema, r)
 	}
+}
+
+// CheckNamedValue lets database/sql know which Go types this driver
+// accepts as parameter values without conversion. The default
+// converter (driver.DefaultParameterConverter) handles primitives;
+// we additionally accept [*pointerArg] (the wrapper [Pointer] returns)
+// and pass it through verbatim so bind() can route it via
+// sqlite3_bind_pointer. Everything else falls back to the default.
+func (c *conn) CheckNamedValue(nv *driver.NamedValue) error {
+	if _, ok := nv.Value.(*pointerArg); ok {
+		return nil
+	}
+	converted, err := driver.DefaultParameterConverter.ConvertValue(nv.Value)
+	if err != nil {
+		return err
+	}
+	nv.Value = converted
+	return nil
 }

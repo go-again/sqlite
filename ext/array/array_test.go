@@ -241,6 +241,60 @@ func TestArray_ModuleName(t *testing.T) {
 	}
 }
 
+func TestArray_TransparentPointer(t *testing.T) {
+	// Transparent path: sqlite.Pointer(slice) instead of Bind/Release.
+	// SQLite's destructor frees the binding on stmt finalize — no
+	// caller-side cleanup needed.
+	_, sc, _ := withConn(t)
+	rows, err := sc.QueryContext(context.Background(),
+		`SELECT value FROM array(?) ORDER BY value`,
+		sqlite.Pointer([]int{42, 7, 99}))
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	defer rows.Close()
+	var got []int64
+	for rows.Next() {
+		var v int64
+		if err := rows.Scan(&v); err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		got = append(got, v)
+	}
+	want := []int64{7, 42, 99}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("row[%d]=%d, want %d", i, got[i], want[i])
+		}
+	}
+}
+
+func TestArray_TransparentPointerStringSlice(t *testing.T) {
+	_, sc, _ := withConn(t)
+	rows, err := sc.QueryContext(context.Background(),
+		`SELECT value FROM array(?)`,
+		sqlite.Pointer([]string{"alpha", "beta", "gamma"}))
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, s)
+	}
+	want := []string{"alpha", "beta", "gamma"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
 func TestArray_ErrUnknownTokenSentinel(t *testing.T) {
 	// errors.Is should match against the package-level sentinel so callers
 	// can branch on the failure mode.

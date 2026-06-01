@@ -3,13 +3,13 @@
 //
 // The vtab is a Go-native re-implementation of SQLite's bundled carray
 // (https://sqlite.org/carray.html) and the equivalent ncruces/ext/array
-// module. The function lineup and column shape match upstream; the bind
-// mechanism is explicit ([Bind] / [Release]) because this driver does not
-// yet expose the sqlite3_bind_pointer surface ncruces uses for transparent
-// slice binding. The trade-off is a documented call pair instead of a
-// transparent argument wrapper.
+// module.
 //
-// # Usage
+// # Transparent binding (preferred)
+//
+// Wrap the slice with [sqlite.Pointer] and pass it as a regular query
+// argument. SQLite's destructor callback releases the binding when the
+// statement finalizes — no caller-side cleanup needed.
 //
 //	import (
 //	    sqlite "github.com/go-again/sqlite"
@@ -18,9 +18,18 @@
 //
 //	if err := array.Register(conn); err != nil { ... }
 //
+//	rows, _ := db.QueryContext(ctx,
+//	    `SELECT value FROM array(?) ORDER BY value`,
+//	    sqlite.Pointer([]int{10, 20, 30}))
+//
+// # Explicit Bind / Release (escape hatch)
+//
+// For long-lived bindings (same slice across many queries) or when an
+// int64 sentinel is more convenient than a wrapped argument, the explicit
+// pair stays available:
+//
 //	token, release := array.Bind(conn, []int{10, 20, 30})
 //	defer release()
-//
 //	rows, _ := db.QueryContext(ctx,
 //	    `SELECT value FROM array(?) ORDER BY value`, token)
 //
@@ -149,21 +158,30 @@ func (c *arrayCursor) Filter(_ int, _ string, args []sqlite.Value) error {
 	if len(args) == 0 {
 		return errors.New("array: Filter called without the array() argument")
 	}
-	tokenAny := args[0]
-	token, ok := tokenAny.(int64)
-	if !ok {
-		return fmt.Errorf("array: array() argument must be an int64 token, got %T", tokenAny)
+	arg := args[0]
+	var slice any
+	switch x := arg.(type) {
+	case int64:
+		// Explicit Bind / Release path: the argument is a token into
+		// the per-package registry.
+		v, ok := bindings.load(x)
+		if !ok {
+			return ErrUnknownToken
+		}
+		slice = v
+	case nil:
+		return errors.New("array: array(NULL) is not a valid binding")
+	default:
+		// Transparent path: sqlite.Pointer substituted the original
+		// Go value into the args slot for us.
+		slice = x
 	}
-	v, ok := bindings.load(token)
-	if !ok {
-		return ErrUnknownToken
-	}
-	rv := reflect.ValueOf(v)
+	rv := reflect.ValueOf(slice)
 	indexable, err := makeIndexable(rv)
 	if err != nil {
 		return err
 	}
-	c.rawAny = v
+	c.rawAny = slice
 	c.value = indexable
 	c.length = indexable.Len()
 	c.rowID = 0

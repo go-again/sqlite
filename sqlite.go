@@ -256,7 +256,7 @@ func applyQueryParams(c *conn, query string) error {
 }
 
 func unlockNotify(t *libc.TLS, ppArg uintptr, nArg int32) {
-	for i := int32(0); i < nArg; i++ {
+	for range int(nArg) {
 		mu := *(*uintptr)(unsafe.Pointer(ppArg))
 		(*mutex)(unsafe.Pointer(mu)).Unlock()
 		ppArg += ptrSize
@@ -637,7 +637,7 @@ func releaseUDFArgs(sp *[]driver.Value) {
 func functionArgs(tls *libc.TLS, argc int32, argv uintptr) *[]driver.Value {
 	sp := acquireUDFArgs(int(argc))
 	args := *sp
-	for i := int32(0); i < argc; i++ {
+	for i := range int(argc) {
 		valPtr := *(*uintptr)(unsafe.Pointer(argv + uintptr(i)*sqliteValPtrSize))
 
 		switch valType := sqlite3.Xsqlite3_value_type(tls, valPtr); valType {
@@ -649,6 +649,13 @@ func functionArgs(tls *libc.TLS, argc int32, argv uintptr) *[]driver.Value {
 			args[i] = sqlite3.Xsqlite3_value_double(tls, valPtr)
 		case sqlite3.SQLITE_NULL:
 			args[i] = nil
+			// SQLite reports SQLITE_NULL for values bound via
+			// sqlite3_bind_pointer. If the value carries OUR type
+			// tag, substitute the wrapped Go value so UDF / vtab
+			// callbacks see the original payload instead of a nil.
+			if v, ok := tryUnwrapPointer(tls, valPtr); ok {
+				args[i] = v
+			}
 		case sqlite3.SQLITE_BLOB:
 			size := sqlite3.Xsqlite3_value_bytes(tls, valPtr)
 			blobPtr := sqlite3.Xsqlite3_value_blob(tls, valPtr)
@@ -758,15 +765,19 @@ type idGen struct {
 }
 
 func (gen *idGen) next() uintptr {
-	base := uintptr(1)
-	for i := 0; i < len(gen.bitset); i, base = i+1, base+64 {
+	for i := range len(gen.bitset) {
 		b := gen.bitset[i]
 		if b != 1<<64-1 {
+			base := uintptr(1) + uintptr(i)*64
 			n := uintptr(bits.TrailingZeros64(^b))
 			gen.bitset[i] |= 1 << n
 			return base + n
 		}
 	}
+	// No free bit in any existing word — append a fresh word with bit 0
+	// set and return the corresponding ID. base for the new word is
+	// 1 + 64 * len_before_append.
+	base := uintptr(1) + uintptr(len(gen.bitset))*64
 	gen.bitset = append(gen.bitset, 1)
 	return base
 }

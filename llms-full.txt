@@ -340,7 +340,8 @@ Each `<name>/auto` sub-package wires the extension via a `Driver.ConnectHook` so
 
 The full lineup:
 
-- **`array`** — eponymous vtab that exposes a bound Go slice as a single-column SQL table. Use `array.Bind(c, slice) → token, release()` then `SELECT value FROM array(?)`.
+- **`array`** — eponymous vtab that exposes a bound Go slice as a single-column SQL table. Two binding styles: transparent `db.Query("SELECT value FROM array(?)", sqlite.Pointer(slice))` (preferred — destructor releases on stmt finalize) or explicit `array.Bind(c, slice) → token, release()` for long-lived bindings.
+- **`csv`** — vtab over RFC 4180 CSV files. `CREATE VIRTUAL TABLE name USING csv(filename='x.csv', header=on, schema='CREATE TABLE x(a INTEGER, b TEXT)')` and then SELECT / JOIN / aggregate against it normally. `csv.Register(c)` uses `os.Open`; `csv.RegisterFS(c, fsys)` sandboxes file access to an `fs.FS` (embed.FS, fstest.MapFS, os.DirFS). Type affinity is inferred from the schema's INTEGER / REAL / TEXT keywords.
 - **`regexp`** — `regexp_like`, `regexp_count`, `regexp_instr`, `regexp_substr`, `regexp_replace`, and the binary `REGEXP` operator over Go's `regexp` (RE2 syntax).
 - **`uuid`** — `uuid([ver, ns, data])`, `gen_random_uuid`, `uuid_str/blob/extract_*` over `github.com/google/uuid`. Covers v1/v3/v4/v5/v6/v7 (DCE Security v2 not implemented).
 - **`hash`** — `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `sha3`, `blake2s`, `blake2b`, `md4`, `ripemd160`. Each function registers only if the underlying `crypto.Hash` is `Available()`. Size variants (`sha256(x, 224)`, `sha3(x, 512)`, etc.) match nalgeon/sqlean.

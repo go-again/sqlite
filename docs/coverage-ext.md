@@ -13,10 +13,12 @@ Status legend:
 
 | ext | LoC (est) | Upstream | Status | Entry | Test pin |
 |---|---|---|---|---|---|
-| array | ~230 | [ncruces/ext/array](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/array) | ✓ landed | `ext/array` + `ext/array/auto` | `ext/array/array_test.go` |
+| array | ~250 | [ncruces/ext/array](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/array) | ✓ landed | `ext/array` + `ext/array/auto` | `ext/array/array_test.go` |
+
+`array` supports two binding styles: transparent via `sqlite.Pointer(slice)` (preferred — SQLite's destructor releases on stmt finalize, no caller cleanup needed) and explicit `array.Bind(c, slice) → token, release()` for long-lived bindings or int64-sentinel use cases.
 | bloom | ~370 | [ncruces/ext/bloom](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/bloom) | ✗ deferred | `ext/bloom` | — |
 | closure | ~280 | [ncruces/ext/closure](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/closure) | ✗ deferred | `ext/closure` | — |
-| csv | ~380 | [ncruces/ext/csv](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/csv) | ✗ deferred | `ext/csv` | — |
+| csv | ~430 | [ncruces/ext/csv](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/csv) | ✓ landed | `ext/csv` + `ext/csv/auto` | `ext/csv/csv_test.go` |
 | fileio | ~430 | [ncruces/ext/fileio](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/fileio) | ✗ deferred | `ext/fileio` | — |
 | lines | ~250 | [ncruces/ext/lines](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/lines) | ✗ deferred | `ext/lines` | — |
 | pivot | ~310 | [ncruces/ext/pivot](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/pivot) | ✗ deferred | `ext/pivot` | — |
