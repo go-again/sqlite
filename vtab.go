@@ -109,6 +109,19 @@ func (c *conn) registerModules() error {
 }
 
 func (c *conn) registerSingleModule(name string, m vtab.Module) error {
+	return c.registerSingleModuleOpts(name, m, false)
+}
+
+// registerSingleEponymousModule registers an eponymous-only virtual table
+// module: xCreate is NULL so SQLite forbids CREATE VIRTUAL TABLE and instead
+// instantiates the table via xConnect when the module name is queried
+// directly (e.g. `SELECT … FROM array(?)`). See
+// https://sqlite.org/vtab.html#eponymous_virtual_tables for the contract.
+func (c *conn) registerSingleEponymousModule(name string, m vtab.Module) error {
+	return c.registerSingleModuleOpts(name, m, true)
+}
+
+func (c *conn) registerSingleModuleOpts(name string, m vtab.Module, eponymous bool) error {
 	// Allocate or reuse a stable ID for this module name and remember the Go implementation.
 	vtabModules.mu.Lock()
 	modID, ok := vtabModules.name2id[name]
@@ -119,10 +132,18 @@ func (c *conn) registerSingleModule(name string, m vtab.Module) error {
 	vtabModules.m[modID] = &goModule{name: name, impl: m}
 	vtabModules.mu.Unlock()
 
+	// Cache key disambiguates eponymous and non-eponymous registrations of
+	// the same module name (different FxCreate wiring → separate native
+	// structs).
+	cacheKey := name
+	if eponymous {
+		cacheKey = name + "\x00eponymous"
+	}
+
 	nativeModules.mu.Lock()
 	defer nativeModules.mu.Unlock()
 	var modPtr uintptr
-	if existing, exists := nativeModules.m[name]; exists {
+	if existing, exists := nativeModules.m[cacheKey]; exists {
 		modPtr = existing
 	} else {
 		// Allocate with the C allocator so the transpiled SQLite code can
@@ -139,7 +160,9 @@ func (c *conn) registerSingleModule(name string, m vtab.Module) error {
 		}
 		mod := (*sqlite3.Sqlite3_module)(unsafe.Pointer(modPtr))
 		mod.FiVersion = 2
-		mod.FxCreate = cFuncPointer(vtabCreateTrampoline)
+		if !eponymous {
+			mod.FxCreate = cFuncPointer(vtabCreateTrampoline)
+		} // eponymous: FxCreate stays 0 (zeroed by Xcalloc)
 		mod.FxConnect = cFuncPointer(vtabConnectTrampoline)
 		mod.FxBestIndex = cFuncPointer(vtabBestIndexTrampoline)
 		mod.FxDisconnect = cFuncPointer(vtabDisconnectTrampoline)
@@ -162,7 +185,7 @@ func (c *conn) registerSingleModule(name string, m vtab.Module) error {
 		mod.FxRelease = cFuncPointer(vtabReleaseTrampoline)
 		mod.FxRollbackTo = cFuncPointer(vtabRollbackToTrampoline)
 
-		nativeModules.m[name] = modPtr
+		nativeModules.m[cacheKey] = modPtr
 	}
 
 	// Prepare C string for module name.

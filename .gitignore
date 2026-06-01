@@ -2,3 +2,5 @@
 !.gitignore
 !.github
 !.golangci.yml
+/pl*.md
+/req*.md

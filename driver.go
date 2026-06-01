@@ -56,6 +56,18 @@ var d = &Driver{
 
 func newDriver() *Driver { return d }
 
+// DefaultDriver returns the singleton [*Driver] the package registers
+// under both "sqlite" and "sqlite3". Use this when a sub-package needs to
+// install a [Driver.ConnectHook] from an init() function — for example,
+// the `ext/<name>/auto/` blank-import sub-packages register their module
+// on every new connection by chaining onto the existing ConnectHook.
+//
+// Callers MUST preserve any previously-installed hook by invoking the
+// prior value before running their own work. Assigning
+// DefaultDriver().ConnectHook = … without saving and chaining discards
+// the existing hook silently.
+func DefaultDriver() *Driver { return d }
+
 // Open returns a new connection to the database. The name is a string in a
 // driver-specific format.
 //

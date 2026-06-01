@@ -52,3 +52,16 @@ Licensed under either Apache License 2.0 or MIT License.
 
 The vec/ sub-package wraps Alex Garcia's sqlite-vec extension as
 auto-registered via modernc.org/sqlite/vec.
+
+============================================================================
+github.com/ncruces/go-sqlite3
+Copyright (c) 2023 Nuno Cruces
+Licensed under the MIT License; see LICENSE.ncruces for the full text.
+============================================================================
+
+The ext/ sub-packages port selected loadable extensions from ncruces's
+WASM-based SQLite driver to our modernc-based runtime. Source is
+re-implemented against this repo's (*Conn).RegisterFunc / vtab helper APIs
+rather than copied verbatim, but the function lineup, semantics, and
+docstrings closely follow ncruces's design. Ported files carry a one-line
+credit header in their package doc.

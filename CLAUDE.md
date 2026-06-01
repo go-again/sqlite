@@ -163,6 +163,10 @@ github.com/go-again/sqlite/
 │   └── cabi/               # shared Go↔C ABI helpers (only this module can import)
 │       └── funcptr.go      # FuncPointer[T]: producer side of the modernc-trampoline trick
 │
+├── ext/                    # loadable Go extensions (opt-in per sub-package)
+│   ├── README.md           # index + registration shapes
+│   └── <name>/             # one sub-package per ext; <name>/auto/ is the blank-import variant
+│
 ├── tests/
 │   └── sql/                # SQL conformance suite (per SQLite Language Reference)
 │
@@ -183,6 +187,12 @@ github.com/go-again/sqlite/
     ├── gorm-config/        # sqlite.Config routed via sqlitegorm.OpenConfig
     ├── vfs-crypto/         # pure-Go encryption-at-rest VFS (Adiantum / AES-XTS-256)
     ├── gorm-crypto/        # comprehensive gorm + crypto + vec + fts + fusion stack
+    ├── ext-array/          # bind a Go slice as a SQL table via ext/array
+    ├── ext-regexp/         # REGEXP operator + regexp_* functions
+    ├── ext-uuid/           # RFC 4122 UUID generation + parsing
+    ├── ext-hash/           # cryptographic hash SQL functions
+    ├── ext-ipaddr/         # IP / CIDR helpers via net/netip
+    ├── ext-zorder/         # Z-order curve encoding
     └── vfs-embed/          # bundling a DB inside a fs.FS
 ```
 
@@ -419,6 +429,12 @@ Ask first: **does the typed API or the raw SQL path own this?**
   exported `Tsqlite3_vfs` / `Tsqlite3_io_methods` structs via field-by-
   field copies — same drift discipline as the root modernc-derived
   files (see "Fragile invariants").
+- **Loadable Go extensions** (SQL scalar UDFs, table-valued functions,
+  vtab-based readers, etc.) go in `ext/<name>/` — each sub-package is
+  independent, ships a `Register(*Conn) error` entry, plus a sibling
+  `ext/<name>/auto/` blank-import that wires `Register` through a
+  `Driver.ConnectHook`. Several are Go-native ports from the
+  ncruces/go-sqlite3 lineup; track status in `docs/coverage-ext.md`.
 - **SQL conformance / raw-SQL feature tests** go in `tests/sql/`,
   organized by SQLite Language Reference category, not by Go package.
 - **Observability** sits as `Wrap(...)` decorators in `vec/` and `fts/`;
@@ -576,6 +592,10 @@ in living-document tables under `docs/`:
 - `docs/coverage-sql.md` — methodical raw-SQL surface matrix (SELECT
   clauses, joins, CTEs, window functions, JSON1, datetime, constraints,
   triggers, UPSERT, RETURNING, PRAGMA, …) exercised by `tests/sql/`.
+- `docs/coverage-ext.md` — every `ext/` loadable extension with status
+  (✓ landed / ⚠ partial / ✗ deferred / ✗ skipped), upstream reference,
+  and the test pin. Includes the per-extension scaffolding checklist
+  for adding new ones.
 - `docs/gorm-upstream.md` / `docs/modernc-upstream.md` /
   `docs/mattn-upstream.md` — reproduction recipes for the three
   CI-enforced upstream-suite lanes.

@@ -29,6 +29,7 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [vfs/doc.go](vfs/doc.go): expose any `fs.FS` (embed.FS, fstest.MapFS, zip-fs) as a read-only SQLite VFS.
 - [vfs/crypto/doc.go](vfs/crypto/doc.go): pure-Go encryption-at-rest VFS — Adiantum / AES-XTS-256, transparent page-level encryption of main DB + journal + WAL + temp files.
 - [fusion/doc.go](fusion/doc.go): rank-fusion helpers — combine vec.KNN and fts.Search results via Reciprocal Rank Fusion (Cormack 2009).
+- [ext/README.md](ext/README.md): loadable Go extensions umbrella — opt-in SQL scalar UDFs, table-valued functions, and vtab-based readers. Each sub-package independent; pick by need. Several are Go-native ports of ncruces/go-sqlite3 extensions. See [docs/coverage-ext.md](docs/coverage-ext.md) for the full matrix.
 
 ## Examples (runnable)
 
@@ -49,6 +50,12 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [examples/gorm-config](examples/gorm-config/main.go): same `sqlite.Config` routed through gorm via `sqlitegorm.OpenConfig`.
 - [examples/vfs-crypto](examples/vfs-crypto/main.go): encryption at rest via vfs/crypto (Adiantum / AES-XTS-256, pure Go).
 - [examples/gorm-crypto](examples/gorm-crypto/main.go): gorm + vfs/crypto + vec/gorm + fts/gorm + fusion — encrypted DB with embedding sidecars, FTS5 search, hybrid ranking via RRF, argon2id key derivation, slog Recorder, WAL + busy_timeout.
+- [examples/ext-array](examples/ext-array/main.go): bind a Go slice as a SQL table via the `ext/array` eponymous vtab; shows explicit `array.Register` + `array.Bind` and the blank-import auto path; JOINs the array against a normal table to demonstrate composition.
+- [examples/ext-regexp](examples/ext-regexp/main.go): REGEXP operator + regexp_substr / regexp_replace over a small users table.
+- [examples/ext-uuid](examples/ext-uuid/main.go): generate v1/v4/v6/v7 + name-based v5; parse + reformat round-trip via uuid_str/uuid_blob.
+- [examples/ext-hash](examples/ext-hash/main.go): md5/sha1/sha2/sha3/blake2b digests + sha3 size variants.
+- [examples/ext-ipaddr](examples/ext-ipaddr/main.go): ipcontains/ipfamily/ipnetwork over an events table with mixed IPv4 / IPv6 sources.
+- [examples/ext-zorder](examples/ext-zorder/main.go): 2D Morton encoding round-trip + locality property demo.
 
 ## Feature coverage matrices
 
@@ -56,6 +63,7 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [docs/coverage-vec.md](docs/coverage-vec.md): every documented sqlite-vec feature with status (typed / raw / inherited).
 - [docs/coverage-fts.md](docs/coverage-fts.md): every FTS5 feature with status.
 - [docs/coverage-gorm.md](docs/coverage-gorm.md): every gorm.Dialector / Migrator / ErrorTranslator method with status.
+- [docs/coverage-ext.md](docs/coverage-ext.md): every `ext/` loadable extension with status (✓ landed / ⚠ partial / ✗ deferred / ✗ skipped), upstream reference, and the test pin. Includes the per-extension scaffolding checklist.
 
 ## Optional
 
