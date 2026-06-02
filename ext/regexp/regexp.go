@@ -45,6 +45,9 @@ import (
 	"errors"
 	"fmt"
 	gore "regexp"
+	goresyntax "regexp/syntax"
+	"strings"
+	"unicode/utf8"
 
 	sqlite "github.com/go-again/sqlite"
 )
@@ -60,6 +63,76 @@ func Register(c *sqlite.Conn) error {
 		c.RegisterFunc("regexp_substr", regexpSubstr, true),
 		c.RegisterFunc("regexp_replace", regexpReplace, true),
 	)
+}
+
+// GlobPrefix returns a GLOB pattern that matches strings whose start
+// equals the anchored literal prefix of expr. Useful for the documented
+// LIKE-optimization win:
+//
+//	WHERE col GLOB ? AND col REGEXP ?
+//
+// SQLite's planner can rewrite `col GLOB 'prefix*'` into a range scan
+// (`col >= 'prefix' AND col < 'prefiy'`); the REGEXP clause filters the
+// candidates. Returns `*` (match anything) if expr is unanchored, and
+// `""` if expr can't possibly match anything (invalid regex, etc.).
+//
+// Implementation walks the compiled regexp program from
+// [regexp/syntax], collecting literal runes until it hits a non-literal
+// instruction or a multi-rune class. Matches ncruces upstream
+// semantics.
+func GlobPrefix(expr string) string {
+	re, err := goresyntax.Parse(expr, goresyntax.Perl)
+	if err != nil {
+		return "" // no match possible
+	}
+	prog, err := goresyntax.Compile(re.Simplify())
+	if err != nil {
+		return ""
+	}
+	i := &prog.Inst[prog.Start]
+	var empty goresyntax.EmptyOp
+loopHeader:
+	for {
+		switch i.Op {
+		case goresyntax.InstFail:
+			return ""
+		case goresyntax.InstCapture, goresyntax.InstNop:
+			// skip
+		case goresyntax.InstEmptyWidth:
+			empty |= goresyntax.EmptyOp(i.Arg)
+		default:
+			break loopHeader
+		}
+		i = &prog.Inst[i.Out]
+	}
+	if empty&goresyntax.EmptyBeginText == 0 {
+		return "*"
+	}
+	var glob strings.Builder
+loopBody:
+	for {
+		switch i.Op {
+		case goresyntax.InstFail:
+			return ""
+		case goresyntax.InstCapture, goresyntax.InstEmptyWidth, goresyntax.InstNop:
+			// skip
+		case goresyntax.InstRune, goresyntax.InstRune1:
+			if len(i.Rune) != 1 || goresyntax.Flags(i.Arg)&goresyntax.FoldCase != 0 {
+				break loopBody
+			}
+			switch r := i.Rune[0]; r {
+			case '*', '?', '[', utf8.RuneError:
+				break loopBody
+			default:
+				glob.WriteRune(r)
+			}
+		default:
+			break loopBody
+		}
+		i = &prog.Inst[i.Out]
+	}
+	glob.WriteByte('*')
+	return glob.String()
 }
 
 // REGEXP operator semantics: `text REGEXP pattern` calls regexp(pattern, text).

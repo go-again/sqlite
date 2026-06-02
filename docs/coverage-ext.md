@@ -16,11 +16,13 @@ Status legend:
 | array | ~250 | [ncruces/ext/array](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/array) | ✓ landed | `ext/array` + `ext/array/auto` | `ext/array/array_test.go` |
 
 `array` supports two binding styles: transparent via `sqlite.Pointer(slice)` (preferred — SQLite's destructor releases on stmt finalize, no caller cleanup needed) and explicit `array.Bind(c, slice) → token, release()` for long-lived bindings or int64-sentinel use cases.
-| bloom | ~370 | [ncruces/ext/bloom](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/bloom) | ✗ deferred | `ext/bloom` | — |
+| bloom | ~290 | [ncruces/ext/bloom](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/bloom) | ⚠ partial | `ext/bloom` + `ext/bloom/auto` | `ext/bloom/bloom_test.go` |
+
+`bloom` is ⚠ partial because the bit array is held in Go memory for the lifetime of the connection — it does not persist across `db.Close()` / reconnect. ncruces upstream persists to a shadow table via SQLite's incremental BLOB API (`sqlite3_blob_open`), which our driver does not yet expose. The in-memory form is fine for build-once / query-many-times patterns within a single session.
 | closure | ~280 | [ncruces/ext/closure](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/closure) | ✗ deferred | `ext/closure` | — |
 | csv | ~430 | [ncruces/ext/csv](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/csv) | ✓ landed | `ext/csv` + `ext/csv/auto` | `ext/csv/csv_test.go` |
 | fileio | ~430 | [ncruces/ext/fileio](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/fileio) | ✗ deferred | `ext/fileio` | — |
-| lines | ~250 | [ncruces/ext/lines](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/lines) | ✗ deferred | `ext/lines` | — |
+| lines | ~250 | [ncruces/ext/lines](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/lines) | ✓ landed | `ext/lines` + `ext/lines/auto` | `ext/lines/lines_test.go` |
 | pivot | ~310 | [ncruces/ext/pivot](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/pivot) | ✗ deferred | `ext/pivot` | — |
 | statement | ~240 | [ncruces/ext/statement](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/statement) | ✗ deferred | `ext/statement` | — |
 | blobio | ~170 | [ncruces/ext/blobio](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/blobio) | ✗ deferred | `ext/blobio` | — |

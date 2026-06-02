@@ -96,7 +96,7 @@ The cost: a constant-factor perf gap on hot UDF / per-row callback paths
 | `github.com/go-again/sqlite/fusion` | Rank-fusion helpers — combine `vec.KNN` and `fts.Search` results via Reciprocal Rank Fusion. |
 | `github.com/go-again/sqlite/vfs` | Expose any `io/fs.FS` (incl. `embed.FS`) as a read-only SQLite VFS. |
 | `github.com/go-again/sqlite/vfs/crypto` | Pure-Go encryption-at-rest VFS — Adiantum or AES-XTS-256, transparent page-level encryption of main DB + journal + WAL + temp files. |
-| `github.com/go-again/sqlite/ext/<name>` | Opt-in loadable Go extensions: `array` (bind a slice as a SQL table), `regexp`, `uuid`, `hash`, `ipaddr`, `zorder`, `stats` (variance/percentile/regr_*/median/mode aggregates + windows), `unicode` (case mapping / normalize / unaccent / collations). Pick per-connection via `<name>.Register(c)` or pool-wide via blank-import of `<name>/auto`. See [docs/coverage-ext.md](docs/coverage-ext.md) for the matrix. |
+| `github.com/go-again/sqlite/ext/<name>` | Opt-in loadable Go extensions: `array` (bind a slice as a SQL table), `csv`, `regexp`, `regexp/gorm` (GLOB-prefix + REGEXP gorm helper), `uuid`, `hash`, `ipaddr`, `zorder`, `stats` (variance/percentile/regr_*/median/mode aggregates + windows), `unicode` (case mapping / normalize / unaccent / collations), `bloom` (Bloom-filter vtab), `lines` (line-by-line text-file vtab). Pick per-connection via `<name>.Register(c)` or pool-wide via blank-import of `<name>/auto`. See [docs/coverage-ext.md](docs/coverage-ext.md) for the matrix. |
 
 ## Quick starts
 

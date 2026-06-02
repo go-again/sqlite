@@ -59,6 +59,7 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [examples/ext-stats](examples/ext-stats/main.go): PostgreSQL-style aggregates (variance, percentile, regr_*, median, mode, every) plus a windowed regr_slope demo over a small employees table.
 - [examples/ext-unicode](examples/ext-unicode/main.go): Unicode-aware case mapping (with locale-tagged forms for Turkish / German), normalize, unaccent, NOCASE_UNICODE / NOCASE_ACCENT preset collations, plus a Swedish-locale collation that sorts `å` after `z`.
 - [examples/ext-csv](examples/ext-csv/main.go): SELECT directly from CSV files via the `ext/csv` vtab. Shows GROUP BY + SUM with type affinity, plus a JOIN across two CSV files sandboxed in an `fstest.MapFS`.
+- `ext/bloom` (Bloom-filter vtab) and `ext/lines` (line-by-line text reader vtab) land without dedicated examples in v0.5 — see `docs/coverage-ext.md` and the per-package doc.go for usage. Examples can follow if requested.
 
 ## Feature coverage matrices
 

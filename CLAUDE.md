@@ -196,6 +196,7 @@ github.com/go-again/sqlite/
     ├── ext-stats/          # variance / percentile / regr_* / median / mode aggregates + windows
     ├── ext-unicode/        # Unicode-aware case mappings, normalize, unaccent, locale collations
     ├── ext-csv/            # SELECT from CSV files via the ext/csv vtab
+    # Bloom (`ext/bloom`) and Lines (`ext/lines`) landed without dedicated examples in v0.5.
     └── vfs-embed/          # bundling a DB inside a fs.FS
 ```
 
