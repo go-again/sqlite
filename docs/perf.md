@@ -1,6 +1,6 @@
 # Performance baselines
 
-Throughput / latency numbers for the post-v0.4 hot paths. Last measured on Apple M4 / darwin/arm64 with Go 1.26 + modernc.org/sqlite at the repo's go.mod-pinned versions, on 2026-05-29. Re-run via `just bench` (or `go test -bench=. -benchmem ./...`) after a dep bump.
+Throughput / latency numbers for the driver hot paths. Last measured on Apple M4 / darwin/arm64 at the repo's go.mod-pinned dependency versions, on 2026-05-29. Re-run via `just bench` (or `go test -bench=. -benchmem ./...`) after a dep bump.
 
 ## sqlite.Pointer binding
 

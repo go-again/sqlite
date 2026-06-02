@@ -28,8 +28,11 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [fts/gorm/doc.go](fts/gorm/doc.go): tag-driven FTS5 sidecars (`fts5:"tokenize=…;external=…;contentless=…"`) on gorm models.
 - [vfs/doc.go](vfs/doc.go): expose any `fs.FS` (embed.FS, fstest.MapFS, zip-fs) as a read-only SQLite VFS.
 - [vfs/crypto/doc.go](vfs/crypto/doc.go): pure-Go encryption-at-rest VFS — Adiantum / AES-XTS-256, transparent page-level encryption of main DB + journal + WAL + temp files.
+- [vfs/cksm/doc.go](vfs/cksm/doc.go): page-level checksum VFS — Fletcher-style trailer on every main-DB page, surfaces silent corruption as SQLITE_IOERR_DATA. Composes with vfs/crypto.
+- [vfs/mvcc/doc.go](vfs/mvcc/doc.go): in-memory MVCC VFS — snapshot-isolation reads + atomic publish on commit; shared (`file:/name`) and private (`file:name`) DBs.
 - [fusion/doc.go](fusion/doc.go): rank-fusion helpers — combine vec.KNN and fts.Search results via Reciprocal Rank Fusion (Cormack 2009).
 - [ext/README.md](ext/README.md): loadable Go extensions umbrella — opt-in SQL scalar UDFs, table-valued functions, and vtab-based readers. Each sub-package independent; pick by need. Several are Go-native ports of ncruces/go-sqlite3 extensions. See [docs/coverage-ext.md](docs/coverage-ext.md) for the full matrix.
+- [ext/spellfix1/doc.go](ext/spellfix1/doc.go): fuzzy-text vtab — Soundex prefilter + Damerau-Levenshtein edit-distance ranking with persistent vocabulary shadow table. Go-native re-implementation of SQLite's spellfix1 (same SQL surface, simpler internals).
 
 ## Examples (runnable)
 
@@ -59,7 +62,13 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [examples/ext-stats](examples/ext-stats/main.go): PostgreSQL-style aggregates (variance, percentile, regr_*, median, mode, every) plus a windowed regr_slope demo over a small employees table.
 - [examples/ext-unicode](examples/ext-unicode/main.go): Unicode-aware case mapping (with locale-tagged forms for Turkish / German), normalize, unaccent, NOCASE_UNICODE / NOCASE_ACCENT preset collations, plus a Swedish-locale collation that sorts `å` after `z`.
 - [examples/ext-csv](examples/ext-csv/main.go): SELECT directly from CSV files via the `ext/csv` vtab. Shows GROUP BY + SUM with type affinity, plus a JOIN across two CSV files sandboxed in an `fstest.MapFS`.
-- `ext/bloom` (Bloom-filter vtab) and `ext/lines` (line-by-line text reader vtab) land without dedicated examples in v0.5 — see `docs/coverage-ext.md` and the per-package doc.go for usage. Examples can follow if requested.
+- [examples/ext-blobio](examples/ext-blobio/main.go): stream `zeroblob(N)` allocations via `readblob` / `writeblob`, and the same data through the typed `(*Conn).OpenBlob` API.
+- [examples/ext-fileio](examples/ext-fileio/main.go): walk a sandboxed `fstest.MapFS` via `fsdir`, `readfile`-it through SQL, and confirm `writefile` is unavailable in sandbox mode.
+- [examples/ext-statement](examples/ext-statement/main.go): parametrized views — anonymous `?N` and named `:pat` binds exposed as HIDDEN columns.
+- [examples/ext-pivot](examples/ext-pivot/main.go): three-SELECT cross-tab (rows × columns × cell aggregate) over a small sales table.
+- [examples/ext-closure](examples/ext-closure/main.go): full and depth-bounded graph walks over an org chart via `transitive_closure`.
+- [examples/vfs-cksm](examples/vfs-cksm/main.go): detect simulated bit-rot via the checksum VFS — corrupt one byte, observe `SQLITE_IOERR_DATA` on read.
+- `ext/bloom` (now persistent via the shadow-blob upgrade) and `ext/lines` ship without dedicated examples — see `docs/coverage-ext.md` and the per-package doc.go for usage.
 
 ## Feature coverage matrices
 
@@ -68,6 +77,7 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [docs/coverage-fts.md](docs/coverage-fts.md): every FTS5 feature with status.
 - [docs/coverage-gorm.md](docs/coverage-gorm.md): every gorm.Dialector / Migrator / ErrorTranslator method with status.
 - [docs/coverage-ext.md](docs/coverage-ext.md): every `ext/` loadable extension with status (✓ landed / ⚠ partial / ✗ deferred / ✗ skipped), upstream reference, and the test pin. Includes the per-extension scaffolding checklist.
+- [docs/coverage-vfs.md](docs/coverage-vfs.md): every `vfs/` sub-package (root fs.FS adapter, crypto, cksm) with status, upstream reference, and the test pin. Includes the per-VFS scaffolding checklist.
 
 ## Optional
 

@@ -34,13 +34,13 @@ SQLite engine, with a hand-written wrapper that adds:
 - A `vfs` adapter that lets you back an `*sql.DB` with any `io/fs.FS` —
   `embed.FS`, `fstest.MapFS`, a zip-fs, anything.
 
-The project supports the **two most recent Go releases** — today that's
-**1.26 (current)** and **1.25 (previous)**. When a new minor ships, the
-just-superseded version drops out within one release cycle. Modern
-syntax is treated as a feature, not an accident: generics, `iter.Seq2`,
-`log/slog`, generic type aliases, `range over int`, `sync.WaitGroup.Go`,
-`strings.SplitSeq`, `reflect.TypeFor` are all in use. `just lint` runs
-`gopls modernize` to keep new contributions on the leading idiom.
+The project supports the **two most recent Go releases**. The actual
+pin lives in `go.mod`; when a new minor ships, the just-superseded
+release drops out within one cycle. Modern syntax is treated as a
+feature, not an accident: generics, `iter.Seq2`, `log/slog`, generic
+type aliases, `range over int`, `sync.WaitGroup.Go`, `strings.SplitSeq`,
+`reflect.TypeFor` are all in use. `just lint` runs `gopls modernize`
+to keep new contributions on the leading idiom.
 
 # Picking the driver name
 
@@ -328,11 +328,16 @@ The `ext/` umbrella ships opt-in SQL functions and vtab modules as Go-native por
 ```go
 import (
     sqlite "github.com/go-again/sqlite"
-    _ "github.com/go-again/sqlite/ext/regexp/auto"  // REGEXP + regexp_*
-    _ "github.com/go-again/sqlite/ext/uuid/auto"    // uuid() + gen_random_uuid + parse/format
-    _ "github.com/go-again/sqlite/ext/hash/auto"    // md5/sha2/sha3/blake2/...
-    _ "github.com/go-again/sqlite/ext/stats/auto"   // var_pop, percentile, regr_*, median, mode, ...
-    _ "github.com/go-again/sqlite/ext/unicode/auto" // upper/lower locale-aware, normalize, unaccent, collations
+    _ "github.com/go-again/sqlite/ext/regexp/auto"    // REGEXP + regexp_*
+    _ "github.com/go-again/sqlite/ext/uuid/auto"      // uuid() + gen_random_uuid + parse/format
+    _ "github.com/go-again/sqlite/ext/hash/auto"      // md5/sha2/sha3/blake2/...
+    _ "github.com/go-again/sqlite/ext/stats/auto"     // var_pop, percentile, regr_*, median, mode, ...
+    _ "github.com/go-again/sqlite/ext/unicode/auto"   // upper/lower locale-aware, normalize, unaccent, collations
+    _ "github.com/go-again/sqlite/ext/blobio/auto"    // readblob / writeblob over (*Conn).OpenBlob
+    _ "github.com/go-again/sqlite/ext/closure/auto"   // transitive_closure graph walker
+    _ "github.com/go-again/sqlite/ext/pivot/auto"     // three-SELECT cross-tab vtab
+    _ "github.com/go-again/sqlite/ext/statement/auto" // parametrized-view vtab
+    // _ "github.com/go-again/sqlite/ext/fileio/auto"    // os-backed read/write+fsdir — opt in only for trusted SQL
 )
 ```
 
@@ -341,11 +346,17 @@ Each `<name>/auto` sub-package wires the extension via a `Driver.ConnectHook` so
 The full lineup:
 
 - **`array`** — eponymous vtab that exposes a bound Go slice as a single-column SQL table. Two binding styles: transparent `db.Query("SELECT value FROM array(?)", sqlite.Pointer(slice))` (preferred — destructor releases on stmt finalize) or explicit `array.Bind(c, slice) → token, release()` for long-lived bindings.
+- **`blobio`** — `readblob(schema, table, column, rowid, offset, n) → BLOB` and `writeblob(schema, table, column, rowid, offset, data) → INTEGER` scalars over `(*Conn).OpenBlob`. Useful when you want incremental BLOB I/O from SQL (triggers, ad-hoc maintenance queries) without materializing the row. For tight Go loops, prefer calling `OpenBlob` directly.
+- **`bloom`** — persistent Bloom-filter vtab. `CREATE VIRTUAL TABLE f USING bloom(size=10000, p=0.01)`, `INSERT INTO f(word) VALUES (?)`, then `SELECT present FROM f WHERE word = ?` to test membership. Bit array lives in a `<vtab>_storage` shadow blob via `(*Conn).OpenBlob`; survives `db.Close()` / reconnect. Stable cross-process Kirsch–Mitzenmacher hashing.
+- **`closure`** — `transitive_closure` vtab. `CREATE VIRTUAL TABLE temp.tc USING transitive_closure(tablename=org, idcolumn=id, parentcolumn=manager)`, then `SELECT id, depth FROM temp.tc WHERE root = 42 AND depth <= 3` to walk every descendant of node 42. Cycle-safe (visited-set), optional `depth = ?` / `<= ?` / `< ?` bounds. Schema args can also be supplied at query time via HIDDEN columns for multi-graph workloads.
 - **`csv`** — vtab over RFC 4180 CSV files. `CREATE VIRTUAL TABLE name USING csv(filename='x.csv', header=on, schema='CREATE TABLE x(a INTEGER, b TEXT)')` and then SELECT / JOIN / aggregate against it normally. `csv.Register(c)` uses `os.Open`; `csv.RegisterFS(c, fsys)` sandboxes file access to an `fs.FS` (embed.FS, fstest.MapFS, os.DirFS). Type affinity is inferred from the schema's INTEGER / REAL / TEXT keywords.
-- **`bloom`** — Bloom-filter vtab. `CREATE VIRTUAL TABLE f USING bloom(size=10000, p=0.01)`, `INSERT INTO f(word) VALUES (?)`, then `SELECT present FROM f WHERE word = ?` to test membership. In-memory (per connection); does not persist across reconnects in v0.5.
+- **`fileio`** — `readfile(path) → BLOB`, `writefile(path, data [, mode]) → INTEGER`, `lsmode(mode_int) → TEXT`, plus the `fsdir(root [, depth])` recursive-walk vtab. `fileio.Register(c)` is os-backed (read+write of the local filesystem); `fileio.RegisterFS(c, fs.FS)` is sandboxed and omits `writefile` since `fs.FS` is read-only. Use the FS variant for untrusted SQL.
 - **`lines`** — line-by-line text-file vtab. `CREATE VIRTUAL TABLE log USING lines(filename='app.log')`, then `SELECT lineno, line FROM log WHERE line LIKE 'ERROR%'`. `lines.Register(c)` opens with `os.Open`; `lines.RegisterFS(c, fsys)` sandboxes.
+- **`pivot`** — cross-tab vtab driven by three SELECT statements: row keys, column keys (value + display name), and a per-cell aggregate. `CREATE VIRTUAL TABLE p USING pivot('SELECT DISTINCT region FROM sales', 'SELECT product, product FROM (SELECT DISTINCT product FROM sales)', 'SELECT SUM(units) FROM sales WHERE region=? AND product=?')`. The cell stmt is cached on the cursor, so a wide pivot doesn't re-prepare per cell.
 - **`regexp/gorm`** — `regexpgorm.WhereRegex(column, pattern)` returns a `clause.Expression` that combines GLOB prefix optimization with REGEXP. For anchored patterns this lets SQLite's planner do a range scan on the GLOB clause and treat the regex as a residual filter, delivering the documented LIKE-optimization win.
 - **`regexp`** — `regexp_like`, `regexp_count`, `regexp_instr`, `regexp_substr`, `regexp_replace`, and the binary `REGEXP` operator over Go's `regexp` (RE2 syntax).
+- **`spellfix1`** — fuzzy-text vtab. `CREATE VIRTUAL TABLE vocab USING spellfix1`, `INSERT INTO vocab(word [, rank]) VALUES (?, ?)`, then `SELECT word, distance FROM vocab WHERE word MATCH ?` to retrieve the closest matches by Damerau-Levenshtein edit distance, grouped phonetically via Soundex. Persistent vocabulary in a `<vtab>_storage` shadow table; survives `db.Close()` / reconnect. Optional `WHERE scope = N` caps edit distance; `LIMIT N` caps result count. Go-native re-implementation of SQLite's spellfix1 (same SQL surface, simpler algorithm).
+- **`statement`** — parametrized-view vtab. `CREATE VIRTUAL TABLE adults USING statement('SELECT name FROM users WHERE age >= ?')` then `SELECT * FROM adults WHERE "?1" = 18`. Anonymous `?` binds become `"?N"` HIDDEN columns; named `:name` / `@name` / `$name` binds become same-named HIDDEN columns. Out-of-order constraints on anonymous params are remapped to their correct stmt positions.
 - **`uuid`** — `uuid([ver, ns, data])`, `gen_random_uuid`, `uuid_str/blob/extract_*` over `github.com/google/uuid`. Covers v1/v3/v4/v5/v6/v7 (DCE Security v2 not implemented).
 - **`hash`** — `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `sha3`, `blake2s`, `blake2b`, `md4`, `ripemd160`. Each function registers only if the underlying `crypto.Hash` is `Available()`. Size variants (`sha256(x, 224)`, `sha3(x, 512)`, etc.) match nalgeon/sqlean.
 - **`ipaddr`** — `ipcontains`, `ipoverlaps`, `ipfamily`, `iphost`, `ipmasklen`, `ipnetwork` over `net/netip`. Fixes the upstream `ipoverlaps` self-referential bug.
@@ -368,6 +379,38 @@ db, _ := sql.Open("sqlite", "file:secret.db?vfs="+name)
 ```
 
 Pure-Go page-level encryption — Adiantum default (32-byte key) or AES-XTS-256 (64-byte key, `crypto.Options{Cipher: crypto.AESXTS}`). The main DB, rollback journal, WAL frames, temp files, and sub-journals are all encrypted; the `-shm` WAL index stays plaintext (memory-mapped, not user data). Length-preserving on disk: zero overhead per page. No MAC, no SQLCipher format compatibility — confidentiality only; pair with disk-level integrity (LUKS dm-integrity, ZFS) if active tampering is in scope. Key management (derivation, rotation, storage) is the caller's responsibility — we treat the key bytes as opaque. For key rotation use the open-new-VFS, copy-rows, atomic-rename recipe documented in `vfs/crypto/doc.go` — the same pattern covers cipher rotation and migrating off a pre-format-break encrypted DB. For per-IO observability set `Options.Recorder` to a custom `crypto.Recorder` or use the built-in `crypto.NewSlogRecorder(slog.Default())`; the file kind (main_db / journal / wal / temp / sub_journal) is tagged on every event so metrics consumers can split by it.
+
+## I want corruption detection at rest
+
+```go
+import "github.com/go-again/sqlite/vfs/cksm"
+
+name, fs, _ := cksm.New(cksm.Options{})
+defer fs.Close()
+
+db, _ := sql.Open("sqlite", "file:journal.db?vfs="+name)
+sc, _ := db.Conn(ctx)
+sc.Raw(func(d any) error { return cksm.EnableChecksums(d.(*sqlite.Conn), "main") })
+```
+
+Pure-Go page-level Fletcher-style checksum trailer (8 bytes per page). `EnableChecksums(conn, "main")` sets reserved_bytes=8 on the schema and runs `VACUUM` to rewrite every existing page with a trailer. On subsequent opens the VFS detects byte 20 == 8 in the SQLite header and auto-activates verification; a corrupted page surfaces as `SQLITE_IOERR_DATA` on read. cksm and vfs/crypto each wrap the system default VFS independently — stacking them needs an `Options.WrapVFS` field, planned but not landed.
+
+## I want fast in-memory tests with snapshot isolation
+
+```go
+import "github.com/go-again/sqlite/vfs/mvcc"
+
+name, fs, _ := mvcc.New(mvcc.Options{})
+defer fs.Close()
+
+// Named SHARED DBs (multiple sql.Open handles see the same data):
+db, _ := sql.Open("sqlite", "file:/shared.db?vfs="+name)
+
+// PRIVATE DBs (each sql.Open gets its own independent store):
+db2, _ := sql.Open("sqlite", "file:scratch.db?vfs="+name)
+```
+
+In-memory MVCC VFS — reader snapshots taken at SHARED-lock acquire; writer mutations buffered until xSync, then atomically published as a new snapshot. Concurrent readers see the pre-commit state for the duration of their transaction. One writer at a time per shared DB; private DBs are fully isolated. WAL mode is not supported (no log file in an in-memory store); use the snapshot-isolation semantics directly. Trade-offs: no durability, no checkpoint, per-commit memory copy is proportional to dataset size.
 
 # Pitfalls
 
@@ -549,12 +592,12 @@ Same swap. The mattn CGo dependency goes away.
 
 # Versioning and stability
 
-Pre-v1.0. Public API is settling but not frozen. Renames in the
-v0.x → v0.x+1 line are allowed (the most recent rename pass swapped
-`Match` → `Neighbor`, `Item` → `Row`, `Result[T]` → `Hit[T]`,
-`WithWhere` → `WithFilter` — without deprecated aliases, because the
-package was fresh enough that no real-world consumers had to bridge).
-Pin to a specific version in your `go.mod`.
+Public API is settling but not frozen. Renames between development
+tags are allowed (the most recent rename pass swapped `Match` →
+`Neighbor`, `Item` → `Row`, `Result[T]` → `Hit[T]`, `WithWhere` →
+`WithFilter` — without deprecated aliases, because the package was
+fresh enough that no real-world consumers had to bridge). Pin to a
+specific tag in your `go.mod`.
 
 # Pointers
 

@@ -26,7 +26,7 @@ type in `gorm/sqlite.go`.
 | Method | Status | Test | Notes |
 |---|---|---|---|
 | `Name() string` | ✓ typed | `TestDialector` | Returns `"sqlite"`. |
-| `Initialize(*DB) error` | ✓ typed | `TestDialector`, `TestGorm_AutoMigrate_CreatesTable` | Registers default callbacks; gates `RETURNING`-aware clauses on SQLite >= 3.35.0. |
+| `Initialize(*DB) error` | ✓ typed | `TestDialector`, `TestGorm_AutoMigrate_CreatesTable` | Registers default callbacks; gates `RETURNING`-aware clauses on the SQLite release that introduced the clause. |
 | `Migrator(*DB) Migrator` | ✓ typed | `TestGorm_AutoMigrate_CreatesTable` | Returns our `Migrator{migrator.Migrator{...}}` wrapper. |
 | `DataTypeOf(*schema.Field) string` | ✓ typed | `TestGorm_AutoMigrate_CreatesTable` | bool→numeric, int/uint→integer (auto-increment becomes `integer PRIMARY KEY AUTOINCREMENT`), float→real, string→text, time→datetime, bytes→blob. |
 | `DefaultValueOf(*schema.Field) clause.Expression` | ✓ typed | covered transitively via AutoMigrate | `NULL` for auto-increment, `DEFAULT` otherwise. |
@@ -65,7 +65,7 @@ Tests live in `gorm/integration_test.go`.
 | Method | Status | Test |
 |---|---|---|
 | `AddColumn(dst any, field string) error` | ⚠ inherited | — |
-| `DropColumn(dst any, field string) error` | ✓ typed | — | Overridden; uses recreate-table approach (SQLite < 3.35 lacks DROP COLUMN). |
+| `DropColumn(dst any, field string) error` | ✓ typed | — | Overridden; uses recreate-table approach (older SQLite releases lacked DROP COLUMN). |
 | `AlterColumn(dst any, field string) error` | ✓ typed | — | Recreate-table with new column definition. |
 | `MigrateColumn(dst any, *schema.Field, ColumnType) error` | ⚠ inherited | — |
 | `MigrateColumnUnique(dst any, *schema.Field, ColumnType) error` | ⚠ inherited | — |

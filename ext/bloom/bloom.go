@@ -7,21 +7,24 @@
 //	INSERT INTO recent(word) VALUES ('hello');
 //	SELECT present FROM recent WHERE word = ?;  -- returns 1 if present.
 //
-// # In-memory only
+// # Persistence
 //
-// This implementation keeps the bit array in Go memory for the lifetime
-// of the connection. The filter does NOT persist across `db.Close()` or
-// reconnects — see [ncruces/ext/bloom] for an upstream design that
-// persists to a shadow table via the SQLite incremental BLOB API
-// (`sqlite3_blob_open`), which our driver does not yet expose. For the
-// common "build once per session, query many times" pattern, in-memory
-// is fine; for cross-session use, write your own persistence shim.
+// The bit array is persisted to a shadow table named `<vtab>_storage`
+// on the same schema. Reads and writes go through SQLite's incremental
+// BLOB API ([github.com/go-again/sqlite.Conn.OpenBlob]), so the bit
+// array survives [database/sql.DB.Close] and reconnects. The shadow
+// table is dropped automatically when the virtual table is dropped.
 //
 // # Module parameters
 //
-//   - size=N — expected element count. Used to size the bit array.
-//     Default: 100.
-//   - p=0.01 — target false-positive probability (0 < p < 1). Default 0.01.
+// Positional and named forms are both accepted:
+//
+//	CREATE VIRTUAL TABLE name USING bloom(100000, 0.01, 7);
+//	CREATE VIRTUAL TABLE name USING bloom(size=100000, p=0.01, k=7);
+//
+//   - size=N (default 100) — expected element count. Used to size the
+//     bit array.
+//   - p=0.01 (default 0.01) — target false-positive probability (0 < p < 1).
 //   - k=N — number of hash functions. Default: optimal for the chosen p,
 //     `round(-log2(p))`.
 //
@@ -49,8 +52,7 @@
 //
 // # Acknowledgement
 //
-// Ported from [ncruces/ext/bloom]. Function lineup matches; persistence
-// strategy differs (we go in-memory).
+// Ported from [ncruces/ext/bloom] with a Go-native blob-IO path.
 //
 // [ncruces/ext/bloom]: https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/bloom
 package bloom
@@ -60,12 +62,22 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"math"
 	"strconv"
 	"strings"
-	"sync"
 
 	sqlite "github.com/go-again/sqlite"
+)
+
+// Stable 8-byte salts prepended to the FNV input to derive two
+// stream-independent 64-bit hashes from a single hash family. Stable
+// across processes because the filter state in the shadow blob must
+// give the same bit positions on every reopen — a randomized
+// hash/maphash seed would break that contract.
+var (
+	saltA = [8]byte{0xc9, 0xf1, 0x0a, 0x4c, 0xb1, 0xc3, 0xeb, 0x96}
+	saltB = [8]byte{0x9e, 0x37, 0x79, 0xb9, 0x7f, 0x4a, 0x7c, 0x15}
 )
 
 // ModuleName is the name the vtab registers under: `bloom`.
@@ -76,34 +88,106 @@ func Register(c *sqlite.Conn) error {
 	return c.CreateModule(ModuleName, ctor)
 }
 
-func ctor(c *sqlite.Conn, _, _, _ string, args []string) (sqlite.VTab, error) {
-	t, err := buildTable(args)
-	if err != nil {
-		return nil, err
+func ctor(c *sqlite.Conn, _, schema, vtabName string, args []string) (sqlite.VTab, error) {
+	if schema == "" {
+		schema = "main"
 	}
+	storage := vtabName + "_storage"
 	if err := c.DeclareVTab(
 		`CREATE TABLE x(present, word TEXT HIDDEN NOT NULL PRIMARY KEY) WITHOUT ROWID`,
 	); err != nil {
+		return nil, err
+	}
+
+	// Try the connect path first: SELECT existing params from the
+	// shadow table. If the table doesn't exist yet, fall through to
+	// create-and-init.
+	t := &table{
+		conn:    c,
+		schema:  schema,
+		storage: storage,
+	}
+	if err := t.loadParams(); err == nil {
+		return t, nil
+	}
+
+	// Create path: build params from args, create the shadow table,
+	// insert the zeroblob row.
+	if err := parseArgs(t, args); err != nil {
+		return nil, err
+	}
+	if err := t.create(); err != nil {
 		return nil, err
 	}
 	return t, nil
 }
 
 type table struct {
-	mu     sync.RWMutex
-	bits   []uint64 // bit array, packed
-	mBits  uint64   // total bits in the array
-	hashes int      // number of hash functions (k)
-	prob   float64  // documented false-positive probability
-	size   int64    // expected element count
+	conn    *sqlite.Conn
+	schema  string
+	storage string
+
+	// hashes is k — number of hash functions probed per word.
+	hashes int
+	// bytes is the size of the bit array in bytes (m/8).
+	bytes int64
+	prob  float64
+	nElem int64
 }
 
-func (*table) Disconnect() error { return nil }
-func (*table) Destroy() error    { return nil }
+func (t *table) qualified() string {
+	return quote(t.schema) + "." + quote(t.storage)
+}
+
+func (t *table) loadParams() error {
+	stmt, err := t.conn.Prepare(fmt.Sprintf(
+		`SELECT length(data), p, n, k FROM %s WHERE rowid=1`, t.qualified()))
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	rs, err := stmt.Query(nil)
+	if err != nil {
+		return err
+	}
+	defer rs.Close()
+	dest := make([]driver.Value, 4)
+	if err := rs.Next(dest); err != nil {
+		return err
+	}
+	t.bytes = toInt64(dest[0])
+	t.prob = toFloat(dest[1])
+	t.nElem = toInt64(dest[2])
+	t.hashes = int(toInt64(dest[3]))
+	return nil
+}
+
+func (t *table) create() error {
+	if _, err := t.conn.Exec(fmt.Sprintf(
+		`CREATE TABLE %s (data BLOB, p REAL, n INTEGER, m INTEGER, k INTEGER)`,
+		t.qualified()), nil); err != nil {
+		return fmt.Errorf("bloom: create storage: %w", err)
+	}
+	if _, err := t.conn.Exec(fmt.Sprintf(
+		`INSERT INTO %s (rowid, data, p, n, m, k) VALUES (1, zeroblob(%d), %f, %d, %d, %d)`,
+		t.qualified(), t.bytes, t.prob, t.nElem, 8*t.bytes, t.hashes), nil); err != nil {
+		return fmt.Errorf("bloom: seed storage: %w", err)
+	}
+	return nil
+}
+
+func (t *table) Disconnect() error { return nil }
+
+func (t *table) Destroy() error {
+	if _, err := t.conn.Exec(`DROP TABLE `+t.qualified(), nil); err != nil {
+		return fmt.Errorf("bloom: drop storage: %w", err)
+	}
+	return nil
+}
 
 // BestIndex routes `word = ?` constraints into Filter as argv[0].
-// Anything else gets SQLITE_CONSTRAINT — there's no other useful index
-// over a Bloom filter.
+// Anything else gets a CONSTRAINT — there's no other useful index over
+// a Bloom filter.
 func (t *table) BestIndex(info *sqlite.IndexInfo) error {
 	for i, c := range info.Constraints {
 		if c.Column == 1 && c.Op == sqlite.OpEQ && c.Usable {
@@ -122,21 +206,37 @@ func (t *table) Open() (sqlite.VTabCursor, error) {
 }
 
 // Insert hooks the [sqlite.VTabUpdater] interface so
-// `INSERT INTO name(word) VALUES (?)` populates the bit array.
-// Update/Delete are unsupported by Bloom filters and return an error.
+// `INSERT INTO name(word) VALUES (?)` writes new bits to the shadow
+// blob. Update/Delete are unsupported by Bloom filters and return an
+// error.
 func (t *table) Insert(cols []driver.Value, _ *int64) error {
 	if len(cols) < 2 {
 		return fmt.Errorf("bloom: insert expects (present, word) columns")
 	}
 	word := stringify(cols[1])
 	if word == "" {
-		return nil // ignore NULL / empty
+		return nil
 	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	b, err := t.conn.OpenBlob(t.schema, t.storage, "data", 1, true)
+	if err != nil {
+		return fmt.Errorf("bloom: open storage blob: %w", err)
+	}
+	defer b.Close()
+	mBits := uint64(8 * t.bytes)
 	for k := range t.hashes {
-		bit := kthHash(k, word) % t.mBits
-		t.bits[bit/64] |= 1 << (bit % 64)
+		bit := kthHash(k, word) % mBits
+		bytePos := int64(bit >> 3)
+		bitMask := byte(1 << (bit & 7))
+		var buf [1]byte
+		// io.ReaderAt may return io.EOF along with the final byte; that
+		// is non-fatal — only treat other errors as failures.
+		if n, err := b.ReadAt(buf[:], bytePos); err != nil && !(errors.Is(err, io.EOF) && n == 1) {
+			return fmt.Errorf("bloom: read bit %d: %w", bit, err)
+		}
+		buf[0] |= bitMask
+		if _, err := b.WriteAt(buf[:], bytePos); err != nil {
+			return fmt.Errorf("bloom: write bit %d: %w", bit, err)
+		}
 	}
 	return nil
 }
@@ -164,16 +264,25 @@ func (c *cursor) Filter(_ int, _ string, args []driver.Value) error {
 	c.emitted = false
 	word := stringify(args[0])
 	if word == "" {
-		// NULL or empty word — treat as not present.
 		c.present = false
 		return nil
 	}
-	c.table.mu.RLock()
-	defer c.table.mu.RUnlock()
+	b, err := c.table.conn.OpenBlob(c.table.schema, c.table.storage, "data", 1, false)
+	if err != nil {
+		return fmt.Errorf("bloom: open storage blob: %w", err)
+	}
+	defer b.Close()
+	mBits := uint64(8 * c.table.bytes)
 	c.present = true
 	for k := range c.table.hashes {
-		bit := kthHash(k, word) % c.table.mBits
-		if c.table.bits[bit/64]&(1<<(bit%64)) == 0 {
+		bit := kthHash(k, word) % mBits
+		bytePos := int64(bit >> 3)
+		bitMask := byte(1 << (bit & 7))
+		var buf [1]byte
+		if n, err := b.ReadAt(buf[:], bytePos); err != nil && !(errors.Is(err, io.EOF) && n == 1) {
+			return fmt.Errorf("bloom: read bit %d: %w", bit, err)
+		}
+		if buf[0]&bitMask == 0 {
 			c.present = false
 			return nil
 		}
@@ -198,54 +307,65 @@ func (c *cursor) Column(col int) (driver.Value, error) {
 
 // --- arg parsing + bit-array math ---
 
-func buildTable(args []string) (*table, error) {
+func parseArgs(t *table, args []string) error {
 	var (
 		size = int64(100)
 		p    = 0.01
 		k    = 0
 	)
+	positional := 0
 	for _, a := range args {
-		key, val, ok := strings.Cut(a, "=")
-		if !ok {
-			return nil, fmt.Errorf("bloom: argument %q is not a key=value pair", a)
-		}
+		key, val, hasEq := strings.Cut(a, "=")
 		key = strings.TrimSpace(key)
 		val = strings.TrimSpace(val)
+		if !hasEq {
+			switch positional {
+			case 0:
+				key, val = "size", key
+			case 1:
+				key, val = "p", key
+			case 2:
+				key, val = "k", key
+			default:
+				return fmt.Errorf("bloom: too many positional arguments at %q", a)
+			}
+			positional++
+		}
 		switch key {
 		case "size", "n":
 			n, err := strconv.ParseInt(unquote(val), 10, 63)
 			if err != nil || n <= 0 {
-				return nil, fmt.Errorf("bloom: size must be a positive integer, got %q", val)
+				return fmt.Errorf("bloom: size must be a positive integer, got %q", val)
 			}
 			size = n
 		case "p", "probability":
 			f, err := strconv.ParseFloat(unquote(val), 64)
 			if err != nil || f <= 0 || f >= 1 {
-				return nil, fmt.Errorf("bloom: p must be in (0,1), got %q", val)
+				return fmt.Errorf("bloom: p must be in (0,1), got %q", val)
 			}
 			p = f
 		case "k", "hashes":
 			n, err := strconv.Atoi(unquote(val))
 			if err != nil || n <= 0 {
-				return nil, fmt.Errorf("bloom: k must be a positive integer, got %q", val)
+				return fmt.Errorf("bloom: k must be a positive integer, got %q", val)
 			}
 			k = n
 		default:
-			return nil, fmt.Errorf("bloom: unknown parameter %q", key)
+			return fmt.Errorf("bloom: unknown parameter %q", key)
 		}
 	}
 	if k == 0 {
 		k = optimalK(p)
 	}
-	m := optimalM(size, p)
-	words := (m + 63) / 64
-	return &table{
-		bits:   make([]uint64, words),
-		mBits:  uint64(m),
-		hashes: k,
-		prob:   p,
-		size:   size,
-	}, nil
+	t.hashes = k
+	t.prob = p
+	t.nElem = size
+	t.bytes = optimalBytes(size, p)
+	return nil
+}
+
+func quote(ident string) string {
+	return `"` + strings.ReplaceAll(ident, `"`, `""`) + `"`
 }
 
 func unquote(s string) string {
@@ -263,25 +383,33 @@ func optimalK(p float64) int {
 	return int(k)
 }
 
-func optimalM(n int64, p float64) uint64 {
-	// m = -n * ln(p) / (ln(2))²
+// optimalBytes returns ceil(m/8), where m = -n*ln(p) / (ln(2))² is the
+// Bloom-filter optimal bit count for n elements at false-positive
+// probability p.
+func optimalBytes(n int64, p float64) int64 {
 	m := -float64(n) * math.Log(p) / (math.Ln2 * math.Ln2)
 	if m < 64 {
-		return 64
+		m = 64
 	}
-	return uint64(math.Ceil(m))
+	return (int64(math.Ceil(m)) + 7) / 8
 }
 
-// kthHash uses the Kirsch-Mitzenmacher double-hashing trick: compute
-// two independent 64-bit hashes (FNV-1 and FNV-1a) and combine as
+// kthHash uses the Kirsch-Mitzenmacher double-hashing trick: derive
+// two stream-independent 64-bit hashes from a single FNV-1a stream by
+// prepending two different 8-byte salts, then combine as
 // `h1 + k*h2`. Approximates k independent hash functions with two real
-// hashes. Standard technique for Bloom filters.
+// hashes. The salts are constants — the bit positions must match
+// across process restarts since the shadow blob persists.
 func kthHash(k int, word string) uint64 {
-	h1 := fnv.New64()
-	_, _ = h1.Write([]byte(word))
-	h2 := fnv.New64a()
-	_, _ = h2.Write([]byte(word))
-	return h1.Sum64() + uint64(k)*h2.Sum64()
+	h := fnv.New64a()
+	_, _ = h.Write(saltA[:])
+	_, _ = h.Write([]byte(word))
+	h1 := h.Sum64()
+	h.Reset()
+	_, _ = h.Write(saltB[:])
+	_, _ = h.Write([]byte(word))
+	h2 := h.Sum64()
+	return h1 + uint64(k)*h2
 }
 
 func stringify(v driver.Value) string {
@@ -303,4 +431,30 @@ func stringify(v driver.Value) string {
 		return "false"
 	}
 	return fmt.Sprint(v)
+}
+
+func toInt64(v driver.Value) int64 {
+	switch x := v.(type) {
+	case int64:
+		return x
+	case float64:
+		return int64(x)
+	case []byte:
+		n, _ := strconv.ParseInt(string(x), 10, 64)
+		return n
+	case string:
+		n, _ := strconv.ParseInt(x, 10, 64)
+		return n
+	}
+	return 0
+}
+
+func toFloat(v driver.Value) float64 {
+	switch x := v.(type) {
+	case float64:
+		return x
+	case int64:
+		return float64(x)
+	}
+	return 0
 }

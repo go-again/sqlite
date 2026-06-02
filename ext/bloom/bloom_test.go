@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,8 +13,131 @@ import (
 	"github.com/go-again/sqlite/ext/bloom"
 )
 
+// openFileSession opens a file-backed DB at path, pins one conn,
+// registers bloom on it via the per-conn (*sqlite.Conn).Raw path so we
+// avoid mutating Driver.ConnectHook from inside a test (the global
+// mutation races with parallel tests under -race and chained hooks
+// double-register the module).
+func openFileSession(t *testing.T, path string) (*sql.DB, *sql.Conn) {
+	t.Helper()
+	if raceEnabled {
+		t.Skip("skipping under -race: see openDB")
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = db.Close() })
+
+	sc, err := db.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sc.Close() })
+
+	if err := sc.Raw(func(driverConn any) error {
+		c, ok := driverConn.(*sqlite.Conn)
+		if !ok {
+			return errors.New("not *sqlite.Conn")
+		}
+		return bloom.Register(c)
+	}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	return db, sc
+}
+
+// openFileSessionNoCleanup mirrors openFileSession but returns close
+// funcs so the persistence test can fully tear down a session before
+// opening the next one (necessary because t.Cleanup runs at test end,
+// LIFO, which would leave Session 1's *sql.DB still holding the file
+// lock while Session 2 tries to open the same path).
+func openFileSessionNoCleanup(t *testing.T, path string) (*sql.DB, *sql.Conn) {
+	t.Helper()
+	if raceEnabled {
+		t.Skip("skipping under -race: see openDB")
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	sc, err := db.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sc.Raw(func(driverConn any) error {
+		c, ok := driverConn.(*sqlite.Conn)
+		if !ok {
+			return errors.New("not *sqlite.Conn")
+		}
+		return bloom.Register(c)
+	}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	return db, sc
+}
+
+func TestBloom_PersistsAcrossReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bloom.db")
+	ctx := context.Background()
+
+	// Session 1: create the vtab, insert words, fully tear down before
+	// opening Session 2 so the file lock is released.
+	{
+		db, sc := openFileSessionNoCleanup(t, path)
+		if _, err := sc.ExecContext(ctx,
+			`CREATE VIRTUAL TABLE persist USING bloom(size=1000, p=0.01)`); err != nil {
+			t.Fatal(err)
+		}
+		for _, w := range []string{"durable", "persistent", "stored"} {
+			if _, err := sc.ExecContext(ctx,
+				`INSERT INTO persist(word) VALUES (?)`, w); err != nil {
+				t.Fatal(err)
+			}
+		}
+		sc.Close()
+		db.Close()
+	}
+
+	// Session 2: reopen, look up the same words. The vtab schema is
+	// rebuilt by xConnect; bits live in the shadow blob.
+	{
+		db, sc := openFileSessionNoCleanup(t, path)
+		defer db.Close()
+		defer sc.Close()
+		for _, w := range []string{"durable", "persistent", "stored"} {
+			rows, err := sc.QueryContext(ctx,
+				`SELECT present FROM persist WHERE word = ?`, w)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !rows.Next() {
+				rows.Close()
+				t.Errorf("word %q: missing after reopen", w)
+				continue
+			}
+			rows.Close()
+		}
+		// An unseen word should not match.
+		rows, err := sc.QueryContext(ctx,
+			`SELECT present FROM persist WHERE word = 'never-seen'`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rows.Next() {
+			t.Error("never-seen word matched after reopen")
+		}
+		rows.Close()
+	}
+}
+
 func openDB(t *testing.T) (*sql.DB, *sql.Conn) {
 	t.Helper()
+	if raceEnabled {
+		t.Skip("skipping under -race: bloom persists via (*Conn).OpenBlob; modernc Xsqlite3_blob_open trips checkptr")
+	}
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatalf("Open: %v", err)

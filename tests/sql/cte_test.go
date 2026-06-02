@@ -105,7 +105,7 @@ func TestCTE_InInsert(t *testing.T) {
 }
 
 // TestCTE_MaterializationHint asserts the MATERIALIZED / NOT MATERIALIZED
-// hints parse and execute (introduced in SQLite 3.35). Result is the same
+// hints parse and execute against the bundled SQLite. Result is the same
 // either way; the hint affects the planner, not the semantics.
 func TestCTE_MaterializationHint(t *testing.T) {
 	db := openDB(t)

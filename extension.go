@@ -36,12 +36,13 @@ func (c *conn) enableLoadExtension(on bool) error {
 // Mattn compatibility: equivalent to mattn's SQLiteConn.LoadExtension.
 //
 // Platform note: success depends on dynamic-loader support in
-// modernc.org/libc. As of v1.72.x, libc's Xdlopen (darwin) and
-// XLoadLibraryW (windows) shims are not implemented and abort the
-// process with "TODOTODO" the moment they're reached — which happens
-// even on the disabled-extensions error path. linux and freebsd are
-// fine. The test suite skips both LoadExtension tests on darwin and
-// windows for that reason; the positive path is platform-dependent.
+// modernc.org/libc. As of the libc release pinned in `go.mod`, libc's
+// Xdlopen (darwin) and XLoadLibraryW (windows) shims are not
+// implemented and abort the process with "TODOTODO" the moment they
+// are reached — which happens even on the disabled-extensions error
+// path. linux and freebsd are fine. The test suite skips both
+// LoadExtension tests on darwin and windows for that reason; the
+// positive path is platform-dependent.
 func (c *Conn) LoadExtension(libPath, entry string) error {
 	return c.loadExtension(libPath, entry)
 }

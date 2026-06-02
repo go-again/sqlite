@@ -151,7 +151,7 @@ clean:
     @find . -name 'cover.out' -not -path './.*' -delete
     @rm -f /tmp/cover.out /tmp/cover.html
 
-# Bump modernc.org/sqlite to a tag (e.g. `just bump-modernc v1.51.0`); libc follows.
+# Bump modernc.org/sqlite to a tag (e.g. `just bump-modernc vX.Y.Z`); libc follows.
 bump-modernc VERSION:
     @echo "Bumping modernc.org/sqlite to {{VERSION}}..."
     go get modernc.org/sqlite@{{VERSION}}

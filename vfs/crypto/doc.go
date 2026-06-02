@@ -96,14 +96,12 @@
 // the main DB at the same offset.
 //
 // The file-kind byte is part of the on-disk format. Databases
-// written by a build that predates the file-kind tweak (the
-// pre-v0.5 development series before this format break landed) are
-// not readable by this package, and vice versa. There's no version
+// written by a build that predates the file-kind tweak are not
+// readable by this package, and vice versa. There's no version
 // banner in the file itself — SQLite reports "file is not a
 // database" when the cipher decrypts garbage. If you have an
 // archived pre-format-break encrypted DB, decrypt it with the older
-// package version into plaintext first and re-encrypt with the
-// current one.
+// build into plaintext first and re-encrypt with the current one.
 //
 // # Threat model boundaries
 //

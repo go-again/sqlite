@@ -57,8 +57,8 @@
 //     GetIndexes, and a custom CurrentDatabase that reads
 //     PRAGMA database_list.
 //   - DDL parser (ddlmod.go) used by the recreate-table approach
-//     SQLite needs for column drops / alters / constraint changes
-//     prior to SQLite 3.35.
+//     SQLite needs for column drops / alters / constraint changes on
+//     SQLite releases that predate native ALTER TABLE … DROP COLUMN.
 //   - DropTableHook interface: third-party gorm plugins (this module's
 //     vec/gorm and fts/gorm bridges, for example) can implement
 //     DropTableHook to cascade their sidecar cleanup when callers run

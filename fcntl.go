@@ -21,6 +21,14 @@ type FileControl interface {
 	// See
 	// https://www.sqlite.org/c3ref/c_fcntl_begin_atomic_write.html#sqlitefcntldataversion.
 	FileControlDataVersion(dbName string) (uint32, error)
+	// Query (n<0) or set (n>=0) SQLITE_FCNTL_RESERVE_BYTES for dbName.
+	// Returns the resulting reserved-bytes count. Reserved bytes are an
+	// unused area at the end of each page available to extensions like
+	// the checksum VFS (see github.com/go-again/sqlite/vfs/cksm).
+	// Setting the value on a non-empty database does not retroactively
+	// rewrite existing pages — VACUUM the database after setting it so
+	// that every page is rebuilt with the new trailer width.
+	FileControlReserveBytes(dbName string, n int) (int, error)
 }
 
 var _ FileControl = (*conn)(nil)
@@ -41,6 +49,15 @@ func (c *conn) FileControlDataVersion(dbName string) (uint32, error) {
 	*(*uint32)(unsafe.Pointer(pu32)) = 0
 	err := c.fileControl(dbName, sqlite3.SQLITE_FCNTL_DATA_VERSION, pu32)
 	return *(*uint32)(unsafe.Pointer(pu32)), err
+}
+
+func (c *conn) FileControlReserveBytes(dbName string, n int) (int, error) {
+	pi32 := c.tls.Alloc(4)
+	defer c.tls.Free(4)
+
+	*(*int32)(unsafe.Pointer(pi32)) = int32(n)
+	err := c.fileControl(dbName, sqlite3.SQLITE_FCNTL_RESERVE_BYTES, pi32)
+	return int(*(*int32)(unsafe.Pointer(pi32))), err
 }
 
 func (c *conn) fileControl(dbName string, op int, pArg uintptr) error {

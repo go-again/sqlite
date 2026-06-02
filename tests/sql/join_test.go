@@ -126,9 +126,9 @@ func TestJoin_SelfJoin(t *testing.T) {
 	}
 }
 
-// TestJoin_RightOuterRejected asserts SQLite parses RIGHT OUTER JOIN as a
-// syntax error. (Older SQLite versions rejected; 3.39+ accepts it. Today
-// we ship 3.53 which supports it — so this test ASSERTS support instead.)
+// TestJoin_RightOuterSupported asserts the bundled SQLite parses
+// RIGHT OUTER JOIN. (Older SQLite releases rejected it; the modern
+// release we ship supports it, so this test asserts support.)
 func TestJoin_RightOuterSupported(t *testing.T) {
 	db := openDB(t)
 	mustExec(t, db, `create table a (id int); insert into a values (1)`)

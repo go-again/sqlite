@@ -8,8 +8,8 @@ import (
 
 // hasMathFunctions probes whether the bundled SQLite has the optional
 // math functions compiled in (the SQLITE_ENABLE_MATH_FUNCTIONS flag).
-// modernc/sqlite v1.50.1 ships them on by default; this guard is for
-// forward-compat in case future bumps split them out.
+// modernc/sqlite ships them on by default at the pin in `go.mod`; this
+// guard is for forward-compat in case future bumps split them out.
 func hasMathFunctions(t *testing.T, db *sql.DB) bool {
 	t.Helper()
 	var v float64

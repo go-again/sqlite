@@ -35,21 +35,20 @@ db, _ := sql.Open("sqlite3", "file:my.db?_pragma=foreign_keys(1)")
 
 ## Supported Go versions
 
-The project tracks the **two most recent Go releases**: today that's
-**Go 1.26 (current)** and **Go 1.25 (previous)**. Anything older is
-unsupported on purpose. When a new Go minor ships, the just-superseded
-version drops out of the support matrix within one release cycle.
-Downstream consumers who need to stay on an older Go should pin an
-older tag of this package.
+The project tracks the **two most recent Go releases**. Anything older
+is unsupported on purpose. When a new Go minor ships, the just-
+superseded release drops out of the support matrix within one cycle;
+the actual pin lives in `go.mod`. Downstream consumers who need to
+stay on an older Go should pin an older tag of this package.
 
 This is a deliberate stance, not a side-effect:
 
 - **Modern syntax is a feature.** The typed APIs lean on generics,
-  `iter.Seq2`, `log/slog`, generic type aliases (Go 1.24+), `range
-  over int` (Go 1.22+), `sync.WaitGroup.Go` (Go 1.25), `strings.SplitSeq`,
-  `reflect.TypeFor`. We adopt new idioms as soon as the second-most-
-  recent release picks them up. `just lint` runs `gopls modernize` to
-  enforce that contributions don't drift to older forms.
+  `iter.Seq2`, `log/slog`, generic type aliases, `range over int`,
+  `sync.WaitGroup.Go`, `strings.SplitSeq`, `reflect.TypeFor`. We adopt
+  new idioms as soon as the second-most-recent release picks them up.
+  `just lint` runs `gopls modernize` to enforce that contributions
+  don't drift to older forms.
 - **Code stays small.** `for i := range n` doesn't need a comment;
   `for i := 0; i < n; i++` would. Fewer lines, fewer reviewer-attention
   pixels.
@@ -96,7 +95,9 @@ The cost: a constant-factor perf gap on hot UDF / per-row callback paths
 | `github.com/go-again/sqlite/fusion` | Rank-fusion helpers — combine `vec.KNN` and `fts.Search` results via Reciprocal Rank Fusion. |
 | `github.com/go-again/sqlite/vfs` | Expose any `io/fs.FS` (incl. `embed.FS`) as a read-only SQLite VFS. |
 | `github.com/go-again/sqlite/vfs/crypto` | Pure-Go encryption-at-rest VFS — Adiantum or AES-XTS-256, transparent page-level encryption of main DB + journal + WAL + temp files. |
-| `github.com/go-again/sqlite/ext/<name>` | Opt-in loadable Go extensions: `array` (bind a slice as a SQL table), `csv`, `regexp`, `regexp/gorm` (GLOB-prefix + REGEXP gorm helper), `uuid`, `hash`, `ipaddr`, `zorder`, `stats` (variance/percentile/regr_*/median/mode aggregates + windows), `unicode` (case mapping / normalize / unaccent / collations), `bloom` (Bloom-filter vtab), `lines` (line-by-line text-file vtab). Pick per-connection via `<name>.Register(c)` or pool-wide via blank-import of `<name>/auto`. See [docs/coverage-ext.md](docs/coverage-ext.md) for the matrix. |
+| `github.com/go-again/sqlite/vfs/cksm` | Pure-Go corruption-detection VFS — Fletcher-style 8-byte checksum trailer per page; surfaces silent bit-rot as `SQLITE_IOERR_DATA`. |
+| `github.com/go-again/sqlite/vfs/mvcc` | Pure-Go in-memory MVCC VFS — snapshot-isolated reads + atomic-publish writes. Shared (`file:/name`) or private (`file:name`) databases. |
+| `github.com/go-again/sqlite/ext/<name>` | Opt-in loadable Go extensions: `array` (bind a slice as a SQL table), `blobio` (incremental BLOB I/O scalars), `bloom` (persistent Bloom-filter vtab), `closure` (transitive_closure graph walker), `csv`, `fileio` (readfile / writefile / lsmode + recursive `fsdir` vtab), `hash`, `ipaddr`, `lines` (line-by-line text-file vtab), `pivot` (three-SELECT cross-tab), `regexp`, `regexp/gorm` (GLOB-prefix + REGEXP gorm helper), `spellfix1` (fuzzy-text vtab — Soundex + Damerau-Levenshtein, persistent), `statement` (parametrized views with `?` and named binds), `stats` (variance/percentile/regr_*/median/mode aggregates + windows), `unicode` (case mapping / normalize / unaccent / collations), `uuid`, `zorder`. Pick per-connection via `<name>.Register(c)` or pool-wide via blank-import of `<name>/auto`. See [docs/coverage-ext.md](docs/coverage-ext.md) for the matrix. |
 
 ## Quick starts
 
@@ -413,7 +414,8 @@ with them), so the build tags become no-ops:
 
 ## SQLite version
 
-Inherited from `modernc.org/sqlite` — currently **3.53.1**.
+Inherited from `modernc.org/sqlite`; the exact build follows whatever
+that dependency ships in `go.mod`.
 
 ## Performance
 

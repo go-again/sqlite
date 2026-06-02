@@ -364,8 +364,8 @@ func SearchSQL[T any](db *gorm.DB, q fts.Query, opts ...Option) (string, []any, 
 // buildFTSSearchOpts translates bridge options into the raw
 // [fts.SearchOption] list. Soft-delete + WithFilter stack into a
 // single [fts.WithFilter]; snippet / highlight / ranking / limit /
-// offset pass through; the v0.4 [WithSelect] / [WithJoin] /
-// [WithOrderBy] options pass through too.
+// offset pass through; the [WithSelect] / [WithJoin] / [WithOrderBy]
+// options pass through too.
 func buildFTSSearchOpts(o options, mm *modelMeta) []fts.SearchOption {
 	var out []fts.SearchOption
 

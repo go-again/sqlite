@@ -1,0 +1,254 @@
+package cksm
+
+import (
+	"database/sql/driver"
+	"encoding/binary"
+	"fmt"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"unsafe"
+
+	"modernc.org/libc"
+	sqlite3 "modernc.org/sqlite/lib"
+
+	"github.com/go-again/sqlite/internal/cabi"
+)
+
+// Options configures a [New] registration. All fields are optional.
+type Options struct {
+	// PageSize must match the database's PRAGMA page_size. Defaults to
+	// 4096 (SQLite's default). Must be a power of two in [512, 65536].
+	PageSize int
+}
+
+// FS is a registered checksum VFS. Each [New] returns a distinct FS;
+// call Close to unregister and release resources.
+type FS struct {
+	name     string
+	cname    uintptr
+	cvfs     uintptr
+	tls      *libc.TLS
+	pageSize int32
+	token    uintptr
+	closed   atomic.Bool
+}
+
+const defaultPageSize = 4096
+
+var newVfsID atomic.Uint64
+
+// stateMu serializes [New] and [FS.Close] so libc TLS setup and the
+// global VFS registration table aren't raced.
+var stateMu sync.Mutex
+
+// fsRegistry maps the opaque token stored in pVfs->FpAppData (and
+// later copied into per-file state) back to the *FS that owns it.
+// Through a registry rather than raw unsafe.Pointer so the FS stays
+// GC-reachable while C-side state holds a reference.
+var (
+	fsRegistryMu sync.RWMutex
+	fsRegistry   = map[uintptr]*FS{}
+	nextFSToken  atomic.Uint64
+)
+
+func registerFS(fs *FS) uintptr {
+	tok := uintptr(nextFSToken.Add(1))
+	fsRegistryMu.Lock()
+	fsRegistry[tok] = fs
+	fsRegistryMu.Unlock()
+	return tok
+}
+
+func lookupFS(tok uintptr) *FS {
+	fsRegistryMu.RLock()
+	defer fsRegistryMu.RUnlock()
+	return fsRegistry[tok]
+}
+
+func unregisterFS(tok uintptr) {
+	fsRegistryMu.Lock()
+	delete(fsRegistry, tok)
+	fsRegistryMu.Unlock()
+}
+
+// New registers a checksum VFS and returns its name (slot into a DSN
+// as `?vfs=<name>`), a handle for cleanup, and any error.
+//
+// Each call registers a distinct VFS. Calls from multiple goroutines
+// are safe — a package-level mutex serializes them.
+func New(opts Options) (name string, fs *FS, err error) {
+	pageSize := opts.PageSize
+	if pageSize == 0 {
+		pageSize = defaultPageSize
+	}
+	if !isValidPageSize(pageSize) {
+		return "", nil, fmt.Errorf("cksm: invalid PageSize %d (must be power of two in [512, 65536])", pageSize)
+	}
+
+	stateMu.Lock()
+	defer stateMu.Unlock()
+
+	tls := libc.NewTLS()
+	defPtr := sqlite3.Xsqlite3_vfs_find(tls, 0)
+	if defPtr == 0 {
+		tls.Close()
+		return "", nil, fmt.Errorf("cksm: Xsqlite3_vfs_find(NULL) returned 0; no default VFS registered")
+	}
+	defVfs := (*sqlite3.Tsqlite3_vfs)(unsafe.Pointer(defPtr))
+	initOnce.Do(func() { initFromDefault(defVfs) })
+
+	name = fmt.Sprintf("cksm%x", newVfsID.Add(1))
+	cname, allocErr := libc.CString(name)
+	if allocErr != nil {
+		tls.Close()
+		return "", nil, fmt.Errorf("cksm: alloc VFS name: %w", allocErr)
+	}
+
+	cvfs := libc.Xmalloc(tls, libc.Tsize_t(unsafe.Sizeof(sqlite3.Tsqlite3_vfs{})))
+	if cvfs == 0 {
+		libc.Xfree(tls, cname)
+		tls.Close()
+		return "", nil, fmt.Errorf("cksm: alloc VFS struct: out of memory")
+	}
+
+	fs = &FS{
+		name:     name,
+		cname:    cname,
+		cvfs:     cvfs,
+		tls:      tls,
+		pageSize: int32(pageSize),
+	}
+	fs.token = registerFS(fs)
+
+	ourVfs := (*sqlite3.Tsqlite3_vfs)(unsafe.Pointer(cvfs))
+	*ourVfs = sqlite3.Tsqlite3_vfs{
+		FiVersion:          1,
+		FszOsFile:          defVfs.FszOsFile + int32(unsafe.Sizeof(perFileState{})),
+		FmxPathname:        defVfs.FmxPathname,
+		FpNext:             0,
+		FzName:             cname,
+		FpAppData:          fs.token,
+		FxOpen:             cabi.FuncPointer(xOpenTrampoline),
+		FxDelete:           defVfs.FxDelete,
+		FxAccess:           defVfs.FxAccess,
+		FxFullPathname:     defVfs.FxFullPathname,
+		FxDlOpen:           defVfs.FxDlOpen,
+		FxDlError:          defVfs.FxDlError,
+		FxDlSym:            defVfs.FxDlSym,
+		FxDlClose:          defVfs.FxDlClose,
+		FxRandomness:       defVfs.FxRandomness,
+		FxSleep:            defVfs.FxSleep,
+		FxCurrentTime:      defVfs.FxCurrentTime,
+		FxGetLastError:     defVfs.FxGetLastError,
+		FxCurrentTimeInt64: defVfs.FxCurrentTimeInt64,
+		FxSetSystemCall:    defVfs.FxSetSystemCall,
+		FxGetSystemCall:    defVfs.FxGetSystemCall,
+		FxNextSystemCall:   defVfs.FxNextSystemCall,
+	}
+
+	if rc := sqlite3.Xsqlite3_vfs_register(tls, cvfs, 0); rc != sqlite3.SQLITE_OK {
+		unregisterFS(fs.token)
+		libc.Xfree(tls, cvfs)
+		libc.Xfree(tls, cname)
+		tls.Close()
+		return "", nil, fmt.Errorf("cksm: Xsqlite3_vfs_register rc=%d", rc)
+	}
+	return name, fs, nil
+}
+
+// Name returns the registered VFS name.
+func (f *FS) Name() string { return f.name }
+
+// Close unregisters the VFS and frees its libc allocations. Idempotent.
+func (f *FS) Close() error {
+	if f.closed.Swap(true) {
+		return nil
+	}
+	stateMu.Lock()
+	defer stateMu.Unlock()
+
+	rc := sqlite3.Xsqlite3_vfs_unregister(f.tls, f.cvfs)
+	unregisterFS(f.token)
+	libc.Xfree(f.tls, f.cvfs)
+	libc.Xfree(f.tls, f.cname)
+	f.tls.Close()
+	if rc != sqlite3.SQLITE_OK {
+		return fmt.Errorf("cksm: Xsqlite3_vfs_unregister rc=%d", rc)
+	}
+	return nil
+}
+
+func isValidPageSize(n int) bool {
+	if n < 512 || n > 65536 {
+		return false
+	}
+	return n&(n-1) == 0
+}
+
+// Enabler is the subset of *sqlite.Conn methods EnableChecksums needs.
+// Accepting the interface (rather than *sqlite.Conn directly) keeps
+// vfs/cksm free of an import cycle: the root package can satisfy it
+// without vfs/cksm needing to import root.
+type Enabler interface {
+	FileControlReserveBytes(schema string, n int) (int, error)
+	Exec(query string, args []driver.Value) (driver.Result, error)
+}
+
+// EnableChecksums sets reserved_bytes=8 on the named schema and runs
+// VACUUM so every existing page is rewritten with the 8-byte trailer
+// in place. Use this once on a fresh DB or any DB that hasn't been
+// configured for checksums yet; on subsequent opens the header byte
+// already reads 8 and the VFS activates itself automatically.
+//
+// schema is the attached-database name ("main" for the primary
+// database; "temp" or a name from ATTACH DATABASE otherwise). Pass
+// "main" if you only have the default database.
+//
+// Without the VACUUM step, existing page bodies do not have valid
+// trailers and the very next read would fail with SQLITE_IOERR_DATA.
+// VACUUM rewrites every page, stamping the trailer through our xWrite
+// trampoline.
+//
+// Mirrors the upstream cksum-vfs convention; see
+// https://sqlite.org/cksumvfs.html.
+func EnableChecksums(c Enabler, schema string) error {
+	r, err := c.FileControlReserveBytes(schema, -1)
+	if err != nil {
+		return fmt.Errorf("cksm: query reserved_bytes: %w", err)
+	}
+	if r == 8 {
+		return nil
+	}
+	if _, err := c.FileControlReserveBytes(schema, 8); err != nil {
+		return fmt.Errorf("cksm: set reserved_bytes: %w", err)
+	}
+	q := "VACUUM"
+	if schema != "" && schema != "main" {
+		q = "VACUUM " + quoteIdent(schema)
+	}
+	if _, err := c.Exec(q, nil); err != nil {
+		return fmt.Errorf("cksm: VACUUM after reserved_bytes change: %w", err)
+	}
+	return nil
+}
+
+func quoteIdent(s string) string {
+	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+}
+
+// compute is the SQLite cksm_vtab Fletcher-style rolling 64-bit
+// checksum: two interleaved 32-bit sums over the page's 8-byte
+// little-endian words. Identical algorithm to the upstream cksm_vtab
+// extension; on-disk compatible.
+func compute(a []byte) (cksm [8]byte) {
+	var s1, s2 uint32
+	for len(a) >= 8 {
+		s1 += binary.LittleEndian.Uint32(a[0:4]) + s2
+		s2 += binary.LittleEndian.Uint32(a[4:8]) + s1
+		a = a[8:]
+	}
+	binary.LittleEndian.PutUint32(cksm[0:4], s1)
+	binary.LittleEndian.PutUint32(cksm[4:8], s2)
+	return cksm
+}

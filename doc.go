@@ -197,9 +197,8 @@
 //
 // # SQLite version, libc pin
 //
-// The bundled SQLite is whatever version modernc.org/sqlite is pinned
-// to in this module's go.mod. Currently that's 3.53.1. We do not pin
-// or fork SQLite itself.
+// The bundled SQLite is whatever build modernc.org/sqlite is pinned to
+// in this module's go.mod. We do not pin or fork SQLite itself.
 //
 // modernc.org/libc is a hard ABI dependency of modernc.org/sqlite's
 // transpiled C. Bumping one without the other breaks the generated
@@ -209,25 +208,12 @@
 //
 // # Supported platforms
 //
-// Coverage matches modernc.org/sqlite's matrix:
+// Coverage matches modernc.org/sqlite's transpilation matrix:
 //
-//	OS      Arch    SQLite
-//	-------------------------
-//	darwin   amd64   3.53.1
-//	darwin   arm64   3.53.1
-//	freebsd  amd64   3.53.1
-//	freebsd  arm64   3.53.1
-//	linux    386     3.53.1
-//	linux    amd64   3.53.1
-//	linux    arm     3.53.1
-//	linux    arm64   3.53.1
-//	linux    loong64 3.53.1
-//	linux    ppc64le 3.53.1
-//	linux    riscv64 3.53.1
-//	linux    s390x   3.53.1
-//	windows  386     3.53.1
-//	windows  amd64   3.53.1
-//	windows  arm64   3.53.1
+//	darwin   amd64, arm64
+//	freebsd  amd64, arm64
+//	linux    386, amd64, arm, arm64, loong64, ppc64le, riscv64, s390x
+//	windows  386, amd64, arm64
 //
 // The vec sub-package is transpiled per-target by
 // modernc.org/sqlite/vec and may skip some of these (see that

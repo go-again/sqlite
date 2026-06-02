@@ -545,3 +545,66 @@ func (c *conn) clearBindings(pstmt uintptr) error {
 	}
 	return nil
 }
+
+// ColumnCount returns the number of result columns the statement
+// produces, equivalent to sqlite3_column_count. Useful from inside
+// vtab xCreate callbacks (ext/statement, ext/pivot) where the schema
+// has to be discovered before any row is stepped.
+func (s *stmt) ColumnCount() int {
+	if s.pstmt == 0 {
+		return 0
+	}
+	return int(sqlite3.Xsqlite3_column_count(s.c.tls, s.pstmt))
+}
+
+// ColumnName returns the result column name at the given 0-based
+// index, equivalent to sqlite3_column_name. Returns "" for out-of-
+// range indices.
+func (s *stmt) ColumnName(i int) string {
+	if s.pstmt == 0 {
+		return ""
+	}
+	p := sqlite3.Xsqlite3_column_name(s.c.tls, s.pstmt, int32(i))
+	if p == 0 {
+		return ""
+	}
+	return libc.GoString(p)
+}
+
+// ColumnDeclType returns the declared SQL type of the result column at
+// the given 0-based index, equivalent to sqlite3_column_decltype.
+// Returns "" for expression columns (no underlying declared type) or
+// out-of-range indices.
+func (s *stmt) ColumnDeclType(i int) string {
+	if s.pstmt == 0 {
+		return ""
+	}
+	p := sqlite3.Xsqlite3_column_decltype(s.c.tls, s.pstmt, int32(i))
+	if p == 0 {
+		return ""
+	}
+	return libc.GoString(p)
+}
+
+// BindCount returns the number of bound parameters in the statement,
+// equivalent to sqlite3_bind_parameter_count.
+func (s *stmt) BindCount() int {
+	if s.pstmt == 0 {
+		return 0
+	}
+	return int(sqlite3.Xsqlite3_bind_parameter_count(s.c.tls, s.pstmt))
+}
+
+// BindName returns the name of the bound parameter at the given
+// 1-based index (matching SQLite's convention), or "" for anonymous
+// `?` parameters. Equivalent to sqlite3_bind_parameter_name.
+func (s *stmt) BindName(i int) string {
+	if s.pstmt == 0 {
+		return ""
+	}
+	p := sqlite3.Xsqlite3_bind_parameter_name(s.c.tls, s.pstmt, int32(i))
+	if p == 0 {
+		return ""
+	}
+	return libc.GoString(p)
+}

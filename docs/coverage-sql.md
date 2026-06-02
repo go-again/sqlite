@@ -2,8 +2,8 @@
 
 Comprehensive feature-by-feature test suite under `tests/sql/`. Every
 documented SQLite SQL surface this driver exposes is exercised by at
-least one test. Last reviewed against SQLite 3.53.1 (bundled via
-`modernc.org/sqlite v1.50.1`) on 2026-05-26.
+least one test. Last reviewed against the SQLite + modernc/sqlite
+versions pinned in `go.mod` on 2026-05-26.
 
 Run locally with `go test ./tests/sql/...`.
 
@@ -147,7 +147,7 @@ Run locally with `go test ./tests/sql/...`.
 | Modifiers (start of /, +N days, weekday, etc.) | ✓ typed | `TestDateTime_Modifiers` |
 | 'now' keyword | ✓ typed | `TestDateTime_NowKeyword` |
 | 'utc' / 'localtime' | ✓ typed | `TestDateTime_UtcLocaltime` |
-| Subsecond precision (%f, 3.42+) | ✓ typed | `TestDateTime_SubsecondPrecision` |
+| Subsecond precision (%f) | ✓ typed | `TestDateTime_SubsecondPrecision` |
 
 ## Scalar functions — conditional
 
@@ -268,7 +268,7 @@ Run locally with `go test ./tests/sql/...`.
 | ON CONFLICT (no target) | ✓ typed | `TestUpsert_OnConflictNoTarget` |
 | INSERT OR IGNORE | ✓ typed | `TestUpsert_OrIgnore` |
 
-## RETURNING (3.35+)
+## RETURNING
 
 | Feature | Status | Test |
 |---|---|---|
@@ -352,4 +352,4 @@ Run locally with `go test ./tests/sql/...`.
 
 ---
 
-Last reviewed against SQLite 3.53.1 (bundled via modernc.org/sqlite) on 2026-05-29.
+Last reviewed against the SQLite + modernc/sqlite versions pinned in `go.mod` on 2026-05-29.

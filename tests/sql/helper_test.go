@@ -87,7 +87,7 @@ func scanAll(t *testing.T, db *sql.DB, query string, args ...any) [][]any {
 	return out
 }
 
-// sqliteVersion returns the running SQLite version as a string ("3.53.1").
+// sqliteVersion returns the running SQLite version as a "X.Y.Z" string.
 // Used to gate tests for features introduced in newer SQLite releases.
 func sqliteVersion(t *testing.T, db *sql.DB) string {
 	t.Helper()

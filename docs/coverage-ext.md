@@ -14,18 +14,24 @@ Status legend:
 | ext | LoC (est) | Upstream | Status | Entry | Test pin |
 |---|---|---|---|---|---|
 | array | ~250 | [ncruces/ext/array](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/array) | ✓ landed | `ext/array` + `ext/array/auto` | `ext/array/array_test.go` |
+| blobio | ~250 | [ncruces/ext/blobio](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/blobio) | ✓ landed | `ext/blobio` + `ext/blobio/auto` | `ext/blobio/blobio_test.go` |
+| bloom | ~390 | [ncruces/ext/bloom](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/bloom) | ✓ landed | `ext/bloom` + `ext/bloom/auto` | `ext/bloom/bloom_test.go` |
+| closure | ~310 | [ncruces/ext/closure](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/closure) | ✓ landed | `ext/closure` + `ext/closure/auto` | `ext/closure/closure_test.go` |
+| csv | ~430 | [ncruces/ext/csv](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/csv) | ✓ landed | `ext/csv` + `ext/csv/auto` | `ext/csv/csv_test.go` |
+| fileio | ~330 | [ncruces/ext/fileio](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/fileio) | ✓ landed | `ext/fileio` + `ext/fileio/auto` | `ext/fileio/fileio_test.go` |
+| lines | ~250 | [ncruces/ext/lines](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/lines) | ✓ landed | `ext/lines` + `ext/lines/auto` | `ext/lines/lines_test.go` |
+| pivot | ~340 | [ncruces/ext/pivot](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/pivot) | ✓ landed | `ext/pivot` + `ext/pivot/auto` | `ext/pivot/pivot_test.go` |
+| statement | ~240 | [ncruces/ext/statement](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/statement) | ✓ landed | `ext/statement` + `ext/statement/auto` | `ext/statement/statement_test.go` |
 
 `array` supports two binding styles: transparent via `sqlite.Pointer(slice)` (preferred — SQLite's destructor releases on stmt finalize, no caller cleanup needed) and explicit `array.Bind(c, slice) → token, release()` for long-lived bindings or int64-sentinel use cases.
-| bloom | ~290 | [ncruces/ext/bloom](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/bloom) | ⚠ partial | `ext/bloom` + `ext/bloom/auto` | `ext/bloom/bloom_test.go` |
 
-`bloom` is ⚠ partial because the bit array is held in Go memory for the lifetime of the connection — it does not persist across `db.Close()` / reconnect. ncruces upstream persists to a shadow table via SQLite's incremental BLOB API (`sqlite3_blob_open`), which our driver does not yet expose. The in-memory form is fine for build-once / query-many-times patterns within a single session.
-| closure | ~280 | [ncruces/ext/closure](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/closure) | ✗ deferred | `ext/closure` | — |
-| csv | ~430 | [ncruces/ext/csv](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/csv) | ✓ landed | `ext/csv` + `ext/csv/auto` | `ext/csv/csv_test.go` |
-| fileio | ~430 | [ncruces/ext/fileio](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/fileio) | ✗ deferred | `ext/fileio` | — |
-| lines | ~250 | [ncruces/ext/lines](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/lines) | ✓ landed | `ext/lines` + `ext/lines/auto` | `ext/lines/lines_test.go` |
-| pivot | ~310 | [ncruces/ext/pivot](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/pivot) | ✗ deferred | `ext/pivot` | — |
-| statement | ~240 | [ncruces/ext/statement](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/statement) | ✗ deferred | `ext/statement` | — |
-| blobio | ~170 | [ncruces/ext/blobio](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/blobio) | ✗ deferred | `ext/blobio` | — |
+`bloom` persists the bit array to a `<vtab>_storage` shadow table via the incremental BLOB API ([`(*Conn).OpenBlob`](../blob.go)). Filter state survives `db.Close()` / reconnect. Hashes use Kirsch–Mitzenmacher double-hashing over FNV-1a streams seeded with stable salts so bit positions match across process restarts.
+
+`closure`, `pivot`, and `statement` are vtab modules that run nested SQL from inside `xCreate`/`xFilter` against the host `*Conn`. The reentrancy is pinned by `vtab_nested_prepare_test.go` at the root.
+
+`fileio` exposes `readfile` / `writefile` / `lsmode` scalars plus the `fsdir` recursive-walk vtab. Use `fileio.Register(c)` for the os-backed mode (read+write of the local filesystem) or `fileio.RegisterFS(c, fs.FS)` for a sandboxed variant; the latter intentionally omits `writefile` since `fs.FS` is read-only.
+
+`blobio` ships `readblob` / `writeblob` scalars over our incremental BLOB API. The openblob() callback form from upstream isn't ported; callers who want long-lived handles can use `(*Conn).OpenBlob` directly from Go.
 
 ## Scalar UDFs (pure Go)
 
@@ -48,13 +54,20 @@ Status legend:
 
 `unicode` is ⚠ partial because the REGEXP override is intentionally not registered (would conflict with `ext/regexp`'s richer surface) and the `icu_load_collation` SQL-side helper isn't exposed (collations register through Go-side [unicode.RegisterLocaleCollation] instead). Auto-registration intentionally leaves SQLite's LIKE built-in alone to preserve the LIKE optimization; opt in via [unicode.RegisterLike] = true or [unicode.RegisterLikeOnly].
 
+## Fuzzy text matching
+
+| ext | LoC (est) | Upstream | Status | Entry | Test pin |
+|---|---|---|---|---|---|
+| spellfix1 | ~530 | [SQLite spellfix1](https://sqlite.org/spellfix1.html) | ✓ landed (Go-native re-implementation) | `ext/spellfix1` + `ext/spellfix1/auto` | `ext/spellfix1/spellfix1_test.go` |
+
+`spellfix1` is a Go-native re-implementation rather than a transpilation of the C `spellfix1.c` — same SQL surface (`CREATE VIRTUAL TABLE x USING spellfix1`, `INSERT INTO x(word [, rank])`, `SELECT word, distance FROM x WHERE word MATCH ?`), simpler internals. Uses Soundex for phonetic grouping and Damerau-Levenshtein with early-exit for distance ranking. Persists vocabulary in a `<vtab>_storage` shadow table (survives `db.Close()` / reconnect). What's NOT ported: non-Latin transliteration (Cyrillic / Greek), the `editdist3` custom cost-matrix API, the Russian-language phonetic encoder. Users who need full upstream parity should wait for modernc to transpile spellfix1.c or open an issue.
+
 ## Skipped (overlap with existing surface)
 
 | ext | Reason |
 |---|---|
 | serdes | Root package already exposes `(*Conn).Serialize` / `Deserialize`. |
 | vec1 | Sub-package `vec/` over `sqlite-vec` provides a richer typed surface. |
-| spellfix1 | Loads modernc-untranspiled upstream C; `fts/` covers most fuzzy-text needs. |
 
 ## Registration shape
 

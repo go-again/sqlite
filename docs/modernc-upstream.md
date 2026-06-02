@@ -8,7 +8,7 @@ package, `*_upstream_test.go`) so they have full access to internal
 types, but are gated by the build tag so the default `go test ./...`
 isn't dragged down by the long-running upstream suite.
 
-Last reviewed against `modernc.org/sqlite v1.50.1` on 2026-05-26.
+Last reviewed against the `modernc.org/sqlite` pin in `go.mod` on 2026-05-26.
 
 ## Reproduction
 
@@ -26,7 +26,7 @@ go test -tags=modernc_upstream -count=1 -timeout 5m .
 | `module_upstream_test.go` | ✓ runs clean |
 | `pre_update_hook_upstream_test.go` | ✓ runs clean |
 
-Each file was copied verbatim from `modernc.org/sqlite@v1.50.1`, with
+Each file was copied verbatim from the corresponding upstream `modernc.org/sqlite` source at the snapshot pinned in `go.mod`, with
 two mechanical edits:
 
 1. A `//go:build modernc_upstream` tag and a "Vendored from" comment
