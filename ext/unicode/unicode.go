@@ -18,15 +18,36 @@ import (
 	sqlite "github.com/go-again/sqlite"
 )
 
-// RegisterLike controls whether [Register] installs a Unicode-aware LIKE
-// override. Default false — see the package doc for the LIKE-optimization
-// trade-off. Set to true BEFORE calling [Register] to opt in.
-var RegisterLike = false
+// Option configures [Register]. Functional options keep optional behavior
+// (like opting into the Unicode-aware LIKE override) discoverable in the
+// godoc and extensible without breaking the API every time a new knob
+// lands.
+type Option func(*config)
+
+type config struct {
+	likeOverride bool
+}
+
+// WithLike opts the Unicode-aware LIKE override into the [Register] call.
+//
+// CAVEAT: overriding LIKE disables SQLite's LIKE optimization (the
+// planner can no longer rewrite `col LIKE 'prefix%'` into a range scan).
+// Off by default for that reason; opt in deliberately.
+func WithLike() Option {
+	return func(c *config) { c.likeOverride = true }
+}
 
 // Register installs the Unicode scalar functions on c, plus the two
-// preset collations NOCASE_UNICODE and NOCASE_ACCENT. The LIKE override
-// is gated on [RegisterLike].
-func Register(c *sqlite.Conn) error {
+// preset collations NOCASE_UNICODE and NOCASE_ACCENT.
+//
+// Pass [WithLike] to also install the Unicode-aware LIKE override. The
+// override is off by default to preserve SQLite's LIKE optimization
+// (see [WithLike] docs).
+func Register(c *sqlite.Conn, opts ...Option) error {
+	var cfg config
+	for _, opt := range opts {
+		opt(&cfg)
+	}
 	var errs []error
 	add := func(name string, fn any) {
 		errs = append(errs, c.RegisterFunc(name, fn, true))
@@ -44,7 +65,7 @@ func Register(c *sqlite.Conn) error {
 		c.RegisterCollation("NOCASE_ACCENT", compareNoCaseAccent),
 	)
 
-	if RegisterLike {
+	if cfg.likeOverride {
 		errs = append(errs, RegisterLikeOnly(c))
 	}
 	return errors.Join(errs...)
@@ -56,8 +77,8 @@ func Register(c *sqlite.Conn) error {
 // want to install LIKE on a different connection set than the other
 // functions.
 //
-// CAVEAT: overriding LIKE disables SQLite's LIKE optimization. See the
-// package doc.
+// CAVEAT: overriding LIKE disables SQLite's LIKE optimization. See
+// [WithLike] for context.
 func RegisterLikeOnly(c *sqlite.Conn) error {
 	return errors.Join(
 		c.RegisterFunc("like", likeTwo, true),
@@ -80,55 +101,84 @@ func RegisterLocaleCollation(c *sqlite.Conn, locale, name string) error {
 }
 
 // --- scalar functions ---
+//
+// The first argument is typed `any` so SQL NULL passes through as Go
+// nil and the function returns `(nil, nil)` — matching PostgreSQL
+// semantics for these helpers. A typed-string first arg would coerce
+// NULL into "" via the reflective register path, which is wrong.
 
-func upper(text string, optLocale ...string) (string, error) {
+func upper(text any, optLocale ...string) (any, error) {
+	s, ok := nilOrString(text)
+	if !ok {
+		return nil, nil
+	}
 	if len(optLocale) == 0 {
-		return strings.ToUpper(text), nil
+		return strings.ToUpper(s), nil
 	}
 	tag, err := language.Parse(optLocale[0])
 	if err != nil {
-		return "", fmt.Errorf("upper: bad locale: %w", err)
+		return nil, fmt.Errorf("upper: bad locale: %w", err)
 	}
-	return cases.Upper(tag).String(text), nil
+	return cases.Upper(tag).String(s), nil
 }
 
-func lower(text string, optLocale ...string) (string, error) {
+func lower(text any, optLocale ...string) (any, error) {
+	s, ok := nilOrString(text)
+	if !ok {
+		return nil, nil
+	}
 	if len(optLocale) == 0 {
-		return strings.ToLower(text), nil
+		return strings.ToLower(s), nil
 	}
 	tag, err := language.Parse(optLocale[0])
 	if err != nil {
-		return "", fmt.Errorf("lower: bad locale: %w", err)
+		return nil, fmt.Errorf("lower: bad locale: %w", err)
 	}
-	return cases.Lower(tag).String(text), nil
+	return cases.Lower(tag).String(s), nil
 }
 
-func initcap(text string, optLocale ...string) (string, error) {
+func initcap(text any, optLocale ...string) (any, error) {
+	s, ok := nilOrString(text)
+	if !ok {
+		return nil, nil
+	}
 	tag := language.English
 	if len(optLocale) > 0 {
 		t, err := language.Parse(optLocale[0])
 		if err != nil {
-			return "", fmt.Errorf("initcap: bad locale: %w", err)
+			return nil, fmt.Errorf("initcap: bad locale: %w", err)
 		}
 		tag = t
 	}
-	return cases.Title(tag).String(text), nil
+	return cases.Title(tag).String(s), nil
 }
 
-func casefold(text string) string {
-	return cases.Fold().String(text)
+func casefold(text any) any {
+	s, ok := nilOrString(text)
+	if !ok {
+		return nil
+	}
+	return cases.Fold().String(s)
 }
 
-func unaccent(text string) (string, error) {
+func unaccent(text any) (any, error) {
+	s, ok := nilOrString(text)
+	if !ok {
+		return nil, nil
+	}
 	t := transform.Chain(norm.NFD, runes.Remove(runes.In(gouni.Mn)), norm.NFC)
-	out, _, err := transform.String(t, text)
+	out, _, err := transform.String(t, s)
 	if err != nil {
-		return "", fmt.Errorf("unaccent: %w", err)
+		return nil, fmt.Errorf("unaccent: %w", err)
 	}
 	return out, nil
 }
 
-func normalize(text string, optForm ...string) (string, error) {
+func normalize(text any, optForm ...string) (any, error) {
+	s, ok := nilOrString(text)
+	if !ok {
+		return nil, nil
+	}
 	form := norm.NFC
 	if len(optForm) > 0 {
 		switch strings.ToUpper(optForm[0]) {
@@ -141,10 +191,25 @@ func normalize(text string, optForm ...string) (string, error) {
 		case "NFKD":
 			form = norm.NFKD
 		default:
-			return "", fmt.Errorf("normalize: invalid form %q (NFC / NFD / NFKC / NFKD)", optForm[0])
+			return nil, fmt.Errorf("normalize: invalid form %q (NFC / NFD / NFKC / NFKD)", optForm[0])
 		}
 	}
-	return form.String(text), nil
+	return form.String(s), nil
+}
+
+// nilOrString returns (text, true) for any non-nil SQL value coerced to
+// a Go string; (text, false) for nil input. Used by every scalar to
+// keep NULL → NULL semantics clean.
+func nilOrString(text any) (string, bool) {
+	switch v := text.(type) {
+	case nil:
+		return "", false
+	case string:
+		return v, true
+	case []byte:
+		return string(v), true
+	}
+	return fmt.Sprint(text), true
 }
 
 // --- LIKE override (opt-in) ---

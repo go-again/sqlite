@@ -11,7 +11,7 @@ import (
 	"github.com/go-again/sqlite/ext/regexp"
 )
 
-func open(t *testing.T) (*sql.DB, *sql.Conn) {
+func openDB(t *testing.T) (*sql.DB, *sql.Conn) {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -37,7 +37,7 @@ func open(t *testing.T) (*sql.DB, *sql.Conn) {
 }
 
 func TestRegexp_Operator(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	cases := []struct {
 		text, pat string
@@ -61,7 +61,7 @@ func TestRegexp_Operator(t *testing.T) {
 }
 
 func TestRegexp_Like(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	var got bool
 	if err := sc.QueryRowContext(context.Background(),
 		`SELECT regexp_like('hello world', 'wo.ld')`).Scan(&got); err != nil {
@@ -73,7 +73,7 @@ func TestRegexp_Like(t *testing.T) {
 }
 
 func TestRegexp_Count(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	cases := []struct {
 		text, pat string
@@ -104,7 +104,7 @@ func TestRegexp_Count(t *testing.T) {
 }
 
 func TestRegexp_Substr(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	cases := []struct {
 		query string
@@ -128,7 +128,7 @@ func TestRegexp_Substr(t *testing.T) {
 }
 
 func TestRegexp_Replace(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	cases := []struct {
 		query string
@@ -156,7 +156,7 @@ func TestRegexp_Replace(t *testing.T) {
 }
 
 func TestRegexp_Instr(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	// 1-based byte position of the first \d+ match in "abc 123 def".
 	var got int64
@@ -188,7 +188,7 @@ func TestRegexp_Instr(t *testing.T) {
 }
 
 func TestRegexp_BadPattern(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	_, err := sc.ExecContext(context.Background(),
 		`SELECT regexp_like('hello', '(unclosed')`)
 	if err == nil || !strings.Contains(err.Error(), "regexp:") {
@@ -198,7 +198,7 @@ func TestRegexp_BadPattern(t *testing.T) {
 
 func TestRegexp_Unicode(t *testing.T) {
 	// Go's regexp is Unicode-aware by default. Verify a multibyte match.
-	_, sc := open(t)
+	_, sc := openDB(t)
 	var got bool
 	if err := sc.QueryRowContext(context.Background(),
 		`SELECT 'café' REGEXP 'caf[éè]'`).Scan(&got); err != nil {

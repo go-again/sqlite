@@ -11,7 +11,7 @@ import (
 	"github.com/go-again/sqlite/ext/ipaddr"
 )
 
-func open(t *testing.T) (*sql.DB, *sql.Conn) {
+func openDB(t *testing.T) (*sql.DB, *sql.Conn) {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -37,7 +37,7 @@ func open(t *testing.T) (*sql.DB, *sql.Conn) {
 }
 
 func TestIPContains(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	cases := []struct {
 		prefix, ip string
@@ -68,7 +68,7 @@ func TestIPContains(t *testing.T) {
 // returns ipoverlaps(A, A) = true. The fixed version returns the right
 // answer for a non-overlapping pair.
 func TestIPOverlaps_NotSelfReferential(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	cases := []struct {
 		a, b string
@@ -91,7 +91,7 @@ func TestIPOverlaps_NotSelfReferential(t *testing.T) {
 }
 
 func TestIPFamily(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	cases := []struct {
 		in   string
@@ -115,7 +115,7 @@ func TestIPFamily(t *testing.T) {
 }
 
 func TestIPHost(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	cases := []struct {
 		in, want string
 	}{
@@ -136,7 +136,7 @@ func TestIPHost(t *testing.T) {
 }
 
 func TestIPMaskLen(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	cases := []struct {
 		in   string
 		want int64
@@ -159,7 +159,7 @@ func TestIPMaskLen(t *testing.T) {
 }
 
 func TestIPNetwork(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	cases := []struct {
 		in, want string
 	}{
@@ -180,7 +180,7 @@ func TestIPNetwork(t *testing.T) {
 }
 
 func TestIP_BadInputSurfaces(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	cases := []string{
 		`SELECT ipcontains('not-a-prefix', '10.0.0.1')`,
 		`SELECT ipfamily('garbage')`,

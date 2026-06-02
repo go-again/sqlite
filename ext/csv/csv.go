@@ -130,9 +130,20 @@ func buildTable(fsys fs.FS, args []string) (*table, error) {
 			}
 			row, err := r.Read()
 			if err != nil {
-				return nil, fmt.Errorf("csv: read header / probe row: %w", err)
+				if errors.Is(err, io.EOF) {
+					if t.header {
+						return nil, errors.New(`csv: header=on but source is empty`)
+					}
+					// No rows AND no explicit columns count — declare a
+					// single TEXT column so the CREATE VIRTUAL TABLE
+					// succeeds; SELECT just returns zero rows.
+					headerRow = nil
+				} else {
+					return nil, fmt.Errorf("csv: read header / probe row: %w", err)
+				}
+			} else {
+				headerRow = row
 			}
-			headerRow = row
 		}
 		t.schema = buildSchema(t.header, columns, headerRow)
 	} else {
@@ -183,6 +194,7 @@ type cursor struct {
 
 func (c *cursor) Close() error {
 	c.row = nil
+	c.csv = nil
 	c.eof = true
 	if c.closer != nil {
 		err := c.closer.Close()

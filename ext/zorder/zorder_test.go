@@ -11,7 +11,7 @@ import (
 	"github.com/go-again/sqlite/ext/zorder"
 )
 
-func openWithZorder(t *testing.T) (*sql.DB, *sql.Conn) {
+func openDB(t *testing.T) (*sql.DB, *sql.Conn) {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -37,7 +37,7 @@ func openWithZorder(t *testing.T) (*sql.DB, *sql.Conn) {
 }
 
 func TestZorder_RoundTrip2D(t *testing.T) {
-	_, sc := openWithZorder(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	cases := []struct{ x, y int64 }{
 		{0, 0}, {1, 0}, {0, 1}, {1, 1}, {7, 3}, {123, 456}, {0xFFFF, 0xAAAA},
@@ -56,7 +56,7 @@ func TestZorder_RoundTrip2D(t *testing.T) {
 }
 
 func TestZorder_RoundTrip3D(t *testing.T) {
-	_, sc := openWithZorder(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	x, y, z := int64(13), int64(42), int64(7)
 	var got [3]int64
@@ -71,7 +71,7 @@ func TestZorder_RoundTrip3D(t *testing.T) {
 }
 
 func TestZorder_BadArity(t *testing.T) {
-	_, sc := openWithZorder(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	if _, err := sc.ExecContext(ctx, `SELECT zorder(42)`); err == nil {
 		t.Error("expected error for arity 1, got nil")
@@ -81,7 +81,7 @@ func TestZorder_BadArity(t *testing.T) {
 func TestZorder_DimensionOverflow(t *testing.T) {
 	// 2-D zorder gives each dimension 31 or 32 bits. A 1<<40 value
 	// must trip the overflow check.
-	_, sc := openWithZorder(t)
+	_, sc := openDB(t)
 	_, err := sc.ExecContext(context.Background(), `SELECT zorder(1099511627776, 0)`)
 	if err == nil || !strings.Contains(err.Error(), "overflow") {
 		t.Errorf("got %v, want overflow error", err)
@@ -89,7 +89,7 @@ func TestZorder_DimensionOverflow(t *testing.T) {
 }
 
 func TestUnzorder_IndexOutOfRange(t *testing.T) {
-	_, sc := openWithZorder(t)
+	_, sc := openDB(t)
 	_, err := sc.ExecContext(context.Background(), `SELECT unzorder(0, 3, 9)`)
 	if err == nil || !strings.Contains(err.Error(), "out of range") {
 		t.Errorf("got %v, want out-of-range error", err)
@@ -101,7 +101,7 @@ func TestZorder_LocalityPreservation(t *testing.T) {
 	// soft invariant: shifting one dimension by 1 changes z by at most
 	// a few orders of magnitude (typically by 1 or 2 — the locality
 	// property is the whole point of Morton encoding).
-	_, sc := openWithZorder(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	var a, b int64
 	if err := sc.QueryRowContext(ctx, `SELECT zorder(100, 200), zorder(101, 200)`).Scan(&a, &b); err != nil {

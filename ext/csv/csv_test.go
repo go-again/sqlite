@@ -305,6 +305,109 @@ func TestCSV_BOMStripped(t *testing.T) {
 	}
 }
 
+func TestCSV_EmptySource(t *testing.T) {
+	// header=on + empty file → clear error (B2 fix).
+	fsys := fstest.MapFS{"empty.csv": {Data: []byte{}}}
+	_, sc := withCSV(t, fsys)
+	_, err := sc.ExecContext(context.Background(),
+		`CREATE VIRTUAL TABLE temp.t USING csv(filename='empty.csv', header=on)`)
+	if err == nil {
+		t.Fatal("expected error for header=on + empty file")
+	}
+	if !strings.Contains(err.Error(), "header=on but source is empty") {
+		t.Errorf("error %q does not surface the empty-source case", err.Error())
+	}
+
+	// header=off + empty file + columns=3 → declares 3 columns; SELECT returns no rows.
+	_, sc2 := withCSV(t, fsys)
+	if _, err := sc2.ExecContext(context.Background(),
+		`CREATE VIRTUAL TABLE temp.t USING csv(filename='empty.csv', columns=3)`); err != nil {
+		t.Fatalf("empty file + columns=3: %v", err)
+	}
+	rows, err := sc2.QueryContext(context.Background(), `SELECT * FROM temp.t`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	cols, _ := rows.Columns()
+	if len(cols) != 3 {
+		t.Errorf("got %d columns, want 3", len(cols))
+	}
+	if rows.Next() {
+		t.Error("expected no rows from empty file")
+	}
+}
+
+func TestCSV_EmbeddedQuotes(t *testing.T) {
+	// `"a""b"` is RFC 4180 doubled-quote escape → literal `a"b`.
+	_, sc := withCSV(t, nil)
+	if _, err := sc.ExecContext(context.Background(),
+		`CREATE VIRTUAL TABLE temp.t USING csv(data='"a""b",c')`); err != nil {
+		t.Fatal(err)
+	}
+	var a, b string
+	if err := sc.QueryRowContext(context.Background(),
+		`SELECT c1, c2 FROM temp.t`).Scan(&a, &b); err != nil {
+		t.Fatal(err)
+	}
+	if a != `a"b` || b != "c" {
+		t.Errorf("got %q, %q; want %q, %q", a, b, `a"b`, "c")
+	}
+}
+
+func TestCSV_EmbeddedNewlines(t *testing.T) {
+	// Multi-line value via "..." continues to the next physical line.
+	fsys := fstest.MapFS{
+		"multi.csv": {Data: []byte("name,bio\nAlice,\"first line\nsecond line\"\nBob,short\n")},
+	}
+	_, sc := withCSV(t, fsys)
+	if _, err := sc.ExecContext(context.Background(),
+		`CREATE VIRTUAL TABLE temp.t USING csv(filename='multi.csv', header=on)`); err != nil {
+		t.Fatal(err)
+	}
+	var name, bio string
+	if err := sc.QueryRowContext(context.Background(),
+		`SELECT name, bio FROM temp.t WHERE name = 'Alice'`).Scan(&name, &bio); err != nil {
+		t.Fatal(err)
+	}
+	if bio != "first line\nsecond line" {
+		t.Errorf("bio=%q, want %q", bio, "first line\nsecond line")
+	}
+}
+
+func TestCSV_EmptyCellInTypedColumn(t *testing.T) {
+	// An empty cell `,,` in an INTEGER-affinity column should produce NULL.
+	fsys := fstest.MapFS{
+		"sparse.csv": {Data: []byte("a,b\n1,\n,2\n")},
+	}
+	_, sc := withCSV(t, fsys)
+	if _, err := sc.ExecContext(context.Background(),
+		`CREATE VIRTUAL TABLE temp.t USING csv(filename='sparse.csv', header=on,
+		    schema='CREATE TABLE x(a INTEGER, b INTEGER)')`); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := sc.QueryContext(context.Background(), `SELECT a, b FROM temp.t`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []struct{ A, B sql.NullInt64 }
+	for rows.Next() {
+		var r struct{ A, B sql.NullInt64 }
+		_ = rows.Scan(&r.A, &r.B)
+		got = append(got, r)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d rows, want 2", len(got))
+	}
+	if !got[0].A.Valid || got[0].A.Int64 != 1 || got[0].B.Valid {
+		t.Errorf("row 0: got %+v, want a=1 b=NULL", got[0])
+	}
+	if got[1].A.Valid || !got[1].B.Valid || got[1].B.Int64 != 2 {
+		t.Errorf("row 1: got %+v, want a=NULL b=2", got[1])
+	}
+}
+
 // roundtrip checks the example carved out in the doc.
 func TestCSV_OSBackedDefaultRegister(t *testing.T) {
 	dir := t.TempDir()

@@ -169,6 +169,31 @@
 //   - github.com/go-again/sqlite/vfs/crypto — pure-Go encryption-at-rest
 //     VFS (Adiantum or AES-XTS-256, transparent page-level encryption
 //     of main DB + journal + WAL + temp files).
+//   - github.com/go-again/sqlite/ext — opt-in loadable Go extensions:
+//     array, csv, regexp, uuid, hash, ipaddr, zorder, stats, unicode.
+//     Each sub-package is independent — pick what you need and leave the
+//     rest off your import graph. Register per-conn via <name>.Register(c)
+//     or pool-wide via blank-import of <name>/auto. See
+//     docs/coverage-ext.md for the matrix.
+//
+// # Virtual tables from Go
+//
+// (*Conn).CreateModule and (*Conn).CreateEponymousModule expose
+// Go-implemented virtual tables to SQLite. Implement the [VTab] and
+// [VTabCursor] interfaces (plus optional [VTabUpdater] / [VTabRenamer] /
+// [VTabTransactional]), then register a constructor that calls
+// [Conn.DeclareVTab] inside its body. The eponymous variant lets the
+// table be queried directly by its module name (e.g.
+// `SELECT … FROM array(?)`) without a preceding CREATE VIRTUAL TABLE.
+//
+// # Custom pointer bindings
+//
+// [Pointer] wraps an arbitrary Go value so it can be bound as a SQL
+// parameter and ferry through to a UDF's args slice or a vtab's Filter
+// callback as the original Go object (rather than a SQLite primitive).
+// SQLite drives the binding lifetime through a destructor callback — no
+// caller-side Release is needed. See [ext/array] for the canonical use
+// case.
 //
 // # SQLite version, libc pin
 //

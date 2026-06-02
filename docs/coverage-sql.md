@@ -349,3 +349,7 @@ Run locally with `go test ./tests/sql/...`.
 3. If new SQL features ship in the bump, add tests + extend this doc.
 4. If existing tests fail, classify: genuine SQL behavior change
    (port the test) vs driver regression (fix the driver).
+
+---
+
+Last reviewed against SQLite 3.53.1 (bundled via modernc.org/sqlite) on 2026-05-29.

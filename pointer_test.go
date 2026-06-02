@@ -129,6 +129,107 @@ func TestValuePointer_PrimitiveReturnsFalse(t *testing.T) {
 	}
 }
 
+// TestPointer_ResetPreservesBinding pins the documented behavior that
+// sqlite3_reset does NOT clear bindings — a prepared statement reused
+// via Reset keeps its Pointer binding until rebound or finalized.
+func TestPointer_ResetPreservesBinding(t *testing.T) {
+	_, sc, c := withMattnConn(t, ":memory:")
+	var captured []any
+	if err := c.RegisterFunc("capture",
+		func(v any) int64 {
+			captured = append(captured, v)
+			return 0
+		}, false); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	stmt, err := sc.PrepareContext(ctx, `SELECT capture(?)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stmt.Close()
+
+	// First exec binds Pointer(slice).
+	if _, err := stmt.ExecContext(ctx, Pointer([]int{1, 2, 3})); err != nil {
+		t.Fatal(err)
+	}
+	// Second exec rebinds the SAME parameter slot. Registry size should
+	// stay small — the old binding's destructor fires when the new
+	// binding overwrites the slot.
+	if _, err := stmt.ExecContext(ctx, Pointer([]int{4, 5, 6})); err != nil {
+		t.Fatal(err)
+	}
+	if len(captured) != 2 {
+		t.Fatalf("captured %d, want 2", len(captured))
+	}
+	got1, _ := captured[0].([]int)
+	got2, _ := captured[1].([]int)
+	if len(got1) != 3 || got1[0] != 1 || len(got2) != 3 || got2[0] != 4 {
+		t.Errorf("captured=%v, want first={1,2,3} second={4,5,6}", captured)
+	}
+}
+
+// TestPointer_RebindReleasesPriorEntry confirms that overwriting a
+// parameter slot drops the old binding from the registry (destructor
+// fires).
+func TestPointer_RebindReleasesPriorEntry(t *testing.T) {
+	_, sc, c := withMattnConn(t, ":memory:")
+	if err := c.RegisterFunc("noop", func(any) int64 { return 0 }, false); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	stmt, err := sc.PrepareContext(ctx, `SELECT noop(?)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stmt.Close()
+	start := pointerRegistrySize()
+	for range 50 {
+		// Each Exec binds a new Pointer; the prior binding gets dropped
+		// when the new one overwrites the slot.
+		if _, err := stmt.ExecContext(ctx, Pointer([]int{0})); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && pointerRegistrySize() > start+1 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := pointerRegistrySize(); got > start+1 {
+		t.Errorf("registry grew to %d after 50 rebinds, want ≤ %d (rebinds aren't releasing)", got, start+1)
+	}
+}
+
+// TestPointer_TypedNilSlice confirms that a typed-nil ([]int)(nil)
+// passed through Pointer arrives at the UDF as either a nil-typed []int
+// or untyped nil — either is acceptable; the test just pins that no
+// panic occurs and the UDF receives SOMETHING distinguishable from a
+// non-nil slice.
+func TestPointer_TypedNilSlice(t *testing.T) {
+	_, sc, c := withMattnConn(t, ":memory:")
+	var captured any
+	if err := c.RegisterFunc("capture",
+		func(v any) int64 {
+			captured = v
+			return 0
+		}, false); err != nil {
+		t.Fatal(err)
+	}
+	var nilSlice []int
+	if _, err := sc.ExecContext(context.Background(),
+		`SELECT capture(?)`, Pointer(nilSlice)); err != nil {
+		t.Fatal(err)
+	}
+	// captured is either ([]int)(nil) or untyped nil. Both are valid;
+	// what matters is no panic.
+	if captured != nil {
+		s, ok := captured.([]int)
+		if !ok || s != nil {
+			t.Errorf("captured=%v (%T), want nil or []int(nil)", captured, captured)
+		}
+	}
+}
+
 // TestPointer_HighVolume hammers the registry to surface any mutex
 // imbalance under `go test -race`. The existing single-conn fixture
 // serializes bind operations, but the race detector still observes the

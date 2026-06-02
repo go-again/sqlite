@@ -26,10 +26,14 @@ import (
 // registered with [Conn.RegisterFunc] (or a [VTab] Filter callback),
 // the args slice receives v unchanged — the Go value, not a primitive.
 //
-// Lifetime: the binding lives until the statement is reset, the parameter
-// is rebound, or the statement is finalized. SQLite drives the cleanup
-// deterministically via a destructor trampoline — no caller-side Release
-// is needed.
+// Lifetime: the binding lives until the parameter is rebound or the
+// statement is finalized. SQLite drives the cleanup deterministically
+// via a destructor trampoline — no caller-side Release is needed.
+//
+// Note: sqlite3_reset does NOT clear bindings (that's
+// sqlite3_clear_bindings). A prepared statement reused via Reset keeps
+// its Pointer binding alive until either the parameter is rebound or
+// the statement is finalized.
 func Pointer(v any) any {
 	return &pointerArg{v: v}
 }

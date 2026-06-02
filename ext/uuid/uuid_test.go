@@ -16,7 +16,7 @@ import (
 
 var rfc4122re = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
-func open(t *testing.T) (*sql.DB, *sql.Conn) {
+func openDB(t *testing.T) (*sql.DB, *sql.Conn) {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -42,7 +42,7 @@ func open(t *testing.T) (*sql.DB, *sql.Conn) {
 }
 
 func TestUUID_DefaultV4(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	var s string
 	if err := sc.QueryRowContext(context.Background(), `SELECT uuid()`).Scan(&s); err != nil {
 		t.Fatal(err)
@@ -60,7 +60,7 @@ func TestUUID_DefaultV4(t *testing.T) {
 }
 
 func TestUUID_AllVersions(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	for _, ver := range []int64{1, 4, 6, 7} {
 		var s string
@@ -78,7 +78,7 @@ func TestUUID_AllVersions(t *testing.T) {
 }
 
 func TestUUID_NameBased(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	// v5 over the DNS namespace + "example.com" — deterministic.
 	var v5 string
@@ -103,7 +103,7 @@ func TestUUID_NameBased(t *testing.T) {
 }
 
 func TestUUID_GenRandom(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	var s string
 	if err := sc.QueryRowContext(context.Background(), `SELECT gen_random_uuid()`).Scan(&s); err != nil {
 		t.Fatal(err)
@@ -118,7 +118,7 @@ func TestUUID_GenRandom(t *testing.T) {
 }
 
 func TestUUID_ParseAndFormat(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	canonical := "6ba7b810-9dad-11d1-80b4-00c04fd430c8" // NameSpaceDNS
 	ctx := context.Background()
 
@@ -149,7 +149,7 @@ func TestUUID_ParseAndFormat(t *testing.T) {
 }
 
 func TestUUID_ExtractVersion(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	known := map[string]int64{
 		"6ba7b810-9dad-11d1-80b4-00c04fd430c8": 1, // ns DNS, v1
@@ -167,7 +167,7 @@ func TestUUID_ExtractVersion(t *testing.T) {
 }
 
 func TestUUID_ExtractTimestamp(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	// v1 UUID has an extractable timestamp.
 	var s string
@@ -197,7 +197,7 @@ func TestUUID_ExtractTimestamp(t *testing.T) {
 }
 
 func TestUUID_BadVersion(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	_, err := sc.ExecContext(context.Background(), `SELECT uuid(99)`)
 	if err == nil || !strings.Contains(err.Error(), "unsupported version") {
 		t.Errorf("got %v, want unsupported version error", err)
@@ -205,7 +205,7 @@ func TestUUID_BadVersion(t *testing.T) {
 }
 
 func TestUUID_NameSpaceShortcuts(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	// Each shortcut should produce the same UUID as the canonical literal.
 	want := gid.NewSHA1(gid.NameSpaceDNS, []byte("x")).String()

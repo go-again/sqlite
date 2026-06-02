@@ -233,3 +233,7 @@ Conflicting table-level keys across fields are rejected at parse time.
 | `vec/gorm/multifield_test.go` | Multi-embedding models: `WithField` dispatch, unknown field rejected, single-field WithField ignored |
 | `vec/gorm/knnsql_test.go` | `KNNSQL` preserves soft-delete filter; `IncludeDeleted` strips it; WithJoin/Filter stack |
 | `fts/gorm/searchsql_test.go` | `SearchSQL` preserves external-mode `deleted_at IS NULL`; `IncludeDeleted` strips it; WithJoin executes via `db.Raw` |
+
+---
+
+Last reviewed against gorm.io/gorm on 2026-05-29.

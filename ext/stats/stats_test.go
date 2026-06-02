@@ -13,7 +13,7 @@ import (
 	"github.com/go-again/sqlite/ext/stats"
 )
 
-func open(t *testing.T) (*sql.DB, *sql.Conn) {
+func openDB(t *testing.T) (*sql.DB, *sql.Conn) {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -53,7 +53,7 @@ func nearly(a, b float64) bool {
 }
 
 func TestStats_Variance(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	cases := []struct {
 		fn   string
@@ -78,7 +78,7 @@ func TestStats_Variance(t *testing.T) {
 
 func TestStats_CovarianceAndCorr(t *testing.T) {
 	// y = 2x → perfect correlation, covar = var_pop(x) * 2.
-	_, sc := open(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	var c, p, s float64
 	if err := sc.QueryRowContext(ctx,
@@ -98,7 +98,7 @@ func TestStats_CovarianceAndCorr(t *testing.T) {
 
 func TestStats_RegrSlope(t *testing.T) {
 	// y = 2x + 0 → slope=2, intercept=0.
-	_, sc := open(t)
+	_, sc := openDB(t)
 	var slope, intercept float64
 	if err := sc.QueryRowContext(context.Background(),
 		`SELECT regr_slope(y, x), regr_intercept(y, x) FROM samples`).Scan(&slope, &intercept); err != nil {
@@ -113,7 +113,7 @@ func TestStats_RegrSlope(t *testing.T) {
 }
 
 func TestStats_RegrJSON(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	var got string
 	if err := sc.QueryRowContext(context.Background(),
 		`SELECT regr_json(y, x) FROM samples`).Scan(&got); err != nil {
@@ -129,7 +129,7 @@ func TestStats_RegrJSON(t *testing.T) {
 }
 
 func TestStats_Median(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	var got float64
 	if err := sc.QueryRowContext(context.Background(),
 		`SELECT median(x) FROM samples`).Scan(&got); err != nil {
@@ -143,7 +143,7 @@ func TestStats_Median(t *testing.T) {
 func TestStats_Percentile(t *testing.T) {
 	// percentile_cont(x, 0.5) ≡ median; with 5 sorted values 1..5,
 	// the 0-indexed position 0.5*(5-1)=2 → exact value 3.
-	_, sc := open(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	cases := []struct {
 		q    string
@@ -166,7 +166,7 @@ func TestStats_Percentile(t *testing.T) {
 }
 
 func TestStats_PercentileJSON(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	var got string
 	if err := sc.QueryRowContext(context.Background(),
 		`SELECT percentile_cont(x, '[0.25, 0.5, 0.75]') FROM samples`).Scan(&got); err != nil {
@@ -182,7 +182,7 @@ func TestStats_PercentileJSON(t *testing.T) {
 }
 
 func TestStats_Mode_Integer(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	if _, err := sc.ExecContext(context.Background(),
 		`CREATE TABLE m(v); INSERT INTO m(v) VALUES (1), (2), (2), (3), (3), (3)`); err != nil {
 		t.Fatal(err)
@@ -198,7 +198,7 @@ func TestStats_Mode_Integer(t *testing.T) {
 }
 
 func TestStats_Mode_Text(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	if _, err := sc.ExecContext(context.Background(),
 		`CREATE TABLE m(v); INSERT INTO m(v) VALUES ('a'), ('b'), ('b')`); err != nil {
 		t.Fatal(err)
@@ -214,7 +214,7 @@ func TestStats_Mode_Text(t *testing.T) {
 }
 
 func TestStats_EveryAndSome(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	if _, err := sc.ExecContext(ctx, `CREATE TABLE b(v); INSERT INTO b(v) VALUES (1), (1), (0)`); err != nil {
 		t.Fatal(err)
@@ -232,7 +232,7 @@ func TestStats_EveryAndSome(t *testing.T) {
 }
 
 func TestStats_EmptySetReturnsNULL(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	if _, err := sc.ExecContext(context.Background(), `CREATE TABLE e(v REAL)`); err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestStats_EmptySetReturnsNULL(t *testing.T) {
 func TestStats_WindowFrame(t *testing.T) {
 	// Sliding 3-row frame over y=2x: regr_slope inside the frame should
 	// stay 2 because the linear relationship is global.
-	_, sc := open(t)
+	_, sc := openDB(t)
 	rows, err := sc.QueryContext(context.Background(), `
 		SELECT regr_slope(y, x) OVER (
 		    ORDER BY x ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING
@@ -284,7 +284,7 @@ func TestStats_WindowFrame(t *testing.T) {
 func TestStats_SkewKurtosisShape(t *testing.T) {
 	// Symmetric uniform 1..5 → skewness ≈ 0, kurtosis (Fisher excess)
 	// ≈ -1.3 for the uniform distribution.
-	_, sc := open(t)
+	_, sc := openDB(t)
 	var skew, kurt float64
 	if err := sc.QueryRowContext(context.Background(),
 		`SELECT skewness_pop(x), kurtosis_pop(x) FROM samples`).Scan(&skew, &kurt); err != nil {
@@ -298,8 +298,91 @@ func TestStats_SkewKurtosisShape(t *testing.T) {
 	}
 }
 
+// TestStats_VarSampSingleSample pins the special-case: var_samp /
+// stddev_samp on a single row return NULL (n-1 = 0 → undefined).
+func TestStats_VarSampSingleSample(t *testing.T) {
+	_, sc := openDB(t)
+	if _, err := sc.ExecContext(context.Background(),
+		`CREATE TABLE one(x); INSERT INTO one VALUES (42)`); err != nil {
+		t.Fatal(err)
+	}
+	var vs, ss sql.NullFloat64
+	if err := sc.QueryRowContext(context.Background(),
+		`SELECT var_samp(x), stddev_samp(x) FROM one`).Scan(&vs, &ss); err != nil {
+		t.Fatal(err)
+	}
+	if vs.Valid {
+		t.Errorf("var_samp on 1 row = %v, want NULL", vs.Float64)
+	}
+	if ss.Valid {
+		t.Errorf("stddev_samp on 1 row = %v, want NULL", ss.Float64)
+	}
+}
+
+// TestStats_RegrCountReturnsInteger pins that regr_count returns the
+// SQL integer type, scannable into int64 without coercion.
+func TestStats_RegrCountReturnsInteger(t *testing.T) {
+	_, sc := openDB(t)
+	var n int64
+	if err := sc.QueryRowContext(context.Background(),
+		`SELECT regr_count(y, x) FROM samples`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 5 {
+		t.Errorf("regr_count = %d, want 5", n)
+	}
+	var typ string
+	if err := sc.QueryRowContext(context.Background(),
+		`SELECT typeof(regr_count(y, x)) FROM samples`).Scan(&typ); err != nil {
+		t.Fatal(err)
+	}
+	if typ != "integer" {
+		t.Errorf("typeof(regr_count) = %q, want integer", typ)
+	}
+}
+
+// TestStats_EveryAllNullReturnsNULL pins that every / some over a set
+// containing only NULLs returns NULL (no rows counted), matching
+// PostgreSQL.
+func TestStats_EveryAllNullReturnsNULL(t *testing.T) {
+	_, sc := openDB(t)
+	if _, err := sc.ExecContext(context.Background(),
+		`CREATE TABLE n(v); INSERT INTO n VALUES (NULL), (NULL), (NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	var e, s sql.NullBool
+	if err := sc.QueryRowContext(context.Background(),
+		`SELECT every(v), some(v) FROM n`).Scan(&e, &s); err != nil {
+		t.Fatal(err)
+	}
+	if e.Valid {
+		t.Errorf("every(all NULL) = %v, want NULL", e.Bool)
+	}
+	if s.Valid {
+		t.Errorf("some(all NULL) = %v, want NULL", s.Bool)
+	}
+}
+
+// TestStats_ModeIgnoresNULL pins that mode skips NULL inputs — they
+// don't bias the frequency count.
+func TestStats_ModeIgnoresNULL(t *testing.T) {
+	_, sc := openDB(t)
+	if _, err := sc.ExecContext(context.Background(),
+		`CREATE TABLE m(v); INSERT INTO m VALUES (NULL), (1), (NULL), (1), (2)`); err != nil {
+		t.Fatal(err)
+	}
+	var got int64
+	if err := sc.QueryRowContext(context.Background(),
+		`SELECT mode(v) FROM m`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != 1 {
+		t.Errorf("mode = %d, want 1 (NULL skipped)", got)
+	}
+}
+
 func TestStats_ScalarHelpers(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	var cbrt float64
 	if err := sc.QueryRowContext(ctx, `SELECT cbrt(27)`).Scan(&cbrt); err != nil {

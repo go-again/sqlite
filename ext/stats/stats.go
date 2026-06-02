@@ -395,19 +395,23 @@ func asBool(v driver.Value) bool {
 // sizes. The window-function planner only emits Inverse when it sees a
 // sliding frame; whole-frame and GROUP BY skip it.
 type percentile struct {
-	nums     []float64
-	posArg   []byte // raw text of the second arg (only for non-median)
-	kind     int
-	posTaken bool
+	nums   []float64
+	posArg []byte // raw text of the second arg (only for non-median)
+	kind   int
 }
 
 func (q *percentile) Step(_ *sqlite.FunctionContext, args []driver.Value) error {
 	if f, ok := toFloat(args[0]); ok {
 		q.nums = append(q.nums, f)
 	}
-	if q.kind != median && !q.posTaken {
-		q.posArg = takeBytes(args[1])
-		q.posTaken = true
+	if q.kind != median {
+		// The second arg is a per-query constant by spec. Capture
+		// whenever we see a non-NULL value — refresh-on-every-row also
+		// works because the value is constant, but skipping NULLs keeps
+		// `posArg` populated when the first row's position is NULL.
+		if b := takeBytes(args[1]); b != nil {
+			q.posArg = b
+		}
 	}
 	return nil
 }

@@ -157,3 +157,7 @@ fixture verbatim; a delta there means upstream changed numeric output.
 - [`../examples/vec-search/`](../examples/vec-search/) — raw `vec.Table`.
 - [`../examples/gorm-vec-tagged/`](../examples/gorm-vec-tagged/) — the
   `vecgorm.Plugin()` flow with a struct-tag-driven sidecar.
+
+---
+
+Last reviewed against modernc.org/sqlite/vec on 2026-05-29.

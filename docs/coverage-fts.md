@@ -190,3 +190,7 @@ modernc bump.
 - [`../examples/fts-search/`](../examples/fts-search/) — raw `fts.Index`.
 - [`../examples/gorm-fts-tagged/`](../examples/gorm-fts-tagged/) — the
   `ftsgorm.Plugin()` flow with a struct-tag-driven FTS5 table.
+
+---
+
+Last reviewed against SQLite FTS5 (bundled in modernc.org/sqlite) on 2026-05-29.

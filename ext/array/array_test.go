@@ -11,10 +11,10 @@ import (
 	"github.com/go-again/sqlite/ext/array"
 )
 
-// withConn opens an in-memory database, pins to MaxOpenConns=1, returns
+// openDB opens an in-memory database, pins to MaxOpenConns=1, returns
 // the *sqlite.Conn for direct module registration plus the pinned *sql.Conn
 // the test uses for SQL execution.
-func withConn(t *testing.T) (*sql.DB, *sql.Conn, *sqlite.Conn) {
+func openDB(t *testing.T) (*sql.DB, *sql.Conn, *sqlite.Conn) {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -47,7 +47,7 @@ func withConn(t *testing.T) (*sql.DB, *sql.Conn, *sqlite.Conn) {
 }
 
 func TestArray_IntSlice(t *testing.T) {
-	_, sc, conn := withConn(t)
+	_, sc, conn := openDB(t)
 	token, release := array.Bind(conn, []int{10, 20, 30})
 	defer release()
 
@@ -77,7 +77,7 @@ func TestArray_IntSlice(t *testing.T) {
 }
 
 func TestArray_TypedSlices(t *testing.T) {
-	_, sc, conn := withConn(t)
+	_, sc, conn := openDB(t)
 	ctx := context.Background()
 
 	cases := []struct {
@@ -117,7 +117,7 @@ func TestArray_TypedSlices(t *testing.T) {
 }
 
 func TestArray_AnyHeterogeneous(t *testing.T) {
-	_, sc, conn := withConn(t)
+	_, sc, conn := openDB(t)
 	token, release := array.Bind(conn, []any{int64(42), "hello", nil, 3.14, true})
 	defer release()
 
@@ -152,7 +152,7 @@ func TestArray_AnyHeterogeneous(t *testing.T) {
 func TestArray_RowIDIsOneBased(t *testing.T) {
 	// carray semantics: rowid starts at 1, matches upstream so JOINs against
 	// other rowid-keyed tables behave intuitively.
-	_, sc, conn := withConn(t)
+	_, sc, conn := openDB(t)
 	token, release := array.Bind(conn, []string{"a", "b", "c"})
 	defer release()
 
@@ -180,7 +180,7 @@ func TestArray_RowIDIsOneBased(t *testing.T) {
 }
 
 func TestArray_UnknownTokenError(t *testing.T) {
-	_, sc, _ := withConn(t)
+	_, sc, _ := openDB(t)
 	_, err := sc.QueryContext(context.Background(),
 		`SELECT value FROM array(?)`, int64(99999))
 	if err == nil {
@@ -192,7 +192,7 @@ func TestArray_UnknownTokenError(t *testing.T) {
 }
 
 func TestArray_ReleaseRemovesBinding(t *testing.T) {
-	_, sc, conn := withConn(t)
+	_, sc, conn := openDB(t)
 	token, release := array.Bind(conn, []int{1, 2, 3})
 	release()
 	// Second release is a no-op (sync.Once).
@@ -205,7 +205,7 @@ func TestArray_ReleaseRemovesBinding(t *testing.T) {
 }
 
 func TestArray_MissingConstraintError(t *testing.T) {
-	_, sc, _ := withConn(t)
+	_, sc, _ := openDB(t)
 	// Querying the vtab without binding array=? must surface the missing
 	// constraint error from BestIndex.
 	_, err := sc.QueryContext(context.Background(), `SELECT value FROM array`)
@@ -217,7 +217,7 @@ func TestArray_MissingConstraintError(t *testing.T) {
 func TestArray_ArrayConstraintIsHidden(t *testing.T) {
 	// The `array` column is HIDDEN — `SELECT *` returns just the visible
 	// `value` column.
-	_, sc, conn := withConn(t)
+	_, sc, conn := openDB(t)
 	token, release := array.Bind(conn, []int{7})
 	defer release()
 	rows, err := sc.QueryContext(context.Background(),
@@ -245,7 +245,7 @@ func TestArray_TransparentPointer(t *testing.T) {
 	// Transparent path: sqlite.Pointer(slice) instead of Bind/Release.
 	// SQLite's destructor frees the binding on stmt finalize — no
 	// caller-side cleanup needed.
-	_, sc, _ := withConn(t)
+	_, sc, _ := openDB(t)
 	rows, err := sc.QueryContext(context.Background(),
 		`SELECT value FROM array(?) ORDER BY value`,
 		sqlite.Pointer([]int{42, 7, 99}))
@@ -273,7 +273,7 @@ func TestArray_TransparentPointer(t *testing.T) {
 }
 
 func TestArray_TransparentPointerStringSlice(t *testing.T) {
-	_, sc, _ := withConn(t)
+	_, sc, _ := openDB(t)
 	rows, err := sc.QueryContext(context.Background(),
 		`SELECT value FROM array(?)`,
 		sqlite.Pointer([]string{"alpha", "beta", "gamma"}))
@@ -295,10 +295,58 @@ func TestArray_TransparentPointerStringSlice(t *testing.T) {
 	}
 }
 
+// TestArray_TransparentPointerHeterogeneous exercises a Pointer-bound
+// []any with mixed element types. Filter has to walk the slice via
+// reflection (not the fast-path type-switch) because []any doesn't match
+// the typed cases.
+func TestArray_TransparentPointerHeterogeneous(t *testing.T) {
+	_, sc, _ := openDB(t)
+	rows, err := sc.QueryContext(context.Background(),
+		`SELECT typeof(value), CAST(value AS TEXT) FROM array(?)`,
+		sqlite.Pointer([]any{int64(42), "hello", nil, 3.14, true}))
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	defer rows.Close()
+	type pair struct{ ty, val string }
+	var got []pair
+	for rows.Next() {
+		var ty, val sql.NullString
+		if err := rows.Scan(&ty, &val); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, pair{ty.String, val.String})
+	}
+	wantTypes := []string{"integer", "text", "null", "real", "integer"}
+	if len(got) != len(wantTypes) {
+		t.Fatalf("got %d rows, want %d", len(got), len(wantTypes))
+	}
+	for i, w := range wantTypes {
+		if got[i].ty != w {
+			t.Errorf("row[%d] type=%q, want %q", i, got[i].ty, w)
+		}
+	}
+}
+
+// TestArray_TransparentPointerNilSlice pins behavior for a wrapped nil
+// slice — should produce zero rows, not error.
+func TestArray_TransparentPointerNilSlice(t *testing.T) {
+	_, sc, _ := openDB(t)
+	rows, err := sc.QueryContext(context.Background(),
+		`SELECT value FROM array(?)`, sqlite.Pointer([]int(nil)))
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		t.Error("expected zero rows from nil slice")
+	}
+}
+
 func TestArray_ErrUnknownTokenSentinel(t *testing.T) {
 	// errors.Is should match against the package-level sentinel so callers
 	// can branch on the failure mode.
-	_, sc, _ := withConn(t)
+	_, sc, _ := openDB(t)
 	_, err := sc.QueryContext(context.Background(),
 		`SELECT value FROM array(?)`, int64(42424242))
 	// The error wrapping goes through the SQLite C side, which doesn't

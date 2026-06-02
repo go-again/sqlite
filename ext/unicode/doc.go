@@ -35,12 +35,12 @@
 // 'prefiy'` — see https://sqlite.org/optoverview.html#the_like_optimization).
 //
 // For that reason [Register] does NOT install the LIKE override by
-// default. To opt in:
+// default. Opt in via the [WithLike] option:
 //
-//	unicode.RegisterLike = true
-//	unicode.Register(conn)
+//	unicode.Register(conn, unicode.WithLike())
 //
-// Or call [RegisterLikeOnly] separately.
+// Or call [RegisterLikeOnly] separately if you want LIKE Unicode-aware
+// on a different connection set than the other functions.
 //
 // The Unicode LIKE follows [strings.EqualFold] semantics — a permissive
 // case-insensitive match that handles most real-world Unicode cases

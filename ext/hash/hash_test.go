@@ -24,7 +24,7 @@ import (
 	"github.com/go-again/sqlite/ext/hash"
 )
 
-func open(t *testing.T) (*sql.DB, *sql.Conn) {
+func openDB(t *testing.T) (*sql.DB, *sql.Conn) {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -61,7 +61,7 @@ func hashHex(t *testing.T, sc *sql.Conn, q string, args ...any) string {
 func TestHash_KnownVectors(t *testing.T) {
 	// Empty-input vectors for each algorithm — the canonical "did we wire
 	// the right hash?" smoke test.
-	_, sc := open(t)
+	_, sc := openDB(t)
 	cases := []struct {
 		fn   string
 		want string // hex of digest("")
@@ -84,7 +84,7 @@ func TestHash_KnownVectors(t *testing.T) {
 }
 
 func TestHash_SizeVariants(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	cases := []struct {
 		q       string
 		wantLen int // bytes
@@ -110,7 +110,7 @@ func TestHash_SizeVariants(t *testing.T) {
 }
 
 func TestHash_InvalidSize(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	_, err := sc.ExecContext(context.Background(), `SELECT sha256('hello', 999)`)
 	if err == nil || !strings.Contains(err.Error(), "invalid size") {
 		t.Errorf("got %v, want invalid-size error", err)
@@ -121,7 +121,7 @@ func TestHash_BlobInput(t *testing.T) {
 	// Hash functions accept BLOB and TEXT identically because the Go
 	// signature uses []byte. The wrapper just rounds the SQL value to
 	// bytes.
-	_, sc := open(t)
+	_, sc := openDB(t)
 	got := hashHex(t, sc, `SELECT sha256(?)`, []byte("hello"))
 	want := "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
 	if got != want {

@@ -11,7 +11,7 @@ import (
 	"github.com/go-again/sqlite/ext/unicode"
 )
 
-func open(t *testing.T) (*sql.DB, *sql.Conn) {
+func openDB(t *testing.T) (*sql.DB, *sql.Conn) {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -37,7 +37,7 @@ func open(t *testing.T) (*sql.DB, *sql.Conn) {
 }
 
 func TestUnicode_UpperLower(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	cases := []struct {
 		q, want string
@@ -63,7 +63,7 @@ func TestUnicode_UpperLower(t *testing.T) {
 func TestUnicode_LocaleAwareUpper(t *testing.T) {
 	// Turkish capital dotted I → lowercase dotted i (vs ASCII rule that
 	// gives "i" without the dot).
-	_, sc := open(t)
+	_, sc := openDB(t)
 	var got string
 	if err := sc.QueryRowContext(context.Background(),
 		`SELECT lower('İSTANBUL', 'tr')`).Scan(&got); err != nil {
@@ -77,7 +77,7 @@ func TestUnicode_LocaleAwareUpper(t *testing.T) {
 }
 
 func TestUnicode_InitCap(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	var got string
 	if err := sc.QueryRowContext(context.Background(),
 		`SELECT initcap('hello world from go')`).Scan(&got); err != nil {
@@ -91,7 +91,7 @@ func TestUnicode_InitCap(t *testing.T) {
 func TestUnicode_Casefold(t *testing.T) {
 	// German eszett: casefold('GROẞER') should produce a string that
 	// compares equal to "großer" under simple ==.
-	_, sc := open(t)
+	_, sc := openDB(t)
 	var got1, got2 string
 	ctx := context.Background()
 	if err := sc.QueryRowContext(ctx, `SELECT casefold('GROẞER')`).Scan(&got1); err != nil {
@@ -106,7 +106,7 @@ func TestUnicode_Casefold(t *testing.T) {
 }
 
 func TestUnicode_Unaccent(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	cases := []struct {
 		in, want string
 	}{
@@ -131,7 +131,7 @@ func TestUnicode_Unaccent(t *testing.T) {
 func TestUnicode_Normalize(t *testing.T) {
 	// NFD decomposes 'é' into 'e' + combining acute (2 codepoints, 3
 	// bytes). NFC composes (1 codepoint, 2 bytes).
-	_, sc := open(t)
+	_, sc := openDB(t)
 	ctx := context.Background()
 	var nfc, nfd string
 	if err := sc.QueryRowContext(ctx, `SELECT normalize('café', 'NFC')`).Scan(&nfc); err != nil {
@@ -146,7 +146,7 @@ func TestUnicode_Normalize(t *testing.T) {
 }
 
 func TestUnicode_NormalizeBadForm(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	_, err := sc.ExecContext(context.Background(), `SELECT normalize('x', 'XYZ')`)
 	if err == nil || !strings.Contains(err.Error(), "invalid form") {
 		t.Errorf("got %v, want invalid-form error", err)
@@ -154,7 +154,7 @@ func TestUnicode_NormalizeBadForm(t *testing.T) {
 }
 
 func TestUnicode_NoCaseUnicodeCollation(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	if _, err := sc.ExecContext(context.Background(),
 		`CREATE TABLE t(s TEXT COLLATE NOCASE_UNICODE);
 		 INSERT INTO t(s) VALUES ('café'), ('CAFÉ'), ('cafe')`); err != nil {
@@ -180,7 +180,7 @@ func TestUnicode_NoCaseUnicodeCollation(t *testing.T) {
 }
 
 func TestUnicode_NoCaseAccentCollation(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	if _, err := sc.ExecContext(context.Background(),
 		`CREATE TABLE t(s TEXT COLLATE NOCASE_ACCENT);
 		 INSERT INTO t(s) VALUES ('café'), ('CAFE'), ('résumé')`); err != nil {
@@ -197,7 +197,7 @@ func TestUnicode_NoCaseAccentCollation(t *testing.T) {
 }
 
 func TestUnicode_LocaleCollation(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	if err := sc.Raw(func(driverConn any) error {
 		c, ok := driverConn.(*sqlite.Conn)
 		if !ok {
@@ -234,7 +234,7 @@ func TestUnicode_LocaleCollation(t *testing.T) {
 func TestUnicode_LikeOptOut(t *testing.T) {
 	// Default Register does NOT install the LIKE override. SQLite's
 	// built-in LIKE is ASCII-only, so 'café' LIKE 'CAFÉ' is false.
-	_, sc := open(t)
+	_, sc := openDB(t)
 	var got bool
 	if err := sc.QueryRowContext(context.Background(),
 		`SELECT 'café' LIKE 'CAFÉ'`).Scan(&got); err != nil {
@@ -247,7 +247,7 @@ func TestUnicode_LikeOptOut(t *testing.T) {
 
 func TestUnicode_LikeOptIn(t *testing.T) {
 	// RegisterLikeOnly directly installs the Unicode-aware LIKE.
-	_, sc := open(t)
+	_, sc := openDB(t)
 	if err := sc.Raw(func(driverConn any) error {
 		c, ok := driverConn.(*sqlite.Conn)
 		if !ok {
@@ -279,8 +279,54 @@ func TestUnicode_LikeOptIn(t *testing.T) {
 	}
 }
 
+// TestUnicode_NullInputs pins that scalar functions pass NULL through
+// rather than panicking or returning "".
+func TestUnicode_NullInputs(t *testing.T) {
+	_, sc := openDB(t)
+	ctx := context.Background()
+	for _, fn := range []string{"upper", "lower", "initcap", "casefold", "unaccent", "normalize"} {
+		var got sql.NullString
+		if err := sc.QueryRowContext(ctx,
+			"SELECT "+fn+"(NULL)").Scan(&got); err != nil {
+			t.Fatalf("%s(NULL): %v", fn, err)
+		}
+		if got.Valid {
+			t.Errorf("%s(NULL) = %q, want NULL", fn, got.String)
+		}
+	}
+}
+
+// TestUnicode_NoCaseUnicodeOrdering pins that NOCASE_UNICODE drives
+// ORDER BY consistently with its equality semantics — case folds
+// before comparison, with the secondary order on the raw string for
+// deterministic tie-breaking.
+func TestUnicode_NoCaseUnicodeOrdering(t *testing.T) {
+	_, sc := openDB(t)
+	if _, err := sc.ExecContext(context.Background(), `
+		CREATE TABLE w(s TEXT);
+		INSERT INTO w(s) VALUES ('Apple'), ('apple'), ('Banana'), ('banana')`); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := sc.QueryContext(context.Background(),
+		`SELECT s FROM w ORDER BY s COLLATE NOCASE_UNICODE, s`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var s string
+		_ = rows.Scan(&s)
+		got = append(got, s)
+	}
+	want := []string{"Apple", "apple", "Banana", "banana"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
 func TestUnicode_LikeEscapeChar(t *testing.T) {
-	_, sc := open(t)
+	_, sc := openDB(t)
 	if err := sc.Raw(func(driverConn any) error {
 		c, _ := driverConn.(*sqlite.Conn)
 		return unicode.RegisterLikeOnly(c)

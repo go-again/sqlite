@@ -5,12 +5,14 @@
 //
 //	import _ "github.com/go-again/sqlite/ext/unicode/auto"
 //
-// The LIKE override is NOT installed by this auto wiring — leaving SQLite's
-// LIKE optimization intact. To opt in, set
-// [github.com/go-again/sqlite/ext/unicode.RegisterLike] to true BEFORE
-// the first connection opens, or call
-// [github.com/go-again/sqlite/ext/unicode.RegisterLikeOnly] from your
-// own ConnectHook.
+// The LIKE override is NOT installed by this auto wiring — leaving
+// SQLite's LIKE optimization intact. To opt in, install via your own
+// ConnectHook with [github.com/go-again/sqlite/ext/unicode.WithLike]:
+//
+//	unicode.Register(conn, unicode.WithLike())
+//
+// Or call [github.com/go-again/sqlite/ext/unicode.RegisterLikeOnly]
+// separately.
 package auto
 
 import (
