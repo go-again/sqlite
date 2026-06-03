@@ -47,7 +47,7 @@ func openDB(t *testing.T, dir string) (db *sql.DB, sc *sql.Conn, name string) {
 		if !ok {
 			return errors.New("not *sqlite.Conn")
 		}
-		return cksm.EnableChecksums(c, "main")
+		return c.EnableChecksums("main")
 	}); err != nil {
 		t.Fatalf("EnableChecksums: %v", err)
 	}
@@ -222,5 +222,46 @@ func TestCksm_Close_Idempotent(t *testing.T) {
 	}
 	if err := fs.Close(); err != nil {
 		t.Errorf("second Close: %v", err)
+	}
+}
+
+// TestCksm_XOpen_InvalidPathRejected exercises the xOpen failure path:
+// the underlying default VFS rejects an open against a non-existent
+// parent directory, and cksm must forward the failure cleanly without
+// leaving a dangling fileMap entry that would leak across calls.
+func TestCksm_XOpen_InvalidPathRejected(t *testing.T) {
+	if raceEnabled {
+		t.Skip("skipping under -race: cksm methods table trips checkptr")
+	}
+	name, fs, err := cksm.New(cksm.Options{})
+	if err != nil {
+		t.Fatalf("cksm.New: %v", err)
+	}
+	t.Cleanup(func() { _ = fs.Close() })
+
+	bad := filepath.Join(t.TempDir(), "nonexistent-subdir", "x.db")
+	// Repeat to verify the failure path doesn't accumulate state: a
+	// dangling fileMap entry would eventually starve subsequent opens.
+	for range 50 {
+		db, err := sql.Open("sqlite", bad+"?vfs="+name)
+		if err != nil {
+			db.Close()
+			continue
+		}
+		if _, err := db.Exec(`CREATE TABLE t(v)`); err == nil {
+			t.Error("expected xOpen failure on invalid path, got success")
+		}
+		db.Close()
+	}
+
+	// After many failed opens, a successful open must still work.
+	good := filepath.Join(t.TempDir(), "good.db")
+	db, err := sql.Open("sqlite", good+"?vfs="+name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE t(v INT)`); err != nil {
+		t.Errorf("after failures, good open failed: %v", err)
 	}
 }

@@ -26,13 +26,14 @@
 //     **shared** — every `sql.Open` of the same name within a single
 //     [FS] sees the same page store, so two handles can talk to each
 //     other.
+//
 //   - Names without a leading slash are **private** — each `sql.Open`
 //     gets its own independent storage. Useful for table-test
 //     isolation when many sub-tests share one registered FS.
 //
-//	name, fs, _ := memdb.New(memdb.Options{})
-//	defer fs.Close()
-//	db, _ := sql.Open("sqlite", "file:/shared.db?vfs="+name)
+//     name, fs, _ := memdb.New(memdb.Options{})
+//     defer fs.Close()
+//     db, _ := sql.Open("sqlite", "file:/shared.db?vfs="+name)
 //
 // # When NOT to use memdb
 //

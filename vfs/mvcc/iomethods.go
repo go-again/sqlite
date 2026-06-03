@@ -58,10 +58,7 @@ func xReadTrampoline(_ *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Tsq
 		dst[i] = 0
 	}
 
-	maxSeen := snap.size
-	if pendingSize > maxSeen {
-		maxSeen = pendingSize
-	}
+	maxSeen := max(snap.size, pendingSize)
 	n := int32(0)
 	end := off + sqlite3.Tsqlite3_int64(amt)
 	if pendingWrites != nil {
@@ -219,6 +216,13 @@ func xLockTrampoline(_ *libc.TLS, pFile uintptr, level int32) int32 {
 		if !h.db.writeMu.TryLock() {
 			return sqlite3.SQLITE_BUSY
 		}
+		// Refresh the snapshot reference at the moment we acquire the
+		// writer lock so writes are layered on top of the latest
+		// published state, not the stale snapshot captured back at
+		// lockShared. Without this refresh, a concurrent writer that
+		// committed while we held lockShared would have its changes
+		// silently overwritten by our publish on xSync.
+		h.snap = h.db.snap.Load()
 	}
 	if level >= lockShared && h.lockLvl < lockShared {
 		// Capture snapshot for the duration of the read transaction.

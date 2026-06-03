@@ -364,9 +364,10 @@ func (t *Table) KNN(ctx context.Context, query []float32, k int, opts ...QueryOp
 func (t *Table) KNNSlice(ctx context.Context, query []float32, k int, opts ...QueryOption) ([]Neighbor, error) {
 	// Cap the initial slice capacity so a caller passing a pathological
 	// k (millions) doesn't pre-allocate gigabytes before the query
-	// runs. Append will grow the slice naturally past the cap for the
-	// rare legitimate large-k case.
-	out := make([]Neighbor, 0, min(k, 1024))
+	// runs, and clamp negative k to 0 so make() doesn't panic. The
+	// streaming KNN iter already returns no rows for k<=0; mirror that.
+	capHint := min(max(k, 0), 1024)
+	out := make([]Neighbor, 0, capHint)
 	for m, err := range t.KNN(ctx, query, k, opts...) {
 		if err != nil {
 			return nil, err

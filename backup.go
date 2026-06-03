@@ -44,10 +44,17 @@ func (b *Backup) Step(n int32) (bool, error) {
 // connection it implicitly opened is also closed. When the Backup was produced
 // by (*Conn).Backup (the mattn-compat factory), the destination connection is
 // owned by the caller and is not closed here.
+//
+// Calling Finish after Close (or vice versa) is a no-op.
 func (b *Backup) Finish() error {
+	if b.pBackup == 0 || b.srcConn == nil {
+		return nil
+	}
 	rc := sqlite3.Xsqlite3_backup_finish(b.srcConn.tls, b.pBackup)
+	b.pBackup = 0
 	if b.dstConn != nil {
 		b.dstConn.Close()
+		b.dstConn = nil
 	}
 	if rc == sqlite3.SQLITE_OK {
 		return nil

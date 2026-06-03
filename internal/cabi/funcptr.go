@@ -29,3 +29,18 @@ import "unsafe"
 func FuncPointer[T any](f T) uintptr {
 	return *(*uintptr)(unsafe.Pointer(&struct{ f T }{f}))
 }
+
+// AsFunc is the consumer-side inverse of [FuncPointer]: turn a stored
+// uintptr (typically read out of an [sqlite3.Tsqlite3_io_methods] slot)
+// back into a callable Go function value of the requested signature.
+//
+// The pattern matches the one modernc's transpiled code uses
+// internally (see _sqlite3OsRead in modernc.org/sqlite/lib for an
+// example): wrap the uintptr in a struct, take its address, cast
+// through unsafe.Pointer to a *F, and deref to get the function value.
+// Each VFS-layer call site specializes this on a distinct signature
+// via a thin callX* helper; consolidating asFunc here keeps the
+// fragile cast in a single place across the module.
+func AsFunc[F any](fp uintptr) F {
+	return *(*F)(unsafe.Pointer(&struct{ uintptr }{fp}))
+}

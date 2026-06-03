@@ -37,7 +37,7 @@ type fileHandle struct {
 	readOnly bool
 
 	mu       sync.Mutex
-	snap     *snapshot       // captured at LOCK_SHARED
+	snap     *snapshot        // captured at LOCK_SHARED
 	writeBuf map[int64][]byte // private writes since RESERVED
 	writeSz  int64            // file size after writes
 	hasWrite bool             // true once xWrite or xTruncate has been called this txn

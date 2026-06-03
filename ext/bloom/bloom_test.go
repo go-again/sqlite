@@ -13,42 +13,9 @@ import (
 	"github.com/go-again/sqlite/ext/bloom"
 )
 
-// openFileSession opens a file-backed DB at path, pins one conn,
-// registers bloom on it via the per-conn (*sqlite.Conn).Raw path so we
-// avoid mutating Driver.ConnectHook from inside a test (the global
-// mutation races with parallel tests under -race and chained hooks
-// double-register the module).
-func openFileSession(t *testing.T, path string) (*sql.DB, *sql.Conn) {
-	t.Helper()
-	if raceEnabled {
-		t.Skip("skipping under -race: see openDB")
-	}
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-
-	sc, err := db.Conn(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = sc.Close() })
-
-	if err := sc.Raw(func(driverConn any) error {
-		c, ok := driverConn.(*sqlite.Conn)
-		if !ok {
-			return errors.New("not *sqlite.Conn")
-		}
-		return bloom.Register(c)
-	}); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-	return db, sc
-}
-
-// openFileSessionNoCleanup mirrors openFileSession but returns close
+// openFileSessionNoCleanup opens a file-backed DB at path, pins one
+// conn, registers bloom on it via the per-conn (*sqlite.Conn).Raw path,
+// and returns close
 // funcs so the persistence test can fully tear down a session before
 // opening the next one (necessary because t.Cleanup runs at test end,
 // LIFO, which would leave Session 1's *sql.DB still holding the file

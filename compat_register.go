@@ -244,16 +244,11 @@ func reflectAggregator(impl any) (func(FunctionContext) (AggregateFunction, erro
 		return nil, 0, fmt.Errorf("aggregate factory must be func() State")
 	}
 	stateT := t.Out(0)
-	stateForCall := stateT
-	if stateT.Kind() == reflect.Ptr { //nolint:govet // inline: reflect.Ptr alias kept for readability over the numeric constant
-		stateForCall = stateT
-	}
-
-	stepM, ok := stateForCall.MethodByName("Step")
+	stepM, ok := stateT.MethodByName("Step")
 	if !ok {
 		return nil, 0, fmt.Errorf("aggregate state type %v has no Step method", stateT)
 	}
-	doneM, ok := stateForCall.MethodByName("Done")
+	doneM, ok := stateT.MethodByName("Done")
 	if !ok {
 		return nil, 0, fmt.Errorf("aggregate state type %v has no Done method", stateT)
 	}

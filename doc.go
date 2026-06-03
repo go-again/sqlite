@@ -165,16 +165,28 @@
 //     (Reciprocal Rank Fusion) for combining vec.KNN and fts.Search
 //     results into a single hybrid-search ranking.
 //   - github.com/go-again/sqlite/vfs — io/fs.FS-backed read-only
-//     databases (e.g. opening a SQLite file out of an embed.FS).
+//     databases (e.g. opening a SQLite file out of an embed.FS). Also
+//     exposes vfs.NewReader(io.ReaderAt, size) for the simpler
+//     direct-buffer case.
 //   - github.com/go-again/sqlite/vfs/crypto — pure-Go encryption-at-rest
 //     VFS (Adiantum or AES-XTS-256, transparent page-level encryption
 //     of main DB + journal + WAL + temp files).
+//   - github.com/go-again/sqlite/vfs/cksm — pure-Go page-level checksum
+//     VFS (Fletcher-style 8-byte trailer per page, on-disk compatible
+//     with SQLite's cksum_vtab). Composes beneath vfs/crypto.
+//   - github.com/go-again/sqlite/vfs/mvcc — in-memory MVCC VFS with
+//     snapshot-isolation reads + atomic publish on commit; shared
+//     (file:/name) and private (file:name) DBs.
+//   - github.com/go-again/sqlite/vfs/memdb — plain in-memory VFS with
+//     direct per-page store, no MVCC; smaller-surface alternative to
+//     vfs/mvcc for tests and scratch DBs.
 //   - github.com/go-again/sqlite/ext — opt-in loadable Go extensions:
-//     array, csv, regexp, uuid, hash, ipaddr, zorder, stats, unicode.
-//     Each sub-package is independent — pick what you need and leave the
-//     rest off your import graph. Register per-conn via <name>.Register(c)
-//     or pool-wide via blank-import of <name>/auto. See
-//     docs/coverage-ext.md for the matrix.
+//     array, blobio, bloom, closure, csv, fileio, hash, ipaddr, lines,
+//     pivot, regexp, spellfix1, statement, stats, unicode, uuid,
+//     zorder. Each sub-package is independent — pick what you need and
+//     leave the rest off your import graph. Register per-conn via
+//     <name>.Register(c) or pool-wide via blank-import of <name>/auto.
+//     See docs/coverage-ext.md for the matrix.
 //
 // # Virtual tables from Go
 //

@@ -16,7 +16,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        go: ['1.25.x']
+        # CLAUDE.md / llms.txt promise the two most recent Go releases;
+        # keep both here so a regression on the older line surfaces.
+        go: ['1.25.x', '1.26.x']
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

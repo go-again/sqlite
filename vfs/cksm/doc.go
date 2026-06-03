@@ -14,12 +14,12 @@
 // that gap by attaching a Fletcher-style checksum to every page.
 //
 // Composition note: cksm wraps the default OS-level VFS by intercepting
-// xRead / xWrite at the page boundary. It and
-// [github.com/go-again/sqlite/vfs/crypto] both wrap the system default
-// VFS independently, so a DB can be opened through one or the other but
-// not stacked through both with the current Options API. Pick one per
-// DB; an Options.WrapVFS field that would allow chaining is a planned
-// follow-up.
+// xRead / xWrite at the page boundary. To stack with
+// [github.com/go-again/sqlite/vfs/crypto] for checksummed-then-encrypted
+// storage, register cksm first and pass its name as the crypto VFS's
+// [Options.WrapVFS]; cksm itself also accepts an [Options.WrapVFS] when
+// callers want to layer it on top of some other registered VFS instead
+// of the system default.
 //
 // # On-disk format
 //

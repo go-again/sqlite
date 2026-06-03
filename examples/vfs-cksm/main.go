@@ -51,7 +51,7 @@ func main() {
 		if !ok {
 			return errors.New("not *sqlite.Conn")
 		}
-		return cksm.EnableChecksums(c, "main")
+		return c.EnableChecksums("main")
 	}); err != nil {
 		log.Fatalf("EnableChecksums: %v", err)
 	}

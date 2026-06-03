@@ -73,7 +73,7 @@ func ctor(c *sqlite.Conn, _, _, _ string, args []string) (sqlite.VTab, error) {
 	}
 	rs := rowStmt.(*sqlite.Stmt)
 	if rs.ColumnCount() == 0 {
-		rs.Close()
+		_ = rs.Close()
 		return nil, errors.New("pivot: row-key query must produce at least one column")
 	}
 	var schema strings.Builder
@@ -90,7 +90,7 @@ func ctor(c *sqlite.Conn, _, _, _ string, args []string) (sqlite.VTab, error) {
 			schema.WriteString(dt)
 		}
 	}
-	rs.Close()
+	_ = rs.Close()
 
 	// Run the column-key query to enumerate pivot columns.
 	colRows, err := c.Prepare(colKeySQL)
@@ -99,13 +99,13 @@ func ctor(c *sqlite.Conn, _, _, _ string, args []string) (sqlite.VTab, error) {
 	}
 	cs := colRows.(*sqlite.Stmt)
 	if cs.ColumnCount() != 2 {
-		cs.Close()
+		_ = cs.Close()
 		return nil, errors.New("pivot: col-key query must produce exactly 2 columns (bind_value, display_name)")
 	}
 	colDeclType := cs.ColumnDeclType(0)
-	r, err := cs.Query(nil)
+	r, err := cs.QueryContext(context.Background(), nil)
 	if err != nil {
-		cs.Close()
+		_ = cs.Close()
 		return nil, fmt.Errorf("pivot: run col-key query: %w", err)
 	}
 	row := make([]driver.Value, 2)
@@ -114,8 +114,8 @@ func ctor(c *sqlite.Conn, _, _, _ string, args []string) (sqlite.VTab, error) {
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			r.Close()
-			cs.Close()
+			_ = r.Close()
+			_ = cs.Close()
 			return nil, fmt.Errorf("pivot: iterate col-key query: %w", err)
 		}
 		bindVal := row[0]
@@ -128,8 +128,8 @@ func ctor(c *sqlite.Conn, _, _, _ string, args []string) (sqlite.VTab, error) {
 			schema.WriteString(colDeclType)
 		}
 	}
-	r.Close()
-	cs.Close()
+	_ = r.Close()
+	_ = cs.Close()
 
 	if len(t.cols) == 0 {
 		return nil, errors.New("pivot: col-key query produced no rows; vtab would have no pivot columns")
@@ -142,15 +142,15 @@ func ctor(c *sqlite.Conn, _, _, _ string, args []string) (sqlite.VTab, error) {
 	}
 	cs2 := cellStmt.(*sqlite.Stmt)
 	if cs2.ColumnCount() != 1 {
-		cs2.Close()
+		_ = cs2.Close()
 		return nil, errors.New("pivot: cell query must produce exactly 1 column")
 	}
 	if cs2.BindCount() != len(t.keys)+1 {
-		cs2.Close()
+		_ = cs2.Close()
 		return nil, fmt.Errorf("pivot: cell query expects %d bound parameters (keys + col value), got %d",
 			len(t.keys)+1, cs2.BindCount())
 	}
-	cs2.Close()
+	_ = cs2.Close()
 
 	schema.WriteByte(')')
 	if err := c.DeclareVTab(schema.String()); err != nil {
@@ -228,9 +228,9 @@ func (c *cursor) Filter(_ int, idxStr string, args []driver.Value) error {
 	if err != nil {
 		return fmt.Errorf("pivot: prepare scan: %w", err)
 	}
-	rs, err := stmt.(*sqlite.Stmt).Query(args)
+	rs, err := stmt.(*sqlite.Stmt).QueryContext(context.Background(), toNamedValues(args))
 	if err != nil {
-		stmt.Close()
+		_ = stmt.Close()
 		return fmt.Errorf("pivot: run scan: %w", err)
 	}
 	c.scan = rs
@@ -292,11 +292,11 @@ func (c *cursor) Column(col int) (sqlite.Value, error) {
 	// dramatically cheaper than prepare/finalize per cell.
 	c.cellArgs = append(c.cellArgs[:0], c.row...)
 	c.cellArgs = append(c.cellArgs, c.table.cols[idx])
-	rs, err := c.cellStmt.Query(c.cellArgs)
+	rs, err := c.cellStmt.QueryContext(context.Background(), toNamedValues(c.cellArgs))
 	if err != nil {
 		return nil, fmt.Errorf("pivot: query cell: %w", err)
 	}
-	defer rs.Close()
+	defer func() { _ = rs.Close() }()
 	one := make([]driver.Value, 1)
 	if err := rs.Next(one); err != nil {
 		if errors.Is(err, io.EOF) {
@@ -375,5 +375,16 @@ func stringify(v driver.Value) string {
 	return fmt.Sprint(v)
 }
 
-// silence "unused" warnings when only context.Background is used:
-var _ = context.Background
+// toNamedValues maps a positional []driver.Value to the []driver.NamedValue
+// shape that the non-deprecated QueryContext / ExecContext path expects.
+// Ordinals are 1-based.
+func toNamedValues(args []driver.Value) []driver.NamedValue {
+	if len(args) == 0 {
+		return nil
+	}
+	out := make([]driver.NamedValue, len(args))
+	for i, v := range args {
+		out[i] = driver.NamedValue{Ordinal: i + 1, Value: v}
+	}
+	return out
+}

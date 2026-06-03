@@ -33,11 +33,15 @@
 //
 // # API
 //
-// The package exposes exactly two symbols:
+// The package exposes a small set of symbols:
 //
 //   - New(fs.FS) (name string, *FS, error) — registers fs under a
 //     fresh unique VFS name and returns it. Pass the name back via
 //     the DSN's ?vfs= parameter when opening a database.
+//   - NewReader(io.ReaderAt, size int64) (name string, *FS, error) —
+//     same shape as New, but wraps any io.ReaderAt + known size as the
+//     single underlying file (named "db") without requiring an fs.FS.
+//     Useful for direct-buffer or memory-mapped immutable databases.
 //   - FS — a type alias for modernc.org/sqlite/vfs.FS, kept around
 //     so callers can hold a reference to the registered VFS for
 //     lifetime control if needed.

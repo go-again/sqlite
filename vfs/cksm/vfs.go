@@ -144,5 +144,5 @@ func initFromHeader(pst *perFileState, page []byte) {
 }
 
 func callXOpen(tls *libc.TLS, fp, pVfs, zName, pFile uintptr, flags int32, pOutFlags uintptr) int32 {
-	return asFunc[func(*libc.TLS, uintptr, uintptr, uintptr, int32, uintptr) int32](fp)(tls, pVfs, zName, pFile, flags, pOutFlags)
+	return cabi.AsFunc[func(*libc.TLS, uintptr, uintptr, uintptr, int32, uintptr) int32](fp)(tls, pVfs, zName, pFile, flags, pOutFlags)
 }

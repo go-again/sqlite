@@ -214,3 +214,40 @@ func containsSubslice(haystack, needle []byte) bool {
 	}
 	return false
 }
+
+// TestCrypto_XOpen_InvalidPathRejected exercises the xOpen failure
+// path on the crypto VFS: the underlying default VFS rejects a path
+// in a non-existent parent directory, and crypto must forward the
+// failure without leaking fileMap entries. Repeated failed opens
+// must not starve subsequent good opens.
+func TestCrypto_XOpen_InvalidPathRejected(t *testing.T) {
+	key := freshKey(99)
+	name, fs, err := crypto.New(crypto.Options{Key: key})
+	if err != nil {
+		t.Fatalf("crypto.New: %v", err)
+	}
+	t.Cleanup(func() { _ = fs.Close() })
+
+	bad := filepath.Join(t.TempDir(), "nonexistent-subdir", "x.db")
+	for range 50 {
+		db, err := sql.Open("sqlite", bad+"?vfs="+name)
+		if err != nil {
+			db.Close()
+			continue
+		}
+		if _, err := db.Exec(`CREATE TABLE t(v)`); err == nil {
+			t.Error("expected xOpen failure on invalid path, got success")
+		}
+		db.Close()
+	}
+
+	good := filepath.Join(t.TempDir(), "good.db")
+	db, err := sql.Open("sqlite", good+"?vfs="+name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE t(v INT)`); err != nil {
+		t.Errorf("after failures, good open failed: %v", err)
+	}
+}

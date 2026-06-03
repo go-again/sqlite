@@ -19,14 +19,14 @@
 //
 // Positional and named forms are both accepted:
 //
-//	CREATE VIRTUAL TABLE name USING bloom(100000, 0.01, 7);
-//	CREATE VIRTUAL TABLE name USING bloom(size=100000, p=0.01, k=7);
+//		CREATE VIRTUAL TABLE name USING bloom(100000, 0.01, 7);
+//		CREATE VIRTUAL TABLE name USING bloom(size=100000, p=0.01, k=7);
 //
-//   - size=N (default 100) — expected element count. Used to size the
-//     bit array.
-//   - p=0.01 (default 0.01) — target false-positive probability (0 < p < 1).
-//   - k=N — number of hash functions. Default: optimal for the chosen p,
-//     `round(-log2(p))`.
+//	  - size=N (default 100) — expected element count. Used to size the
+//	    bit array.
+//	  - p=0.01 (default 0.01) — target false-positive probability (0 < p < 1).
+//	  - k=N — number of hash functions. Default: optimal for the chosen p,
+//	    `round(-log2(p))`.
 //
 // # Schema
 //
@@ -58,6 +58,7 @@
 package bloom
 
 import (
+	"context"
 	"database/sql/driver"
 	"errors"
 	"fmt"
@@ -153,12 +154,12 @@ func (t *table) loadParams() error {
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
-	rs, err := stmt.Query(nil)
+	defer func() { _ = stmt.Close() }()
+	rs, err := stmt.(*sqlite.Stmt).QueryContext(context.Background(), nil)
 	if err != nil {
 		return err
 	}
-	defer rs.Close()
+	defer func() { _ = rs.Close() }()
 	dest := make([]driver.Value, 4)
 	if err := rs.Next(dest); err != nil {
 		return err
@@ -171,12 +172,13 @@ func (t *table) loadParams() error {
 }
 
 func (t *table) create() error {
-	if _, err := t.conn.Exec(fmt.Sprintf(
+	ctx := context.Background()
+	if _, err := t.conn.ExecContext(ctx, fmt.Sprintf(
 		`CREATE TABLE %s (data BLOB, p REAL, n INTEGER, m INTEGER, k INTEGER)`,
 		t.qualified()), nil); err != nil {
 		return fmt.Errorf("bloom: create storage: %w", err)
 	}
-	if _, err := t.conn.Exec(fmt.Sprintf(
+	if _, err := t.conn.ExecContext(ctx, fmt.Sprintf(
 		`INSERT INTO %s (rowid, data, p, n, m, k) VALUES (1, zeroblob(%d), %f, %d, %d, %d)`,
 		t.qualified(), t.bytes, t.prob, t.nElem, 8*t.bytes, t.hashes), nil); err != nil {
 		return fmt.Errorf("bloom: seed storage: %w", err)
@@ -187,7 +189,7 @@ func (t *table) create() error {
 func (t *table) Disconnect() error { return nil }
 
 func (t *table) Destroy() error {
-	if _, err := t.conn.Exec(`DROP TABLE `+t.qualified(), nil); err != nil {
+	if _, err := t.conn.ExecContext(context.Background(), `DROP TABLE `+t.qualified(), nil); err != nil {
 		return fmt.Errorf("bloom: drop storage: %w", err)
 	}
 	return nil
@@ -229,7 +231,7 @@ func (t *table) Insert(cols []driver.Value, _ *int64) error {
 	if err != nil {
 		return fmt.Errorf("bloom: open storage blob: %w", err)
 	}
-	defer b.Close()
+	defer func() { _ = b.Close() }()
 	mBits := uint64(8 * t.bytes)
 	for k := range t.hashes {
 		bit := kthHash(k, word) % mBits
@@ -279,7 +281,7 @@ func (c *cursor) Filter(_ int, _ string, args []driver.Value) error {
 	if err != nil {
 		return fmt.Errorf("bloom: open storage blob: %w", err)
 	}
-	defer b.Close()
+	defer func() { _ = b.Close() }()
 	mBits := uint64(8 * c.table.bytes)
 	c.present = true
 	for k := range c.table.hashes {

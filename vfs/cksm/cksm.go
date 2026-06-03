@@ -187,6 +187,9 @@ func New(opts Options) (name string, fs *FS, err error) {
 
 	if rc := sqlite3.Xsqlite3_vfs_register(tls, cvfs, 0); rc != sqlite3.SQLITE_OK {
 		unregisterFS(fs.token)
+		if fs.ourIoMethods != nil {
+			libc.Xfree(tls, uintptr(unsafe.Pointer(fs.ourIoMethods)))
+		}
 		libc.Xfree(tls, cvfs)
 		libc.Xfree(tls, cname)
 		tls.Close()
@@ -196,25 +199,25 @@ func New(opts Options) (name string, fs *FS, err error) {
 }
 
 // Name returns the registered VFS name.
-func (f *FS) Name() string { return f.name }
+func (fs *FS) Name() string { return fs.name }
 
 // Close unregisters the VFS and frees its libc allocations. Idempotent.
-func (f *FS) Close() error {
-	if f.closed.Swap(true) {
+func (fs *FS) Close() error {
+	if fs.closed.Swap(true) {
 		return nil
 	}
 	stateMu.Lock()
 	defer stateMu.Unlock()
 
-	rc := sqlite3.Xsqlite3_vfs_unregister(f.tls, f.cvfs)
-	unregisterFS(f.token)
-	libc.Xfree(f.tls, f.cvfs)
-	libc.Xfree(f.tls, f.cname)
-	if f.ourIoMethods != nil {
-		libc.Xfree(f.tls, uintptr(unsafe.Pointer(f.ourIoMethods)))
-		f.ourIoMethods = nil
+	rc := sqlite3.Xsqlite3_vfs_unregister(fs.tls, fs.cvfs)
+	unregisterFS(fs.token)
+	libc.Xfree(fs.tls, fs.cvfs)
+	libc.Xfree(fs.tls, fs.cname)
+	if fs.ourIoMethods != nil {
+		libc.Xfree(fs.tls, uintptr(unsafe.Pointer(fs.ourIoMethods)))
+		fs.ourIoMethods = nil
 	}
-	f.tls.Close()
+	fs.tls.Close()
 	if rc != sqlite3.SQLITE_OK {
 		return fmt.Errorf("cksm: Xsqlite3_vfs_unregister rc=%d", rc)
 	}
@@ -226,28 +229,6 @@ func isValidPageSize(n int) bool {
 		return false
 	}
 	return n&(n-1) == 0
-}
-
-// Enabler is the subset of *sqlite.Conn that [EnableChecksums]
-// needs. Any type with the same shape can satisfy it — typically the
-// root package's *sqlite.Conn.
-type Enabler interface {
-	EnableChecksums(schema string) error
-}
-
-// EnableChecksums is a thin wrapper around the root package's
-// (*sqlite.Conn).EnableChecksums method, kept for backwards
-// compatibility with older callers. New code should call the method
-// directly on the connection.
-//
-// schema is the attached-database name ("main" for the primary
-// database; "temp" or a name from ATTACH DATABASE otherwise). Pass
-// "main" if you only have the default database.
-//
-// Mirrors the upstream cksum-vfs convention; see
-// https://sqlite.org/cksumvfs.html.
-func EnableChecksums(c Enabler, schema string) error {
-	return c.EnableChecksums(schema)
 }
 
 // compute is the SQLite cksm_vtab Fletcher-style rolling 64-bit

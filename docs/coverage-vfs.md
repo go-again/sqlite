@@ -19,7 +19,7 @@ Status legend:
 |---|---|---|---|---|
 | `vfs/` (root, fs.FS adapter) | [ncruces vfs/readervfs](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs/readervfs) | ✓ landed | `vfs.New(fs.FS)` | `vfs/vfs_test.go` |
 | `vfs/crypto` | [ncruces vfs/adiantum](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs/adiantum) + [vfs/xts](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs/xts) | ✓ landed | `crypto.New(Options)` | `vfs/crypto/integration_test.go` |
-| `vfs/cksm` | [ncruces vfs/cksm.go](https://github.com/ncruces/go-sqlite3/blob/main/vfs/cksm.go) | ✓ landed | `cksm.New(Options)` + `cksm.EnableChecksums(conn, schema)` | `vfs/cksm/cksm_test.go` |
+| `vfs/cksm` | [ncruces vfs/cksm.go](https://github.com/ncruces/go-sqlite3/blob/main/vfs/cksm.go) | ✓ landed | `cksm.New(Options)` + `(*sqlite.Conn).EnableChecksums(schema)` | `vfs/cksm/cksm_test.go` |
 | `vfs/mvcc` | [ncruces vfs/mvcc](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs/mvcc) | ✓ landed (Go-native re-implementation, no wbt dep) | `mvcc.New(Options)` | `vfs/mvcc/mvcc_test.go` |
 | `vfs/memdb` | [ncruces vfs/memdb](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs/memdb) | ✓ landed | `memdb.New(Options)` | `vfs/memdb/memdb_test.go` |
 | `vfs.NewReader(io.ReaderAt, size)` | [ncruces vfs/readervfs](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs/readervfs) | ✓ landed | `vfs.NewReader(r, n)` | `vfs/vfs_test.go` |
@@ -65,12 +65,9 @@ layers don't collide.
 computes a 32-bit Fletcher-style rolling sum over the page body and
 stamps the 8-byte trailer; every read verifies it. Activates only when
 the database's `reserved_bytes` byte (offset 20 of the SQLite header)
-reads 8, which `EnableChecksums(conn, schema)` sets via
+reads 8, which `(*sqlite.Conn).EnableChecksums(schema)` sets via
 `SQLITE_FCNTL_RESERVE_BYTES` and then `VACUUM`s the database to rewrite
-every existing page with the trailer in place. cksm and `vfs/crypto`
-each wrap the system default VFS independently; stacking them through
-one open database needs an `Options.WrapVFS` field (planned), so for
-now pick one wrapper per DB.
+every existing page with the trailer in place.
 
 ## Skipped / out of scope
 

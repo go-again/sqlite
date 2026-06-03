@@ -374,3 +374,27 @@ func TestTyped_Drop(t *testing.T) {
 		t.Errorf("expected error querying dropped table")
 	}
 }
+
+// TestKNNSlice_NonPositiveK pins the negative-k clamp in KNNSlice. The
+// streaming KNN iter already short-circuits on k<=0; this test asserts
+// that KNNSlice does not panic in its make() before reaching the iter.
+func TestKNNSlice_NonPositiveK(t *testing.T) {
+	db := openDB(t)
+	ctx := context.Background()
+	tbl, err := vec.Create(ctx, db, "docs", 8, vec.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tbl.BatchInsert(ctx, fixture); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []int{0, -1, -1024} {
+		got, err := tbl.KNNSlice(ctx, fixtureQuery, k)
+		if err != nil {
+			t.Errorf("k=%d: unexpected error: %v", k, err)
+		}
+		if len(got) != 0 {
+			t.Errorf("k=%d: got %d matches, want 0", k, len(got))
+		}
+	}
+}

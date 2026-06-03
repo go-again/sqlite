@@ -150,3 +150,42 @@ func TestMemdb_Close_Idempotent(t *testing.T) {
 		t.Errorf("second Close: %v", err)
 	}
 }
+
+// TestMemdb_QueryAfterFSCloseFailsCleanly pins the cleanup ordering:
+// after FS.Close, the VFS is unregistered. A *sql.DB still holding a
+// pooled conn must surface a clean error on its next operation rather
+// than crashing. (Active queries during Close are UB by contract.)
+func TestMemdb_QueryAfterFSCloseFailsCleanly(t *testing.T) {
+	name, fs, err := memdb.New(memdb.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := sql.Open("sqlite", "file:/x?vfs="+name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `CREATE TABLE t(v INT)`); err != nil {
+		t.Fatal(err)
+	}
+	// Close the pooled conn so it is no longer holding a file handle.
+	// (mvcc/memdb in-memory store is destroyed when refs drop to 0.)
+	sqlDB, _ := db.Conn(ctx)
+	sqlDB.Close()
+
+	if err := fs.Close(); err != nil {
+		t.Fatalf("FS.Close: %v", err)
+	}
+
+	// A new query has to open a fresh conn through the now-gone VFS;
+	// this must fail cleanly. No panic.
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("query after FS.Close panicked: %v", r)
+		}
+	}()
+	_, _ = db.ExecContext(ctx, `INSERT INTO t VALUES (1)`)
+}

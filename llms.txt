@@ -8,7 +8,7 @@
 The driver registers under two names so it slots into either ecosystem's
 blank imports verbatim: `"sqlite"` (modernc-compatible) and `"sqlite3"`
 (mattn-compatible). Same singleton, no behavioural split. Supports the
-two most recent Go releases only (today: 1.26 current, 1.25 previous);
+two most recent Go releases only (the pin is `go.mod`'s `go` directive);
 modern syntax is treated as a feature — generics, iter.Seq2, log/slog,
 range-over-int, sync.WaitGroup.Go, etc. are all in use.
 
@@ -33,7 +33,7 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [vfs/memdb/doc.go](vfs/memdb/doc.go): plain in-memory VFS — direct per-page store with no MVCC; smaller-surface alternative to vfs/mvcc for tests and scratch DBs.
 - [fusion/doc.go](fusion/doc.go): rank-fusion helpers — combine vec.KNN and fts.Search results via Reciprocal Rank Fusion (Cormack 2009).
 - [ext/README.md](ext/README.md): loadable Go extensions umbrella — opt-in SQL scalar UDFs, table-valued functions, and vtab-based readers. Each sub-package independent; pick by need. Several are Go-native ports of ncruces/go-sqlite3 extensions. See [docs/coverage-ext.md](docs/coverage-ext.md) for the full matrix.
-- [ext/spellfix1/doc.go](ext/spellfix1/doc.go): fuzzy-text vtab — Soundex prefilter + Damerau-Levenshtein edit-distance ranking with persistent vocabulary shadow table. Go-native re-implementation of SQLite's spellfix1 (same SQL surface, simpler internals).
+- [ext/spellfix1/spellfix1.go](ext/spellfix1/spellfix1.go): fuzzy-text vtab — Soundex prefilter + Damerau-Levenshtein edit-distance ranking with persistent vocabulary shadow table. Go-native re-implementation of SQLite's spellfix1 (same SQL surface, simpler internals).
 
 ## Examples (runnable)
 
@@ -70,8 +70,11 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [examples/ext-closure](examples/ext-closure/main.go): full and depth-bounded graph walks over an org chart via `transitive_closure`.
 - [examples/vfs-cksm](examples/vfs-cksm/main.go): detect simulated bit-rot via the checksum VFS — corrupt one byte, observe `SQLITE_IOERR_DATA` on read.
 - [examples/vfs-mvcc](examples/vfs-mvcc/main.go): SHARED (`file:/name`) vs PRIVATE (`file:name`) in-memory MVCC databases; reader / writer concurrency demo.
+- [examples/vfs-memdb](examples/vfs-memdb/main.go): same shared / private shape as vfs-mvcc but on the simpler `vfs/memdb` VFS — writes are visible immediately, no snapshot isolation.
+- [examples/hooks](examples/hooks/main.go): install update / authorizer / commit / trace hooks on a pinned connection (MaxOpenConns(1) + db.Conn + sc.Raw idiom).
+- [examples/backup](examples/backup/main.go): `(*Conn).Backup` mattn-compat factory + top-level `sqlite.Serialize` / `sqlite.Deserialize` round-trip.
 - [examples/ext-spellfix1](examples/ext-spellfix1/main.go): fuzzy lookup of misspellings (`WHERE word MATCH ?`) with Soundex prefilter + Damerau-Levenshtein scoring + rank boost.
-- `ext/bloom` (now persistent via the shadow-blob upgrade) and `ext/lines` ship without dedicated examples — see `docs/coverage-ext.md` and the per-package doc.go for usage.
+- `ext/bloom` (persistent via the shadow-blob layout) and `ext/lines` ship without dedicated examples — see `docs/coverage-ext.md` and the per-package doc.go for usage.
 
 ## Feature coverage matrices
 

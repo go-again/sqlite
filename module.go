@@ -143,8 +143,8 @@ func (c *Conn) DeclareVTab(schema string) error {
 // required) into the lower-level [vtab.Module] interface that the
 // existing trampolines (vtab.go) expect.
 type vtabCtorModule struct {
-	conn       *Conn
-	createCtor VTabCtor // called by xCreate (fresh CREATE VIRTUAL TABLE)
+	conn        *Conn
+	createCtor  VTabCtor // called by xCreate (fresh CREATE VIRTUAL TABLE)
 	connectCtor VTabCtor // called by xConnect (reopen of an existing vtab)
 }
 

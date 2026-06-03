@@ -18,14 +18,14 @@
 //   - fsdir(root [, depth]) virtual table: recursively walks root.
 //     Columns:
 //
-//	    name   TEXT     – path relative to root
-//	    mode   INTEGER  – io/fs.FileMode bits
-//	    mtime  INTEGER  – modification time, Unix nanoseconds
-//	    data   BLOB     – file contents for regular files; symlink target
-//	                       for symlinks (os-backed only); NULL otherwise
-//	    level  INTEGER  – walk depth (1 for direct children of root)
-//	    path   HIDDEN   – initial-root constraint (required)
-//	    depth  HIDDEN   – optional max depth constraint
+//     name   TEXT     – path relative to root
+//     mode   INTEGER  – io/fs.FileMode bits
+//     mtime  INTEGER  – modification time, Unix nanoseconds
+//     data   BLOB     – file contents for regular files; symlink target
+//     for symlinks (os-backed only); NULL otherwise
+//     level  INTEGER  – walk depth (1 for direct children of root)
+//     path   HIDDEN   – initial-root constraint (required)
+//     depth  HIDDEN   – optional max depth constraint
 //
 // # Sandboxing
 //

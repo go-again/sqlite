@@ -21,15 +21,14 @@ type Options struct{}
 // FS; call [FS.Close] to unregister and release every named DB it
 // hosts.
 type FS struct {
-	name    string
-	cname   uintptr
-	cvfs    uintptr
-	tls     *libc.TLS
-	token   uintptr
-	closed  atomic.Bool
-	mu      sync.Mutex
-	memDBs  map[string]*memDB // shared (leading-/) DBs
-	cleanup []func()          // private DBs to release on Close
+	name   string
+	cname  uintptr
+	cvfs   uintptr
+	tls    *libc.TLS
+	token  uintptr
+	closed atomic.Bool
+	mu     sync.Mutex
+	memDBs map[string]*memDB // shared (leading-/) DBs
 }
 
 // memDB is the shared per-name in-memory database. Pages are byte
@@ -37,10 +36,10 @@ type FS struct {
 // behind an atomic.Pointer so readers acquire an O(1) consistent view
 // at lock-acquire time.
 type memDB struct {
-	name     string
-	snap     atomic.Pointer[snapshot]
-	writeMu  sync.Mutex // serializes writers (one at a time)
-	refs     atomic.Int32
+	name    string
+	snap    atomic.Pointer[snapshot]
+	writeMu sync.Mutex // serializes writers (one at a time)
+	refs    atomic.Int32
 }
 
 // snapshot is an immutable view of a memDB at a moment in time.
@@ -115,20 +114,25 @@ func New(_ Options) (name string, fs *FS, err error) {
 	}
 	fs.token = registerFS(fs)
 
-	// Per-file size: default-VFS's allocation tail + our perFileState.
-	szOsFile := defVfs.FszOsFile + int32(unsafe.Sizeof(perFileState{}))
+	// Per-file size: just enough to hold the base SQLite file struct
+	// (FpMethods pointer) followed by our perFileState. mvcc never
+	// forwards I/O to the default VFS, so we don't need its private
+	// tail — and matching the perFileStateOf offset (sizeof
+	// Tsqlite3_file) prevents a future maintainer from accidentally
+	// overlapping the two regions.
+	szOsFile := int32(unsafe.Sizeof(sqlite3.Tsqlite3_file{}) + unsafe.Sizeof(perFileState{}))
 
 	ourVfs := (*sqlite3.Tsqlite3_vfs)(unsafe.Pointer(cvfs))
 	*ourVfs = sqlite3.Tsqlite3_vfs{
-		FiVersion:          1,
-		FszOsFile:          szOsFile,
-		FmxPathname:        defVfs.FmxPathname,
-		FpNext:             0,
-		FzName:             cname,
-		FpAppData:          fs.token,
-		FxOpen:             cabi.FuncPointer(xOpenTrampoline),
-		FxDelete:           cabi.FuncPointer(xDeleteTrampoline),
-		FxAccess:           cabi.FuncPointer(xAccessTrampoline),
+		FiVersion:   1,
+		FszOsFile:   szOsFile,
+		FmxPathname: defVfs.FmxPathname,
+		FpNext:      0,
+		FzName:      cname,
+		FpAppData:   fs.token,
+		FxOpen:      cabi.FuncPointer(xOpenTrampoline),
+		FxDelete:    cabi.FuncPointer(xDeleteTrampoline),
+		FxAccess:    cabi.FuncPointer(xAccessTrampoline),
 		// FullPathname must be ours — the default VFS would resolve the
 		// name against the host filesystem (absolute-path resolution,
 		// symlink walk), which is meaningless for an in-memory store
@@ -169,6 +173,16 @@ func (f *FS) Close() error {
 	libc.Xfree(f.tls, f.cname)
 	f.tls.Close()
 
+	// Drop any fileHandles still owned by this FS. Without this drain,
+	// repeated New/Close cycles permanently leak handle records.
+	fileHandlesMu.Lock()
+	for tok, h := range fileHandles {
+		if h.fs == f {
+			delete(fileHandles, tok)
+		}
+	}
+	fileHandlesMu.Unlock()
+
 	f.mu.Lock()
 	f.memDBs = nil
 	f.mu.Unlock()
@@ -206,15 +220,20 @@ func (f *FS) acquireDB(name string) (*memDB, bool) {
 }
 
 func (f *FS) releaseDB(db *memDB, shared bool) {
-	if db.refs.Add(-1) > 0 {
-		return
-	}
 	if !shared {
+		// Private DB lives in no map; nothing to protect.
+		db.refs.Add(-1)
 		return
 	}
+	// Decrement must happen under f.mu so a concurrent acquireDB
+	// can't grab a reference between the decrement and the delete —
+	// otherwise the next acquire on this name spawns a second memDB
+	// and we'd have two live snapshot stores under one shared name.
 	f.mu.Lock()
-	if cur, ok := f.memDBs[db.name]; ok && cur == db {
-		delete(f.memDBs, db.name)
+	if db.refs.Add(-1) == 0 {
+		if cur, ok := f.memDBs[db.name]; ok && cur == db {
+			delete(f.memDBs, db.name)
+		}
 	}
 	f.mu.Unlock()
 }

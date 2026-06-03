@@ -455,3 +455,76 @@ func keysOf(matches []fts.Hit[int64, string]) []int64 {
 	}
 	return out
 }
+
+// TestDegenerate_EmptyTerm covers fts.Term("") — should produce no
+// matches without crashing the query planner or panicking the
+// builder. Either an empty result set or a clean FTS5 error is
+// acceptable; the only contract violation is panic / driver crash.
+func TestDegenerate_EmptyTerm(t *testing.T) {
+	db := openDB(t)
+	ctx := context.Background()
+	idx := newIdx(t, db, fts.Options{})
+	if err := idx.Insert(ctx, fixtureCorpus...); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Term(\"\") panicked: %v", r)
+		}
+	}()
+	matches, err := idx.SearchSlice(ctx, fts.Term(""))
+	if err != nil {
+		t.Logf("Term(\"\"): error (acceptable): %v", err)
+		return
+	}
+	if len(matches) != 0 {
+		t.Errorf("Term(\"\") matches=%d, want 0", len(matches))
+	}
+}
+
+// TestDegenerate_ZeroTokenPhrase covers fts.Phrase() — zero positional
+// args. Builder must produce a syntactically valid (or rejected)
+// query, never crash.
+func TestDegenerate_ZeroTokenPhrase(t *testing.T) {
+	db := openDB(t)
+	ctx := context.Background()
+	idx := newIdx(t, db, fts.Options{})
+	if err := idx.Insert(ctx, fixtureCorpus...); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Phrase() panicked: %v", r)
+		}
+	}()
+	_, err := idx.SearchSlice(ctx, fts.Phrase())
+	// Either an FTS5 syntax error or an empty result is acceptable;
+	// a panic or driver error is not.
+	if err != nil {
+		t.Logf("Phrase(): error (acceptable): %v", err)
+	}
+}
+
+// TestDegenerate_EmptyRaw covers fts.Raw("") — empty user-supplied
+// match text. Same contract as Term("") — no panic.
+func TestDegenerate_EmptyRaw(t *testing.T) {
+	db := openDB(t)
+	ctx := context.Background()
+	idx := newIdx(t, db, fts.Options{})
+	if err := idx.Insert(ctx, fixtureCorpus...); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Raw(\"\") panicked: %v", r)
+		}
+	}()
+	matches, err := idx.SearchSlice(ctx, fts.Raw(""))
+	if err != nil {
+		t.Logf("Raw(\"\"): error (acceptable): %v", err)
+		return
+	}
+	if len(matches) != 0 {
+		t.Errorf("Raw(\"\") matches=%d, want 0", len(matches))
+	}
+}

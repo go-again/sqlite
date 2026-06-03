@@ -47,6 +47,34 @@ type conn struct {
 // of times) while bounding the per-conn memory footprint.
 const defaultStmtCacheSize = 100
 
+// connByDB maps sqlite3* (the C-side db uintptr) back to the *conn that
+// owns it. UDF / vtab trampolines reach back via
+// sqlite3_context_db_handle to fetch per-conn settings (e.g. the
+// integer-time format that should be applied to a UDF's return value).
+var (
+	connByDBMu sync.RWMutex
+	connByDB   = map[uintptr]*conn{}
+)
+
+func registerConn(c *conn) {
+	connByDBMu.Lock()
+	connByDB[c.db] = c
+	connByDBMu.Unlock()
+}
+
+func unregisterConn(db uintptr) {
+	connByDBMu.Lock()
+	delete(connByDB, db)
+	connByDBMu.Unlock()
+}
+
+func connForDB(db uintptr) *conn {
+	connByDBMu.RLock()
+	c := connByDB[db]
+	connByDBMu.RUnlock()
+	return c
+}
+
 func newConn(dsn string) (*conn, error) {
 	var query, vfsName string
 
@@ -93,6 +121,7 @@ func newConn(dsn string) (*conn, error) {
 	}
 
 	c.db = db
+	registerConn(c)
 	if err = c.extendedResultCodes(true); err != nil {
 		c.Close()
 		return nil, err
@@ -821,11 +850,13 @@ func (c *conn) Close() (err error) {
 				c.free(e.psql)
 			}
 		}
-		if err := c.closeV2(c.db); err != nil {
-			return err
-		}
-
+		closeErr := c.closeV2(c.db)
+		c.dropHookHandlers()
+		unregisterConn(c.db)
 		c.db = 0
+		if closeErr != nil {
+			return closeErr
+		}
 	}
 
 	if c.tls != nil {
@@ -1082,6 +1113,9 @@ func (c *conn) Deserialize(buf []byte) (err error) {
 
 	rc := sqlite3.Xsqlite3_deserialize(c.tls, c.db, zSchema, pBuf, int64(bufLen), int64(bufLen), sqlite3.SQLITE_DESERIALIZE_RESIZEABLE|sqlite3.SQLITE_DESERIALIZE_FREEONCLOSE)
 	if rc != sqlite3.SQLITE_OK {
+		// FREEONCLOSE only transfers ownership of pBuf to SQLite on
+		// success; on failure we still own it.
+		sqlite3.Xsqlite3_free(c.tls, pBuf)
 		return c.errstr(rc)
 	}
 	return nil

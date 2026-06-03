@@ -31,6 +31,15 @@ Coverage matrix and status (✓ landed / ⚠ partial / ✗ deferred) lives at [`
 | [`zorder`](zorder/) | `zorder(d1, …, dN)` / `unzorder(z, N, i)` Morton encoding for 2–24 dimensions. |
 | [`stats`](stats/) | Aggregates + windows: `var_pop`/`var_samp`/`stddev_*`, `skewness_*`, `kurtosis_*`, `covar_*`, `corr`, the full `regr_*` family, `percentile_cont/disc`, `median`, `mode`, `every`, `some`. Welford + Terriberry + Kahan; streaming Inverse path for sliding windows. Plus `cbrt`, `cot` scalars. |
 | [`unicode`](unicode/) | Unicode-aware `upper` / `lower` / `initcap` / `casefold` / `normalize` (NFC/NFD/NFKC/NFKD) / `unaccent` via `golang.org/x/text`. Preset `NOCASE_UNICODE` and `NOCASE_ACCENT` collations register automatically. `RegisterLocaleCollation(c, locale, name)` for BCP-47-tagged collators. Unicode-aware `LIKE` override is opt-in via `unicode.Register(c, unicode.WithLike())`. |
+| [`blobio`](blobio/) | `readblob(schema, table, column, rowid)` / `writeblob(...)` scalars over `sqlite3_blob_open`, plus the typed `(*Conn).OpenBlob` API. Stream large `zeroblob(N)` allocations in/out of TEXT/BLOB columns without materialising in memory. |
+| [`bloom`](bloom/) | Persistent Bloom-filter vtab. `CREATE VIRTUAL TABLE name USING bloom(capacity=N, error_rate=R, ...)`; shadow-blob persistence so the filter survives reopens. Kirsch-Mitzenmacher double-hashing with stable per-table salts. |
+| [`closure`](closure/) | `transitive_closure(root_col, depth)` vtab — full and depth-bounded graph walks over an adjacency-list table. Eponymous; `WHERE root=? AND depth<=?` parametrises each walk. |
+| [`fileio`](fileio/) | `readfile(path)` / `writefile(path, data, mode)` scalars + `fsdir(path, depth)` recursive walker vtab. `fileio.Register(c)` uses the live OS; `fileio.RegisterFS(c, fsys)` sandboxes to any `fs.FS` (writefile then errors). |
+| [`lines`](lines/) | Eponymous vtab `lines(text)` that yields one row per line. Streams via `bufio.Scanner` so large blobs of text don't materialise twice. |
+| [`pivot`](pivot/) | `pivot_vtab(...)` three-SELECT cross-tab — rows × columns × cell aggregate. Constructs a dynamic schema from the column-key projection and caches the cell-aggregate stmt per cell. |
+| [`spellfix1`](spellfix1/) | `CREATE VIRTUAL TABLE name USING spellfix1` — fuzzy lookup vtab. Soundex prefilter + Damerau-Levenshtein edit-distance ranking, persistent vocabulary shadow table. Go-native re-implementation of SQLite's spellfix1 (same SQL surface, simpler internals). |
+| [`statement`](statement/) | `CREATE VIRTUAL TABLE name USING statement(sql='...')` — parametrised views. `?N` anonymous and `:name` named binds become HIDDEN columns on the vtab; SELECTs `... WHERE :pat=?` drive the underlying prepared stmt. |
+| [`regexp/gorm`](regexp/gorm/) | gorm helpers built on `ext/regexp`. `regexpgorm.WhereRegex(db, col, pattern)` adds a `col REGEXP ?` clause without touching the dialect. |
 
 ## Attribution
 

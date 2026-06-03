@@ -65,7 +65,7 @@ func makeReadblob(c *sqlite.Conn) func(string, string, string, int64, int64, int
 		if err != nil {
 			return nil, fmt.Errorf("readblob: %w", err)
 		}
-		defer b.Close()
+		defer func() { _ = b.Close() }()
 		buf := make([]byte, n)
 		if _, err := io.ReadFull(io.NewSectionReader(b, offset, n), buf); err != nil {
 			return nil, fmt.Errorf("readblob: %w", err)
@@ -127,7 +127,7 @@ func makeOpenblob(c *sqlite.Conn) func(args ...driver.Value) (int64, error) {
 		if err != nil {
 			return 0, fmt.Errorf("openblob: %w", err)
 		}
-		defer b.Close()
+		defer func() { _ = b.Close() }()
 		if err := cb(b, trailing...); err != nil {
 			return 0, fmt.Errorf("openblob callback: %w", err)
 		}
@@ -152,7 +152,7 @@ func makeWriteblob(c *sqlite.Conn) func(string, string, string, int64, int64, dr
 		if err != nil {
 			return 0, fmt.Errorf("writeblob: %w", err)
 		}
-		defer b.Close()
+		defer func() { _ = b.Close() }()
 		n, err := b.WriteAt(p, offset)
 		if err != nil {
 			return int64(n), fmt.Errorf("writeblob: %w", err)

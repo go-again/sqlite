@@ -20,14 +20,14 @@ type Options struct{}
 // FS is a registered in-memory VFS. Each [New] returns a distinct FS;
 // call [FS.Close] to unregister and release every named DB it hosts.
 type FS struct {
-	name    string
-	cname   uintptr
-	cvfs    uintptr
-	tls     *libc.TLS
-	token   uintptr
-	closed  atomic.Bool
-	mu      sync.Mutex
-	memDBs  map[string]*memDB // shared (leading-/) DBs keyed by trimmed name
+	name   string
+	cname  uintptr
+	cvfs   uintptr
+	tls    *libc.TLS
+	token  uintptr
+	closed atomic.Bool
+	mu     sync.Mutex
+	memDBs map[string]*memDB // shared (leading-/) DBs keyed by trimmed name
 }
 
 // memDB is the shared per-name page store. Pages are byte slices
@@ -107,7 +107,13 @@ func New(_ Options) (name string, fs *FS, err error) {
 	}
 	fs.token = registerFS(fs)
 
-	szOsFile := defVfs.FszOsFile + int32(unsafe.Sizeof(perFileState{}))
+	// Per-file size: just enough to hold the base SQLite file struct
+	// (FpMethods pointer) followed by our perFileState. memdb never
+	// forwards I/O to the default VFS, so we don't need its private
+	// tail — and matching the perFileStateOf offset (sizeof
+	// Tsqlite3_file) prevents a future maintainer from accidentally
+	// overlapping the two regions.
+	szOsFile := int32(unsafe.Sizeof(sqlite3.Tsqlite3_file{}) + unsafe.Sizeof(perFileState{}))
 
 	ourVfs := (*sqlite3.Tsqlite3_vfs)(unsafe.Pointer(cvfs))
 	*ourVfs = sqlite3.Tsqlite3_vfs{
@@ -156,6 +162,16 @@ func (f *FS) Close() error {
 	libc.Xfree(f.tls, f.cname)
 	f.tls.Close()
 
+	// Drop any fileHandles still owned by this FS. Without this drain,
+	// repeated New/Close cycles permanently leak handle records.
+	fileHandlesMu.Lock()
+	for tok, h := range fileHandles {
+		if h.fs == f {
+			delete(fileHandles, tok)
+		}
+	}
+	fileHandlesMu.Unlock()
+
 	f.mu.Lock()
 	f.memDBs = nil
 	f.mu.Unlock()
@@ -189,15 +205,20 @@ func (f *FS) acquireDB(name string) (*memDB, bool) {
 }
 
 func (f *FS) releaseDB(db *memDB, shared bool) {
-	if db.refs.Add(-1) > 0 {
-		return
-	}
 	if !shared {
+		// Private DB lives in no map; nothing to protect.
+		db.refs.Add(-1)
 		return
 	}
+	// Decrement must happen under f.mu so a concurrent acquireDB
+	// can't grab a reference between the decrement and the delete —
+	// otherwise the next acquire on this name spawns a second memDB
+	// instance and we'd have two live stores under one shared name.
 	f.mu.Lock()
-	if cur, ok := f.memDBs[db.name]; ok && cur == db {
-		delete(f.memDBs, db.name)
+	if db.refs.Add(-1) == 0 {
+		if cur, ok := f.memDBs[db.name]; ok && cur == db {
+			delete(f.memDBs, db.name)
+		}
 	}
 	f.mu.Unlock()
 }

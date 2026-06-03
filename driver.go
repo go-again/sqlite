@@ -7,6 +7,8 @@ package sqlite // import "github.com/go-again/sqlite"
 import (
 	"database/sql/driver"
 	"fmt"
+	"maps"
+	"sync"
 
 	"modernc.org/sqlite/vtab"
 )
@@ -36,6 +38,9 @@ type Driver struct {
 	// connection hooks run. Mattn-compatible.
 	ConnectHook func(*Conn) error
 
+	// mu guards the mutable maps and slice below from concurrent
+	// Register* calls racing against Open's iteration.
+	mu sync.RWMutex
 	// user defined functions that are added to every new connection on Open
 	udfs map[string]*userDefinedFunction
 	// collations that are added to every new connection on Open
@@ -131,19 +136,36 @@ func (d *Driver) Open(name string) (conn driver.Conn, err error) {
 		return nil, err
 	}
 
-	for _, udf := range d.udfs {
+	// Snapshot the four driver-mutated collections under d.mu so a
+	// concurrent Register* call can't race against this Open.
+	d.mu.RLock()
+	udfs := make([]*userDefinedFunction, 0, len(d.udfs))
+	for _, u := range d.udfs {
+		udfs = append(udfs, u)
+	}
+	colls := make([]*collation, 0, len(d.collations))
+	for _, coll := range d.collations {
+		colls = append(colls, coll)
+	}
+	hooks := make([]ConnectionHookFn, len(d.connectionHooks))
+	copy(hooks, d.connectionHooks)
+	mods := make(map[string]vtab.Module, len(d.modules))
+	maps.Copy(mods, d.modules)
+	d.mu.RUnlock()
+
+	for _, udf := range udfs {
 		if err = c.createFunctionInternal(udf); err != nil {
 			c.Close()
 			return nil, err
 		}
 	}
-	for _, coll := range d.collations {
+	for _, coll := range colls {
 		if err = c.createCollationInternal(coll); err != nil {
 			c.Close()
 			return nil, err
 		}
 	}
-	for _, connHookFn := range d.connectionHooks {
+	for _, connHookFn := range hooks {
 		if err = connHookFn(c, name); err != nil {
 			c.Close()
 			return nil, fmt.Errorf("connection hook: %w", err)
@@ -153,9 +175,11 @@ func (d *Driver) Open(name string) (conn driver.Conn, err error) {
 	// Note: vtab module registration applies to new connections only. If a
 	// module is registered after a connection has been opened, that existing
 	// connection will not see the module; open a new connection to use it.
-	if err := c.registerModules(); err != nil {
-		c.Close()
-		return nil, err
+	for name, mod := range mods {
+		if err := c.registerSingleModule(name, mod); err != nil {
+			c.Close()
+			return nil, err
+		}
 	}
 
 	// Mattn-compat: load any driver-level extensions, then run ConnectHook.
@@ -183,5 +207,7 @@ func (d *Driver) Open(name string) (conn driver.Conn, err error) {
 // RegisterConnectionHook registers a function to be called after each connection
 // is opened. This is called after all the connection has been set up.
 func (d *Driver) RegisterConnectionHook(fn ConnectionHookFn) {
+	d.mu.Lock()
 	d.connectionHooks = append(d.connectionHooks, fn)
+	d.mu.Unlock()
 }

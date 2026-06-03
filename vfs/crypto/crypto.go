@@ -233,6 +233,9 @@ func New(opts Options) (name string, fs *FS, err error) {
 
 	if rc := sqlite3.Xsqlite3_vfs_register(tls, cvfs, 0); rc != sqlite3.SQLITE_OK {
 		unregisterFS(fs.token)
+		if fs.ourIoMethods != nil {
+			libc.Xfree(tls, uintptr(unsafe.Pointer(fs.ourIoMethods)))
+		}
 		libc.Xfree(tls, cvfs)
 		libc.Xfree(tls, cname)
 		tls.Close()
@@ -245,26 +248,26 @@ func New(opts Options) (name string, fs *FS, err error) {
 // the first value from [New]. Useful when a caller wants to thread
 // just the *FS around (e.g. via dependency injection) and build the
 // DSN at the point of sql.Open.
-func (f *FS) Name() string { return f.name }
+func (fs *FS) Name() string { return fs.name }
 
 // Close unregisters the VFS and frees its libc allocations. Idempotent.
-func (f *FS) Close() error {
-	if f.closed.Swap(true) {
+func (fs *FS) Close() error {
+	if fs.closed.Swap(true) {
 		return nil
 	}
 	stateMu.Lock()
 	defer stateMu.Unlock()
 
-	rc := sqlite3.Xsqlite3_vfs_unregister(f.tls, f.cvfs)
-	unregisterFS(f.token)
-	libc.Xfree(f.tls, f.cvfs)
-	libc.Xfree(f.tls, f.cname)
-	if f.ourIoMethods != nil {
-		libc.Xfree(f.tls, uintptr(unsafe.Pointer(f.ourIoMethods)))
-		f.ourIoMethods = nil
+	rc := sqlite3.Xsqlite3_vfs_unregister(fs.tls, fs.cvfs)
+	unregisterFS(fs.token)
+	libc.Xfree(fs.tls, fs.cvfs)
+	libc.Xfree(fs.tls, fs.cname)
+	if fs.ourIoMethods != nil {
+		libc.Xfree(fs.tls, uintptr(unsafe.Pointer(fs.ourIoMethods)))
+		fs.ourIoMethods = nil
 	}
-	f.tls.Close()
-	// NOTE: we deliberately do NOT zero out f.cipher here. A previous
+	fs.tls.Close()
+	// NOTE: we deliberately do NOT zero out fs.cipher here. A previous
 	// version did, motivated by "shorten the GC window before the key
 	// bytes become reclaimable", but it opened a race: a trampoline
 	// that resolved its *FS via fsFor() just before Close ran would

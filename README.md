@@ -65,7 +65,7 @@ If you have, you know what it cost:
   headers at build time. The Go cross-compile story for those targets is
   hostile to CGo — you either ship a fat base image or move the build into
   a multi-stage Dockerfile and pull in alpine-sdk for the build stage.
-  `go-again/sqlite` builds in `FROM golang:1.25-alpine` with no `apk add`.
+  `go-again/sqlite` builds in `FROM golang:alpine` with no `apk add`.
 - **`go build` cross-compile**: `GOOS=linux GOARCH=arm64 go build` from
   macOS just works here. With mattn you need a cross C toolchain (osxcross,
   zig-as-CC, or a remote build runner) and the bug surface from

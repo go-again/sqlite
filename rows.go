@@ -63,11 +63,16 @@ func (r *rows) Close() (err error) {
 	r.allocs = nil
 
 	if r.reuseStmt {
-		// Reset the statement for reuse instead of finalizing it
-		if e := r.c.reset(r.pstmt); e != nil {
-			return e
+		// Reset the statement for reuse instead of finalizing it.
+		// Always clear bindings even if reset errors, matching the
+		// cached-stmt path in stmt.exec — leaving bindings on the
+		// stmt leaks captured argument state into the next call.
+		resetErr := r.c.reset(r.pstmt)
+		clearErr := r.c.clearBindings(r.pstmt)
+		if resetErr != nil {
+			return resetErr
 		}
-		return r.c.clearBindings(r.pstmt)
+		return clearErr
 	}
 
 	return r.c.finalize(r.pstmt)

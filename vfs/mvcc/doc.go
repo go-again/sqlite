@@ -52,9 +52,10 @@
 //     write atomically replaces a page in the snapshot map; the cost
 //     is proportional to dataset size, not write count, so large
 //     databases pay a per-commit copy proportional to the page count.
-//   - No checksum or encryption. Composing with `vfs/cksm` /
-//     `vfs/crypto` requires an `Options.WrapVFS` field; that field is
-//     a planned follow-up.
+//   - No checksum or encryption, and no `Options.WrapVFS` field —
+//     mvcc owns the page store directly, so it cannot meaningfully
+//     layer on top of (or beneath) the disk-oriented `vfs/cksm` /
+//     `vfs/crypto` wrappers.
 //
 // Ported in spirit from [ncruces/vfs/mvcc] but without the upstream
 // `wbt` red-black tree dependency. We use a simpler map + copy-on-

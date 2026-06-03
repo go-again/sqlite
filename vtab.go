@@ -90,21 +90,12 @@ type cConstraintUsage = sqlite3.Tsqlite3_index_constraint_usage
 
 // registerModule is installed as the hook for vtab.RegisterModule.
 func registerModule(name string, m vtab.Module) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if _, exists := d.modules[name]; exists {
 		return fmt.Errorf("sqlite: module %q already registered", name)
 	}
 	d.modules[name] = m
-	return nil
-}
-
-// registerModules installs all globally registered vtab modules on this
-// connection by calling sqlite3_create_module_v2 for each one.
-func (c *conn) registerModules() error {
-	for name, mod := range d.modules {
-		if err := c.registerSingleModule(name, mod); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -633,12 +624,10 @@ func vtabColumnTrampoline(tls *libc.TLS, pCursor uintptr, ctx uintptr, iCol int3
 	if err := functionReturnValue(tls, ctx, val); err != nil {
 		// Include a descriptive error message for easier debugging
 		// (e.g., unsupported type conversions).
-		if err != nil {
-			z, cerr := libc.CString(err.Error())
-			if cerr == nil {
-				defer libc.Xfree(tls, z)
-				sqlite3.Xsqlite3_result_error(tls, ctx, z, -1)
-			}
+		z, cerr := libc.CString(err.Error())
+		if cerr == nil {
+			defer libc.Xfree(tls, z)
+			sqlite3.Xsqlite3_result_error(tls, ctx, z, -1)
 		}
 		sqlite3.Xsqlite3_result_error_code(tls, ctx, sqlite3.SQLITE_ERROR)
 		return sqlite3.SQLITE_ERROR

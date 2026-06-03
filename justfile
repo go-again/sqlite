@@ -117,11 +117,17 @@ tidy:
 example NAME:
     go run ./examples/{{NAME}}/
 
+# Examples that write .db files (crypto/cksm/backup) would otherwise leave
+# debris in the repo PWD — we redirect each one into a per-example temp
+# dir and clean up afterwards.
 # Smoke-test every example (each prints something to stdout when working).
 examples:
-    @for ex in $(ls -d examples/*/); do \
+    @repo="$(pwd)"; \
+    for ex in $(ls -d examples/*/); do \
         echo "=== $ex ==="; \
-        go run "./$ex" || (echo "FAILED: $ex"; exit 1); \
+        sandbox="$(mktemp -d)"; \
+        ( cd "$sandbox" && go run "$repo/$ex" ) || (echo "FAILED: $ex"; rm -rf "$sandbox"; exit 1); \
+        rm -rf "$sandbox"; \
     done
 
 # Cross-build every GOOS/GOARCH the CI matrix covers (compile-only).

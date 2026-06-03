@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"sort"
+	"slices"
 	"testing"
 
 	sqlite "github.com/go-again/sqlite"
@@ -93,7 +93,7 @@ func TestClosure_AllDescendants(t *testing.T) {
 		t.Fatal(err)
 	}
 	ids, _ := collect(t, sc, `SELECT id, depth FROM temp.tc WHERE root = 1 ORDER BY id`)
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 	want := []int64{1, 2, 3, 4, 5, 6, 7}
 	if len(ids) != len(want) {
 		t.Errorf("ids=%v, want %v", ids, want)
@@ -111,7 +111,7 @@ func TestClosure_DepthBound(t *testing.T) {
 	// depth <= 1 from root=2 should give 2 (self), 4, 5.
 	ids, depths := collect(t, sc,
 		`SELECT id, depth FROM temp.tc WHERE root = 2 AND depth <= 1 ORDER BY id`)
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 	want := []int64{2, 4, 5}
 	if len(ids) != len(want) {
 		t.Errorf("ids=%v, want %v (depths=%v)", ids, want, depths)

@@ -366,6 +366,8 @@ func registerCollation(
 	impl func(left, right string) int,
 	enc int32,
 ) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if _, ok := d.collations[zName]; ok {
 		return fmt.Errorf("a collation %q is already registered", zName)
 	}
@@ -514,7 +516,8 @@ func registerFunction(
 	zFuncName string,
 	impl *FunctionImpl,
 ) error {
-
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if _, ok := d.udfs[zFuncName]; ok {
 		return fmt.Errorf("a function named %q is already registered", zFuncName)
 	}
@@ -665,7 +668,11 @@ func functionArgs(tls *libc.TLS, argc int32, argv uintptr) *[]driver.Value {
 			}
 			args[i] = v
 		default:
-			panic(fmt.Sprintf("unexpected argument type %q passed by sqlite", valType))
+			// SQLite's value-type enum is documented to be TEXT/INTEGER/
+			// FLOAT/NULL/BLOB. A future addition would be an ABI change;
+			// surface as NULL rather than panicking inside a C callback,
+			// which would tear down the whole process.
+			args[i] = nil
 		}
 	}
 
@@ -683,7 +690,21 @@ func functionReturnValue(tls *libc.TLS, ctx uintptr, res driver.Value) error {
 	case bool:
 		sqlite3.Xsqlite3_result_int(tls, ctx, libc.Bool32(resTyped))
 	case time.Time:
-		sqlite3.Xsqlite3_result_int64(tls, ctx, resTyped.Unix())
+		// Honor the owning conn's integer time format if one is set; the
+		// UDF return path otherwise defaults to Unix() seconds, matching
+		// the bind-side default at conn.bind(time.Time).
+		v := resTyped.Unix()
+		if c := connForDB(sqlite3.Xsqlite3_context_db_handle(tls, ctx)); c != nil {
+			switch c.integerTimeFormat {
+			case "unix_milli":
+				v = resTyped.UnixMilli()
+			case "unix_micro":
+				v = resTyped.UnixMicro()
+			case "unix_nano":
+				v = resTyped.UnixNano()
+			}
+		}
+		sqlite3.Xsqlite3_result_int64(tls, ctx, v)
 	case string:
 		size := int32(len(resTyped))
 		cstr, err := libc.CString(resTyped)
@@ -783,6 +804,13 @@ func (gen *idGen) next() uintptr {
 }
 
 func (gen *idGen) reclaim(id uintptr) {
+	if id == 0 {
+		// IDs are 1-based; reclaiming 0 would underflow `id - 1` and
+		// index into the bitset with a wrap-around value. Defensive
+		// no-op so a future regression can't corrupt the live free-bit
+		// map without anyone noticing.
+		return
+	}
 	bit := id - 1
 	gen.bitset[bit/64] &^= 1 << (bit % 64)
 }
@@ -944,6 +972,12 @@ func collationTrampoline(tls *libc.TLS, pApp uintptr, nLeft int32, zLeft uintptr
 	xCollations.mu.RLock()
 	xCollation := xCollations.m[pApp]
 	xCollations.mu.RUnlock()
+	if xCollation == nil {
+		// pApp was reclaimed (registration failure, race during teardown)
+		// — degrade to byte-wise comparison rather than nil-deref. Caller
+		// will see deterministic but no-op ordering.
+		return 0
+	}
 
 	left := string(libc.GoBytes(zLeft, int(nLeft)))
 	right := string(libc.GoBytes(zRight, int(nRight)))

@@ -390,10 +390,10 @@ defer fs.Close()
 
 db, _ := sql.Open("sqlite", "file:journal.db?vfs="+name)
 sc, _ := db.Conn(ctx)
-sc.Raw(func(d any) error { return cksm.EnableChecksums(d.(*sqlite.Conn), "main") })
+sc.Raw(func(d any) error { return d.(*sqlite.Conn).EnableChecksums("main") })
 ```
 
-Pure-Go page-level Fletcher-style checksum trailer (8 bytes per page). `EnableChecksums(conn, "main")` sets reserved_bytes=8 on the schema and runs `VACUUM` to rewrite every existing page with a trailer. On subsequent opens the VFS detects byte 20 == 8 in the SQLite header and auto-activates verification; a corrupted page surfaces as `SQLITE_IOERR_DATA` on read. cksm and vfs/crypto each wrap the system default VFS independently — stacking them needs an `Options.WrapVFS` field, planned but not landed.
+Pure-Go page-level Fletcher-style checksum trailer (8 bytes per page). `(*sqlite.Conn).EnableChecksums("main")` sets reserved_bytes=8 on the schema and runs `VACUUM` to rewrite every existing page with a trailer. On subsequent opens the VFS detects byte 20 == 8 in the SQLite header and auto-activates verification; a corrupted page surfaces as `SQLITE_IOERR_DATA` on read. Both `cksm.Options` and `crypto.Options` accept a `WrapVFS` field for stacking — register cksm first, then point crypto at it for checksum-on-the-inside / encrypt-on-the-outside.
 
 ## I want fast in-memory tests with snapshot isolation
 

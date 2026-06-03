@@ -47,6 +47,7 @@
 package spellfix1
 
 import (
+	"context"
 	"database/sql/driver"
 	"errors"
 	"fmt"
@@ -55,6 +56,20 @@ import (
 
 	sqlite "github.com/go-again/sqlite"
 )
+
+// toNamedValues maps a positional []driver.Value to []driver.NamedValue
+// for the non-deprecated QueryContext / ExecContext path. Ordinals are
+// 1-based.
+func toNamedValues(args []driver.Value) []driver.NamedValue {
+	if len(args) == 0 {
+		return nil
+	}
+	out := make([]driver.NamedValue, len(args))
+	for i, v := range args {
+		out[i] = driver.NamedValue{Ordinal: i + 1, Value: v}
+	}
+	return out
+}
 
 // Register installs the spellfix1 vtab on c. Vocabulary is persisted
 // via `(*Conn).OpenBlob` and a shadow table; survives `db.Close()` /
@@ -94,14 +109,15 @@ func createCtor(c *sqlite.Conn, _, schema, vtabName string, _ []string) (sqlite.
 	if err := c.DeclareVTab(declSQL); err != nil {
 		return nil, err
 	}
-	if _, err := c.Exec(fmt.Sprintf(
+	ctx := context.Background()
+	if _, err := c.ExecContext(ctx, fmt.Sprintf(
 		`CREATE TABLE %s (word TEXT NOT NULL, rank INTEGER NOT NULL DEFAULT 0, phonetic TEXT NOT NULL)`,
 		t.qualified()), nil); err != nil {
 		return nil, fmt.Errorf("spellfix1: create storage: %w", err)
 	}
 	// CREATE INDEX requires the index name to be schema-qualified, and
 	// the bare table name is inferred from that schema.
-	if _, err := c.Exec(fmt.Sprintf(
+	if _, err := c.ExecContext(ctx, fmt.Sprintf(
 		`CREATE INDEX IF NOT EXISTS %s.%s ON %s(phonetic)`,
 		quote(t.schema), quote(t.storage+"_phon"), quote(t.storage)), nil); err != nil {
 		return nil, fmt.Errorf("spellfix1: create index: %w", err)
@@ -140,7 +156,7 @@ func (t *table) qualified() string {
 
 func (t *table) Disconnect() error { return nil }
 func (t *table) Destroy() error {
-	if _, err := t.conn.Exec(`DROP TABLE `+t.qualified(), nil); err != nil {
+	if _, err := t.conn.ExecContext(context.Background(), `DROP TABLE `+t.qualified(), nil); err != nil {
 		return fmt.Errorf("spellfix1: drop storage: %w", err)
 	}
 	return nil
@@ -196,7 +212,6 @@ func (t *table) BestIndex(info *sqlite.IndexInfo) error {
 		info.Constraints[topIdx].Omit = true
 		idxNum |= 2
 		idxBytes = append(idxBytes, byte(idx))
-		idx++
 	}
 	info.IdxNum = idxNum
 	info.IdxStr = string(idxBytes)
@@ -226,9 +241,9 @@ func (t *table) Insert(cols []driver.Value, _ *int64) error {
 		rank = int64Of(cols[1])
 	}
 	ph := soundex(word)
-	_, err := t.conn.Exec(fmt.Sprintf(
+	_, err := t.conn.ExecContext(context.Background(), fmt.Sprintf(
 		`INSERT INTO %s (word, rank, phonetic) VALUES (?, ?, ?)`, t.qualified()),
-		[]driver.Value{word, rank, ph})
+		toNamedValues([]driver.Value{word, rank, ph}))
 	if err != nil {
 		return fmt.Errorf("spellfix1: insert: %w", err)
 	}
@@ -252,12 +267,12 @@ type matchRow struct {
 }
 
 type cursor struct {
-	table    *table
-	query    string
-	scope    int
-	top      int
-	results  []matchRow
-	row      int
+	table   *table
+	query   string
+	scope   int
+	top     int
+	results []matchRow
+	row     int
 }
 
 func (c *cursor) Filter(idxNumInt int, idxStr string, args []driver.Value) error {
@@ -297,8 +312,8 @@ func (c *cursor) Filter(idxNumInt int, idxStr string, args []driver.Value) error
 	if err != nil {
 		return fmt.Errorf("spellfix1: scan prepare: %w", err)
 	}
-	defer stmt.Close()
-	rs, err := stmt.(*sqlite.Stmt).Query([]driver.Value{ph, ph})
+	defer func() { _ = stmt.Close() }()
+	rs, err := stmt.(*sqlite.Stmt).QueryContext(context.Background(), toNamedValues([]driver.Value{ph, ph}))
 	if err != nil {
 		return fmt.Errorf("spellfix1: scan query: %w", err)
 	}
@@ -309,7 +324,7 @@ func (c *cursor) Filter(idxNumInt int, idxStr string, args []driver.Value) error
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			rs.Close()
+			_ = rs.Close()
 			return err
 		}
 		w := stringOf(row[0])
@@ -322,7 +337,7 @@ func (c *cursor) Filter(idxNumInt int, idxStr string, args []driver.Value) error
 			word: w, rank: r, distance: d, matchlen: len(c.query),
 		})
 	}
-	rs.Close()
+	_ = rs.Close()
 
 	// Sort by (distance - rank/1024) ascending; cap to top.
 	sortByScore(c.results)
@@ -519,11 +534,11 @@ func int64Of(v driver.Value) int64 {
 		return int64(x)
 	case []byte:
 		var n int64
-		fmt.Sscan(string(x), &n)
+		_, _ = fmt.Sscan(string(x), &n)
 		return n
 	case string:
 		var n int64
-		fmt.Sscan(x, &n)
+		_, _ = fmt.Sscan(x, &n)
 		return n
 	}
 	return 0

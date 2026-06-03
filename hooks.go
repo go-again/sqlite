@@ -105,6 +105,35 @@ type traceState struct {
 	wantExpandedSQL bool
 }
 
+// dropHookHandlers removes any entries this conn left in the six
+// process-global hook maps (xUpdateHandlers, xAuthorizerHandlers,
+// xTraceHandlers, xPreUpdateHandlers, xCommitHandlers,
+// xRollbackHandlers). Called from (*conn).Close; without it captured
+// closures (and their *libc.TLS) would live for the process lifetime,
+// and a stale callback could fire if SQLite later recycled the
+// uintptr handle for a new connection.
+func (c *conn) dropHookHandlers() {
+	h := c.db
+	xUpdateHandlers.mu.Lock()
+	delete(xUpdateHandlers.m, h)
+	xUpdateHandlers.mu.Unlock()
+	xAuthorizerHandlers.mu.Lock()
+	delete(xAuthorizerHandlers.m, h)
+	xAuthorizerHandlers.mu.Unlock()
+	xTraceHandlers.mu.Lock()
+	delete(xTraceHandlers.m, h)
+	xTraceHandlers.mu.Unlock()
+	xPreUpdateHandlers.mu.Lock()
+	delete(xPreUpdateHandlers.m, h)
+	xPreUpdateHandlers.mu.Unlock()
+	xCommitHandlers.mu.Lock()
+	delete(xCommitHandlers.m, h)
+	xCommitHandlers.mu.Unlock()
+	xRollbackHandlers.mu.Lock()
+	delete(xRollbackHandlers.m, h)
+	xRollbackHandlers.mu.Unlock()
+}
+
 // RegisterUpdateHook installs a callback that fires after every INSERT, UPDATE,
 // or DELETE on a rowid table. Passing a nil callback removes any previously
 // installed hook.

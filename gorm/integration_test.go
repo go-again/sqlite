@@ -250,3 +250,58 @@ func TestGorm_Transaction_CommitAndRollback(t *testing.T) {
 		t.Errorf("after rollback count=%d, want 1 (only the committed row)", n)
 	}
 }
+
+// TestGorm_Migrator_RecreateRollbackOnCheckConstraint exercises the
+// recreate-table path in (Migrator).recreateTable: drop a column from a
+// table whose existing rows violate a CHECK constraint on the new
+// schema. The Tx (CREATE __temp / INSERT / DROP / RENAME) must roll
+// back as a unit; the original table must survive intact.
+func TestGorm_Migrator_RecreateRollbackOnCheckConstraint(t *testing.T) {
+	db := openInMemory(t)
+
+	if err := db.Exec(`CREATE TABLE widgets (
+		id INTEGER PRIMARY KEY,
+		name TEXT NOT NULL,
+		size INTEGER NOT NULL CHECK(size >= 0)
+	)`).Error; err != nil {
+		t.Fatalf("create widgets: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO widgets(name, size) VALUES ('alpha', 5), ('beta', 10)`).Error; err != nil {
+		t.Fatalf("seed widgets: %v", err)
+	}
+
+	// AlterColumn on size with a tighter CHECK that one of the existing
+	// rows violates (size > 5) forces the INSERT into the recreated
+	// table to fail mid-Tx. recreateTable's transaction must roll back.
+	type Widget struct {
+		ID   uint   `gorm:"primaryKey"`
+		Name string `gorm:"not null"`
+		Size int    `gorm:"check:size > 5;not null"`
+	}
+	err := db.AutoMigrate(&Widget{})
+	if err == nil {
+		t.Fatalf("AutoMigrate: want CHECK-constraint failure, got nil")
+	}
+
+	// Original table must still hold both rows; the recreate Tx must
+	// have rolled back rather than leaving a half-applied schema.
+	var rows []struct {
+		ID   int
+		Name string
+		Size int
+	}
+	if err := db.Raw(`SELECT id, name, size FROM widgets ORDER BY id`).Scan(&rows).Error; err != nil {
+		t.Fatalf("post-rollback select: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Errorf("after rollback rows=%d, want 2 (original schema intact)", len(rows))
+	}
+
+	// Lingering __temp table from a failed recreate would be the
+	// canonical signal of a botched rollback.
+	var leftover int
+	db.Raw(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name LIKE '%__temp%'`).Scan(&leftover)
+	if leftover != 0 {
+		t.Errorf("found %d leftover __temp table(s); recreate rollback was incomplete", leftover)
+	}
+}

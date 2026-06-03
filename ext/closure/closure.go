@@ -39,6 +39,7 @@
 package closure
 
 import (
+	"context"
 	"database/sql/driver"
 	"errors"
 	"fmt"
@@ -256,7 +257,7 @@ func (c *cursor) Filter(idxNumInt int, _ string, args []driver.Value) error {
 	if err != nil {
 		return fmt.Errorf("transitive_closure: prepare walker: %w", err)
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	c.nodes = c.nodes[:0]
 	c.nodes = append(c.nodes, node{id: root, depth: 0})
@@ -268,7 +269,7 @@ func (c *cursor) Filter(idxNumInt int, _ string, args []driver.Value) error {
 		if curr.depth >= maxDepth {
 			continue
 		}
-		rs, err := stmt.(*sqlite.Stmt).Query([]driver.Value{curr.id})
+		rs, err := stmt.(*sqlite.Stmt).QueryContext(context.Background(), []driver.NamedValue{{Ordinal: 1, Value: curr.id}})
 		if err != nil {
 			return fmt.Errorf("transitive_closure: query children of %d: %w", curr.id, err)
 		}
@@ -278,7 +279,7 @@ func (c *cursor) Filter(idxNumInt int, _ string, args []driver.Value) error {
 				if errors.Is(err, io.EOF) {
 					break
 				}
-				rs.Close()
+				_ = rs.Close()
 				return err
 			}
 			child, ok := row[0].(int64)
@@ -291,7 +292,7 @@ func (c *cursor) Filter(idxNumInt int, _ string, args []driver.Value) error {
 				c.nodes = append(c.nodes, node{id: child, depth: curr.depth + 1})
 			}
 		}
-		rs.Close()
+		_ = rs.Close()
 	}
 	return nil
 }

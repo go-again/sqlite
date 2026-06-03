@@ -28,9 +28,9 @@ func NamedArg(arg string) (key, value string) {
 // Unquote strips one layer of SQLite-style quoting from val. The
 // recognized delimiters are:
 //
-//   - '  (single quote, SQL string literal — escape `''`)
+//   - '  (single quote, SQL string literal — escape `”`)
 //   - "  (double quote, identifier — escape `""`)
-//   - `  (backtick, MySQL-compatible identifier — escape `` `` )
+//   - `  (backtick, MySQL-compatible identifier — escape “ “ )
 //   - [] (square brackets, MSSQL-compatible identifier — no escape inside)
 //
 // If val does not begin and end with a matching delimiter, it is

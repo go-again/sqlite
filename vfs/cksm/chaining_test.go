@@ -63,7 +63,7 @@ func TestChain_CksmWrappedByCrypto(t *testing.T) {
 		if !ok {
 			return errors.New("not *sqlite.Conn")
 		}
-		return cksm.EnableChecksums(c, "main")
+		return c.EnableChecksums("main")
 	}); err != nil {
 		t.Fatalf("EnableChecksums: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestChain_PlainCksmWithoutCrypto(t *testing.T) {
 		if !ok {
 			return errors.New("not *sqlite.Conn")
 		}
-		return cksm.EnableChecksums(c, "main")
+		return c.EnableChecksums("main")
 	}); err != nil {
 		t.Fatal(err)
 	}

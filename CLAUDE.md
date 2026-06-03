@@ -62,7 +62,7 @@ github.com/go-again/sqlite/
 ├── CLAUDE.md               # this file
 ├── AGENTS.md               # vendor-neutral alias pointing at CLAUDE.md
 ├── README.md               # human-facing docs
-├── justfile                # 26 recipes for common ops; see "Common tasks"
+├── justfile                # recipes for common ops; see "Common tasks"
 ├── LICENSE                 # Apache 2.0
 ├── LICENSE.modernc         # preserved upstream BSD-style (modernc.org/sqlite)
 ├── LICENSE.mattn           # preserved upstream MIT (mattn/go-sqlite3)
@@ -150,7 +150,7 @@ github.com/go-again/sqlite/
 │
 ├── vfs/
 │   ├── doc.go
-│   ├── vfs.go              # thin re-export of modernc.org/sqlite/vfs (fs.FS → VFS)
+│   ├── vfs.go              # thin re-export of modernc.org/sqlite/vfs (fs.FS → VFS) + NewReader(io.ReaderAt, size)
 │   └── crypto/             # pure-Go encryption-at-rest VFS
 │       ├── doc.go          # crypto contract + threat model + drift discipline + observability
 │       ├── crypto.go       # New(), Options, Cipher constants, *FS handle
@@ -161,9 +161,19 @@ github.com/go-again/sqlite/
 │       └── derive_key.go    # DeriveKey: Argon2id passphrase + salt → cipher-sized key
 │   └── cksm/               # pure-Go page-checksum VFS (Fletcher-style 8-byte trailer)
 │       ├── doc.go          # contract, on-disk format, EnableChecksums recipe
-│       ├── cksm.go         # New(), Options, EnableChecksums, compute()
+│       ├── cksm.go         # New(), Options, compute()
 │       ├── vfs.go          # registration, xOpen, perFileState (with atomic.Int32 enabled)
 │       └── iomethods.go    # 12 io-method trampolines (verify on read, stamp on write)
+│   └── mvcc/               # in-memory snapshot-isolation VFS (Go-native MVCC)
+│       ├── doc.go          # snapshot/commit/abort contract, shared vs private DBs
+│       ├── mvcc.go         # New(), Options, FS, memDB, snapshot, acquire/release
+│       ├── vfs.go          # registration, xOpen, perFileState, fileHandles registry
+│       └── iomethods.go    # 12 io-method trampolines (read snapshot, buffer until xSync)
+│   └── memdb/              # plain in-memory VFS (direct page store, no MVCC)
+│       ├── doc.go          # contract, shared vs private DBs, when not to use
+│       ├── memdb.go        # New(), Options, FS, memDB, acquire/release
+│       ├── vfs.go          # registration, xOpen, perFileState, fileHandles registry
+│       └── iomethods.go    # 12 io-method trampolines (direct read/write under RWMutex)
 │
 ├── internal/
 │   ├── cabi/               # shared Go↔C ABI helpers (only this module can import)
@@ -210,7 +220,12 @@ github.com/go-again/sqlite/
     ├── ext-pivot/          # three-SELECT cross-tab (rows × cols × cell)
     ├── ext-closure/        # transitive_closure org-chart walks + depth bounds
     ├── vfs-cksm/           # corruption detection — corrupt a byte, observe SQLITE_IOERR_DATA
-    # Bloom (`ext/bloom`, now persistent) and Lines (`ext/lines`) ship without dedicated examples.
+    ├── vfs-mvcc/           # in-memory MVCC VFS: shared vs private DBs, reader/writer concurrency
+    ├── vfs-memdb/          # plain in-memory VFS: shared vs private DBs, no snapshot isolation
+    ├── hooks/              # install update / authorizer / commit / trace hooks via the pin-one-conn idiom
+    ├── backup/             # (*Conn).Backup factory + sqlite.Serialize / Deserialize round-trip
+    ├── ext-spellfix1/      # fuzzy lookup with Soundex prefilter + Damerau-Levenshtein scoring
+    # Bloom (`ext/bloom`, persistent) and Lines (`ext/lines`) ship without dedicated examples.
     └── vfs-embed/          # bundling a DB inside a fs.FS
 ```
 
@@ -531,7 +546,7 @@ let `go mod tidy` resolve the transitive set.
 | Producer side of the Go→C function-pointer dance? | `internal/cabi/funcptr.go::FuncPointer` (root + vfs/crypto + vfs/cksm delegate here) |
 | Consumer side (calling a stored uintptr back from Go)? | `vfs/crypto/iomethods.go::asFunc[F]` and `vfs/cksm/iomethods.go::asFunc[F]` (duplicated; promote to cabi at the third consumer) |
 | Where does encryption-at-rest live? | `vfs/crypto/`, see also `vfs/crypto/doc.go` for the on-disk format + threat model |
-| Where does corruption detection live? | `vfs/cksm/`, see `vfs/cksm/doc.go` for the trailer format + `EnableChecksums` recipe |
+| Where does corruption detection live? | `vfs/cksm/`, see `vfs/cksm/doc.go` for the trailer format. `(*Conn).EnableChecksums(schema)` in `fcntl.go` is the one-call activation recipe. |
 | How does `(*Conn).OpenBlob` work? | `blob.go::OpenBlob` + `*Blob` (io.ReaderAt / WriterAt over `sqlite3_blob_*`) |
 | Where are stmt introspection helpers (ColumnCount/Name/DeclType, BindCount/BindName)? | `stmt.go::ColumnCount` (added for `ext/statement` + `ext/pivot` to discover output/bind shape from a prepared stmt) |
 | How do I set reserved_bytes from Go? | `fcntl.go::FileControlReserveBytes` (wraps `SQLITE_FCNTL_RESERVE_BYTES`) |
@@ -545,6 +560,10 @@ let `go mod tidy` resolve the transitive set.
 | How does FTS5 search compose its SQL? | `fts/fts.go::buildSearchSQL` |
 | What FTS5 syntax does each builder emit? | `fts/query_test.go::TestBuild_*` — string assertions |
 | How does a vtab call back into SQL on its host conn? | `vtab_nested_prepare_test.go` pins the invariant; `ext/closure`, `ext/pivot`, `ext/statement` all use it |
+| Where's the io.ReaderAt-backed VFS adapter? | `vfs/vfs.go::NewReader(io.ReaderAt, size)` — bundles a raw byte buffer as a single-file read-only VFS, no fs.FS needed |
+| Where's the in-memory MVCC VFS? | `vfs/mvcc/` — snapshot-isolation reads + atomic publish on xSync; shared (`file:/name`) vs private (`file:name`) |
+| Where's the plain in-memory VFS? | `vfs/memdb/` — direct per-page store under sync.RWMutex; smaller-surface alternative to `vfs/mvcc` for tests and scratch DBs |
+| One-call recipe for enabling page checksums on a fresh DB? | `(*Conn).EnableChecksums(schema)` in `fcntl.go` — sets reserved_bytes=8 and VACUUMs |
 
 ---
 

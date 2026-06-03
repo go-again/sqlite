@@ -173,21 +173,18 @@ func TestFsdir_OS(t *testing.T) {
 	}
 
 	rows, err := sc.QueryContext(context.Background(),
-		`SELECT name, level FROM fsdir(?) WHERE name != '' ORDER BY name`, tmp)
+		`SELECT name FROM fsdir(?) WHERE name != '' ORDER BY name`, tmp)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer rows.Close()
 	var names []string
-	var levels []int
 	for rows.Next() {
 		var name string
-		var level int
-		if err := rows.Scan(&name, &level); err != nil {
+		if err := rows.Scan(&name); err != nil {
 			t.Fatal(err)
 		}
 		names = append(names, name)
-		levels = append(levels, level)
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
@@ -203,10 +200,10 @@ func TestFsdir_OS(t *testing.T) {
 
 func TestFsdir_FSDepthCap(t *testing.T) {
 	fsys := fstest.MapFS{
-		"root.txt":            &fstest.MapFile{Data: []byte("r")},
-		"a/level1.txt":        &fstest.MapFile{Data: []byte("a1")},
-		"a/b/level2.txt":      &fstest.MapFile{Data: []byte("a2")},
-		"a/b/c/level3.txt":    &fstest.MapFile{Data: []byte("a3")},
+		"root.txt":         &fstest.MapFile{Data: []byte("r")},
+		"a/level1.txt":     &fstest.MapFile{Data: []byte("a1")},
+		"a/b/level2.txt":   &fstest.MapFile{Data: []byte("a2")},
+		"a/b/c/level3.txt": &fstest.MapFile{Data: []byte("a3")},
 	}
 	_, sc := openFS(t, fsys)
 	rows, err := sc.QueryContext(context.Background(),
