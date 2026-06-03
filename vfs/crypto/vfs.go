@@ -2,7 +2,6 @@ package crypto
 
 import (
 	"sync"
-	"sync/atomic"
 	"unsafe"
 
 	"modernc.org/libc"
@@ -12,24 +11,25 @@ import (
 )
 
 // perFileState lives at the tail of each Tsqlite3_file allocation
-// SQLite hands to our xOpen. The default unix VFS writes its own
-// TunixFile into [0..defaultSzOsFile-1]; we tack our state on after
-// it. Tsqlite3_vfs.FszOsFile is the sum of both at registration.
+// SQLite hands to our xOpen. The wrapped VFS writes its own state into
+// [0..wrappedSzOsFile-1]; we tack our state on after it, at the offset
+// stored on the owning *FS. Total per-file allocation =
+// fs.wrappedSzOsFile + sizeof(perFileState).
 type perFileState struct {
-	// defaultMethods is the saved pMethods value the default VFS's
+	// defaultMethods is the saved pMethods value the wrapped VFS's
 	// xOpen installed. We overwrite the file's visible pMethods with
 	// our own table; this field lets io-method trampolines forward.
 	defaultMethods uintptr
 
 	// fsToken is the registry handle the trampolines use to recover
-	// the owning *FS (and thus cipher + pageSize). Set by xOpen.
-	// Zero means "this file isn't encrypted" — we forward verbatim
-	// in that case (used for the WAL `-shm` index, which has no
-	// xRead/xWrite path, plus any open flag fileKindFor returns 0 for).
+	// the owning *FS when the file is encrypted. Zero means
+	// "unencrypted, forward verbatim" (auxiliary files we don't
+	// touch).
 	fsToken uintptr
 
 	// pageSize is cached on the file so xRead/xWrite hot paths
-	// don't need a map lookup per call. Set by xOpen from fs.pageSize.
+	// don't need a registry lookup per call. Set by xOpen from
+	// fs.pageSize.
 	pageSize int32
 
 	// fileKind tags the file as main DB / journal / WAL / temp /
@@ -41,37 +41,26 @@ type perFileState struct {
 	_ [3]byte // pad to 8-byte alignment
 }
 
-// initOnce guards package-level VFS state populated from the default
-// VFS the first time New runs.
-var initOnce sync.Once
-
-// Package-level state populated once via initOnce. Reads after init
-// happen on every xOpen / io-method trampoline; they're wrapped in
-// atomics so the Go memory model formally publishes the writes. The
-// values never change after the first New(): the default VFS is
-// process-global, the singleton io-methods table is address-stable
-// (package-level var), and the per-file offset depends only on the
-// default VFS's szOsFile.
-var (
-	defaultSzOsFile atomic.Int32   // size of the default VFS's per-file allocation
-	defaultVfsPtr   atomic.Uintptr // pointer to the default Tsqlite3_vfs (for xOpen forwarding)
-	ourIoMethodsPtr atomic.Uintptr // pointer to our singleton io-methods table
-
-	// ourIoMethods is the methods table itself. Address-stable
-	// (package-level var); ourIoMethodsPtr stores its address.
-	ourIoMethods sqlite3.Tsqlite3_io_methods
-)
-
-func initFromDefault(def *sqlite3.Tsqlite3_vfs) {
-	defaultSzOsFile.Store(def.FszOsFile)
-	defaultVfsPtr.Store(uintptr(unsafe.Pointer(def)))
+// initIoMethods fills the FS's owned io-methods table. Called once at
+// New() time. Each FS gets its own table because trampolines recover
+// the owning *FS by reading pMethods from pFile and reverse-mapping
+// via [FS.ourIoMethods]'s known offset within the FS struct.
+func (fs *FS) initIoMethods() {
+	// Allocate the methods table via libc so checkptr (-race) doesn't
+	// instrument arithmetic against it — modernc's transpiled lib does
+	// pointer arithmetic against the table internally.
+	p := libc.Xmalloc(fs.tls, libc.Tsize_t(unsafe.Sizeof(sqlite3.Tsqlite3_io_methods{})))
+	if p == 0 {
+		panic("crypto: alloc io-methods: out of memory")
+	}
+	fs.ourIoMethods = (*sqlite3.Tsqlite3_io_methods)(unsafe.Pointer(p))
 	// iVersion=2 + FxShmMap non-zero is what SQLite checks before it
 	// will switch to WAL journaling (see lib's _walModeCheck at the
 	// FxShmMap-presence test). xShmMap/Lock/Barrier/Unmap forward
-	// 1:1 to the default unix VFS — the WAL `-shm` index file is
+	// 1:1 to the wrapped VFS — the WAL `-shm` index file is
 	// memory-mapped shared state, not user-row data, so it stays
 	// plaintext on disk (see [Recorder] docstring and doc.go).
-	ourIoMethods = sqlite3.Tsqlite3_io_methods{
+	*fs.ourIoMethods = sqlite3.Tsqlite3_io_methods{
 		FiVersion:               2,
 		FxClose:                 cabi.FuncPointer(xCloseTrampoline),
 		FxRead:                  cabi.FuncPointer(xReadTrampoline),
@@ -90,50 +79,77 @@ func initFromDefault(def *sqlite3.Tsqlite3_vfs) {
 		FxShmBarrier:            cabi.FuncPointer(xShmBarrierTrampoline),
 		FxShmUnmap:              cabi.FuncPointer(xShmUnmapTrampoline),
 	}
-	ourIoMethodsPtr.Store(uintptr(unsafe.Pointer(&ourIoMethods)))
 }
 
-func perFileStateOf(pFile uintptr) *perFileState {
-	return (*perFileState)(unsafe.Pointer(pFile + uintptr(defaultSzOsFile.Load())))
+// perFileStateOf returns the per-file state slot for pFile, using
+// this FS's wrappedSzOsFile as the offset.
+func (fs *FS) perFileStateOf(pFile uintptr) *perFileState {
+	return (*perFileState)(unsafe.Pointer(pFile + uintptr(fs.wrappedSzOsFile)))
 }
 
-// fsFor returns the *FS responsible for the given file, or nil if
-// the file is unencrypted (an auxiliary file we forward verbatim).
-func fsFor(pFile uintptr) *FS {
-	tok := perFileStateOf(pFile).fsToken
-	if tok == 0 {
-		return nil
-	}
-	return lookupFS(tok)
+// fileMap tracks every pFile this package's xOpen handled, mapping
+// it to its owning *FS. Trampolines use this map instead of
+// pMethods-reverse-mapping because the latter only identifies the
+// OUTERMOST VFS in a chain — an inner VFS called via the outer's
+// callXFoo sees the outer's pMethods, not its own. Map keyed by pFile
+// pointer is layering-agnostic.
+var fileMap struct {
+	mu sync.RWMutex
+	m  map[uintptr]*FS
+}
+
+func init() { fileMap.m = make(map[uintptr]*FS) }
+
+func registerFile(pFile uintptr, fs *FS) {
+	fileMap.mu.Lock()
+	fileMap.m[pFile] = fs
+	fileMap.mu.Unlock()
+}
+
+func unregisterFile(pFile uintptr) {
+	fileMap.mu.Lock()
+	delete(fileMap.m, pFile)
+	fileMap.mu.Unlock()
+}
+
+// fsForFile recovers the owning *FS for pFile. Each crypto.New() call
+// maintains its own pFile entries; chained inner / outer FSes from
+// other packages have their own maps and don't collide.
+func fsForFile(pFile uintptr) *FS {
+	fileMap.mu.RLock()
+	fs := fileMap.m[pFile]
+	fileMap.mu.RUnlock()
+	return fs
 }
 
 // xOpenTrampoline is SQLite's entry point for any file open via our
-// registered VFS. Forward to the default VFS, capture its installed
+// registered VFS. Forward to the wrapped VFS, capture its installed
 // io-methods, swap the visible methods to our wrapping table, and
 // stash the registry token + pageSize for the io-method trampolines.
 func xOpenTrampoline(tls *libc.TLS, pVfs, zName, pFile uintptr, flags int32, pOutFlags uintptr) int32 {
-	defPtr := defaultVfsPtr.Load()
-	def := (*sqlite3.Tsqlite3_vfs)(unsafe.Pointer(defPtr))
-	rc := callXOpen(tls, def.FxOpen, defPtr, zName, pFile, flags, pOutFlags)
+	ourVfs := (*sqlite3.Tsqlite3_vfs)(unsafe.Pointer(pVfs))
+	fs := lookupFS(ourVfs.FpAppData)
+	if fs == nil {
+		return sqlite3.SQLITE_INTERNAL
+	}
+	wrappedVfs := (*sqlite3.Tsqlite3_vfs)(unsafe.Pointer(fs.wrappedVfsPtr))
+	rc := callXOpen(tls, wrappedVfs.FxOpen, fs.wrappedVfsPtr, zName, pFile, flags, pOutFlags)
 	if rc != sqlite3.SQLITE_OK {
 		return rc
 	}
 
 	base := (*sqlite3.Tsqlite3_file)(unsafe.Pointer(pFile))
-	pst := perFileStateOf(pFile)
+	pst := fs.perFileStateOf(pFile)
 	pst.defaultMethods = base.FpMethods
 
 	if kind := fileKindFor(flags); kind != 0 {
-		ourVfs := (*sqlite3.Tsqlite3_vfs)(unsafe.Pointer(pVfs))
-		fs := lookupFS(ourVfs.FpAppData)
-		if fs != nil {
-			pst.fsToken = fs.token
-			pst.pageSize = fs.pageSize
-			pst.fileKind = kind
-		}
+		pst.fsToken = fs.token
+		pst.pageSize = fs.pageSize
+		pst.fileKind = kind
 	}
 
-	base.FpMethods = ourIoMethodsPtr.Load()
+	registerFile(pFile, fs)
+	base.FpMethods = uintptr(unsafe.Pointer(fs.ourIoMethods))
 	return sqlite3.SQLITE_OK
 }
 

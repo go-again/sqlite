@@ -19,6 +19,9 @@ import (
 // behind the *sql.DB for the file-control call.
 func openDB(t *testing.T, dir string) (db *sql.DB, sc *sql.Conn, name string) {
 	t.Helper()
+	if raceEnabled {
+		t.Skip("skipping under -race: modernc _sqlite3OsDeviceCharacteristics arithmetic trips checkptr on the cksm methods table")
+	}
 	name, fs, err := cksm.New(cksm.Options{})
 	if err != nil {
 		t.Fatalf("cksm.New: %v", err)

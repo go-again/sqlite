@@ -20,6 +20,12 @@ type Options struct {
 	// PageSize must match the database's PRAGMA page_size. Defaults to
 	// 4096 (SQLite's default). Must be a power of two in [512, 65536].
 	PageSize int
+
+	// WrapVFS is the name of an existing registered VFS that this
+	// cksm VFS should layer on top of. Empty means wrap the system
+	// default VFS. Set to a [vfs/crypto] name to get
+	// "checksummed-then-encrypted" composition.
+	WrapVFS string
 }
 
 // FS is a registered checksum VFS. Each [New] returns a distinct FS;
@@ -32,6 +38,23 @@ type FS struct {
 	pageSize int32
 	token    uintptr
 	closed   atomic.Bool
+
+	// ourIoMethods lives in its own heap allocation rather than as an
+	// inline FS field. Two reasons: (1) it has a stable address that
+	// can be safely cast to uintptr for the C side, and (2) Go's
+	// checkptr (-race) is happier with a Tsqlite3_io_methods-sized
+	// allocation than a field inside a larger struct when modernc's
+	// transpiled lib does pointer arithmetic against the methods
+	// table.
+	ourIoMethods *sqlite3.Tsqlite3_io_methods
+
+	// wrappedVfsPtr is the Tsqlite3_vfs we forward xOpen to. With
+	// Options.WrapVFS == "" this is the system default VFS; otherwise
+	// it is the VFS whose name the caller passed.
+	wrappedVfsPtr uintptr
+	// wrappedSzOsFile is the wrapped VFS's szOsFile. Our perFileState
+	// lives at this offset from pFile.
+	wrappedSzOsFile int32
 }
 
 const defaultPageSize = 4096
@@ -90,13 +113,27 @@ func New(opts Options) (name string, fs *FS, err error) {
 	defer stateMu.Unlock()
 
 	tls := libc.NewTLS()
-	defPtr := sqlite3.Xsqlite3_vfs_find(tls, 0)
-	if defPtr == 0 {
-		tls.Close()
-		return "", nil, fmt.Errorf("cksm: Xsqlite3_vfs_find(NULL) returned 0; no default VFS registered")
+	var defPtr uintptr
+	if opts.WrapVFS != "" {
+		cName, allocErr := libc.CString(opts.WrapVFS)
+		if allocErr != nil {
+			tls.Close()
+			return "", nil, fmt.Errorf("cksm: alloc WrapVFS name: %w", allocErr)
+		}
+		defPtr = sqlite3.Xsqlite3_vfs_find(tls, cName)
+		libc.Xfree(tls, cName)
+		if defPtr == 0 {
+			tls.Close()
+			return "", nil, fmt.Errorf("cksm: WrapVFS %q not registered", opts.WrapVFS)
+		}
+	} else {
+		defPtr = sqlite3.Xsqlite3_vfs_find(tls, 0)
+		if defPtr == 0 {
+			tls.Close()
+			return "", nil, fmt.Errorf("cksm: Xsqlite3_vfs_find(NULL) returned 0; no default VFS registered")
+		}
 	}
 	defVfs := (*sqlite3.Tsqlite3_vfs)(unsafe.Pointer(defPtr))
-	initOnce.Do(func() { initFromDefault(defVfs) })
 
 	name = fmt.Sprintf("cksm%x", newVfsID.Add(1))
 	cname, allocErr := libc.CString(name)
@@ -113,12 +150,15 @@ func New(opts Options) (name string, fs *FS, err error) {
 	}
 
 	fs = &FS{
-		name:     name,
-		cname:    cname,
-		cvfs:     cvfs,
-		tls:      tls,
-		pageSize: int32(pageSize),
+		name:            name,
+		cname:           cname,
+		cvfs:            cvfs,
+		tls:             tls,
+		pageSize:        int32(pageSize),
+		wrappedVfsPtr:   defPtr,
+		wrappedSzOsFile: defVfs.FszOsFile,
 	}
+	fs.initIoMethods()
 	fs.token = registerFS(fs)
 
 	ourVfs := (*sqlite3.Tsqlite3_vfs)(unsafe.Pointer(cvfs))
@@ -172,6 +212,10 @@ func (f *FS) Close() error {
 	unregisterFS(f.token)
 	libc.Xfree(f.tls, f.cvfs)
 	libc.Xfree(f.tls, f.cname)
+	if f.ourIoMethods != nil {
+		libc.Xfree(f.tls, uintptr(unsafe.Pointer(f.ourIoMethods)))
+		f.ourIoMethods = nil
+	}
 	f.tls.Close()
 	if rc != sqlite3.SQLITE_OK {
 		return fmt.Errorf("cksm: Xsqlite3_vfs_unregister rc=%d", rc)

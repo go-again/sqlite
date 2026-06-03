@@ -535,6 +535,8 @@ let `go mod tidy` resolve the transitive set.
 | How does `(*Conn).OpenBlob` work? | `blob.go::OpenBlob` + `*Blob` (io.ReaderAt / WriterAt over `sqlite3_blob_*`) |
 | Where are stmt introspection helpers (ColumnCount/Name/DeclType, BindCount/BindName)? | `stmt.go::ColumnCount` (added for `ext/statement` + `ext/pivot` to discover output/bind shape from a prepared stmt) |
 | How do I set reserved_bytes from Go? | `fcntl.go::FileControlReserveBytes` (wraps `SQLITE_FCNTL_RESERVE_BYTES`) |
+| How does cksm/crypto chaining work? | `vfs/crypto/crypto.go::Options.WrapVFS` + per-package `fileMap` (in `vfs.go`) maps pFile → owning `*FS`; per-FS `ourIoMethods` + `wrappedSzOsFile`. Both layers store state at their own offset and forward via the captured wrapped methods. |
+| Where's the vtab xCreate / xConnect split? | `module.go::CreateModuleSplit` (two-callback form). `ext/bloom` and `ext/spellfix1` use it to distinguish first-time shadow-table creation from subsequent reopens. |
 | Where's the shared NamedArg / Unquote parser? | `internal/sqlid/sqlid.go` (used by `ext/closure`, reusable by future named-arg vtabs) |
 | What's the prepared-statement cache? | `stmt_cache.go` + the `stmts` field on `conn` |
 | Where's the gorm Dialector? | `gorm/sqlite.go::Dialector` |

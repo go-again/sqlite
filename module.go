@@ -98,7 +98,7 @@ func (c *Conn) CreateModule(name string, ctor VTabCtor) error {
 	if name == "" {
 		return fmt.Errorf("sqlite: CreateModule: name is empty")
 	}
-	return c.registerSingleModule(name, &vtabCtorModule{conn: c, ctor: ctor})
+	return c.registerSingleModule(name, &vtabCtorModule{conn: c, createCtor: ctor, connectCtor: ctor})
 }
 
 // CreateEponymousModule registers a Go-implemented eponymous-only virtual
@@ -120,7 +120,7 @@ func (c *Conn) CreateEponymousModule(name string, ctor VTabCtor) error {
 	if name == "" {
 		return fmt.Errorf("sqlite: CreateEponymousModule: name is empty")
 	}
-	return c.registerSingleEponymousModule(name, &vtabCtorModule{conn: c, ctor: ctor})
+	return c.registerSingleEponymousModule(name, &vtabCtorModule{conn: c, createCtor: ctor, connectCtor: ctor})
 }
 
 // DeclareVTab calls sqlite3_declare_vtab to describe a virtual table's
@@ -138,25 +138,55 @@ func (c *Conn) DeclareVTab(schema string) error {
 	return nil
 }
 
-// vtabCtorModule adapts a [VTabCtor] into the lower-level [vtab.Module]
-// interface that the existing trampolines (vtab.go) expect. xCreate and
-// xConnect both route to the same ctor.
+// vtabCtorModule adapts one [VTabCtor] (used for both xCreate and
+// xConnect) or a pair of ctors (when distinct create/connect logic is
+// required) into the lower-level [vtab.Module] interface that the
+// existing trampolines (vtab.go) expect.
 type vtabCtorModule struct {
-	conn *Conn
-	ctor VTabCtor
+	conn       *Conn
+	createCtor VTabCtor // called by xCreate (fresh CREATE VIRTUAL TABLE)
+	connectCtor VTabCtor // called by xConnect (reopen of an existing vtab)
 }
 
 func (m *vtabCtorModule) Create(_ vtab.Context, args []string) (vtab.Table, error) {
-	return m.callCtor(args)
+	return m.invoke(m.createCtor, args)
 }
 
 func (m *vtabCtorModule) Connect(_ vtab.Context, args []string) (vtab.Table, error) {
-	return m.callCtor(args)
+	return m.invoke(m.connectCtor, args)
 }
 
-func (m *vtabCtorModule) callCtor(args []string) (vtab.Table, error) {
+func (m *vtabCtorModule) invoke(ctor VTabCtor, args []string) (vtab.Table, error) {
 	if len(args) < 3 {
 		return nil, fmt.Errorf("sqlite: vtab ctor called with fewer than 3 args (got %d)", len(args))
 	}
-	return m.ctor(m.conn, args[0], args[1], args[2], args[3:])
+	return ctor(m.conn, args[0], args[1], args[2], args[3:])
+}
+
+// CreateModuleSplit registers a Go-implemented virtual table module on
+// this connection under name, using separate create and connect ctors
+// so the module can distinguish "first-time CREATE VIRTUAL TABLE" from
+// "subsequent reopen of an existing vtab via the schema cache".
+//
+// Use this when the module persists state across sessions (e.g. a
+// shadow storage table) and needs different logic for the first
+// CREATE vs every later open. See [ext/bloom] and [ext/spellfix1] for
+// canonical examples — both maintain a `<vtab>_storage` shadow table
+// that is created on xCreate and merely opened on xConnect.
+//
+// Modules whose create and connect logic are identical should use the
+// simpler [Conn.CreateModule] instead. Eponymous tables (table-valued
+// functions) only ever go through xConnect; use
+// [Conn.CreateEponymousModule] for those.
+func (c *Conn) CreateModuleSplit(name string, create, connect VTabCtor) error {
+	if create == nil {
+		return fmt.Errorf("sqlite: CreateModuleSplit %q: create ctor is nil", name)
+	}
+	if connect == nil {
+		return fmt.Errorf("sqlite: CreateModuleSplit %q: connect ctor is nil", name)
+	}
+	if name == "" {
+		return fmt.Errorf("sqlite: CreateModuleSplit: name is empty")
+	}
+	return c.registerSingleModule(name, &vtabCtorModule{conn: c, createCtor: create, connectCtor: connect})
 }

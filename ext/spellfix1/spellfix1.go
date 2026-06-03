@@ -60,7 +60,7 @@ import (
 // via `(*Conn).OpenBlob` and a shadow table; survives `db.Close()` /
 // reconnect.
 func Register(c *sqlite.Conn) error {
-	return c.CreateModule("spellfix1", ctor)
+	return c.CreateModuleSplit("spellfix1", createCtor, connectCtor)
 }
 
 const declSQL = `CREATE TABLE x(
@@ -89,36 +89,43 @@ const (
 	colSoundsLike
 )
 
-func ctor(c *sqlite.Conn, _, schema, vtabName string, _ []string) (sqlite.VTab, error) {
+func createCtor(c *sqlite.Conn, _, schema, vtabName string, _ []string) (sqlite.VTab, error) {
+	t := newTable(c, schema, vtabName)
+	if err := c.DeclareVTab(declSQL); err != nil {
+		return nil, err
+	}
+	if _, err := c.Exec(fmt.Sprintf(
+		`CREATE TABLE %s (word TEXT NOT NULL, rank INTEGER NOT NULL DEFAULT 0, phonetic TEXT NOT NULL)`,
+		t.qualified()), nil); err != nil {
+		return nil, fmt.Errorf("spellfix1: create storage: %w", err)
+	}
+	// CREATE INDEX requires the index name to be schema-qualified, and
+	// the bare table name is inferred from that schema.
+	if _, err := c.Exec(fmt.Sprintf(
+		`CREATE INDEX IF NOT EXISTS %s.%s ON %s(phonetic)`,
+		quote(t.schema), quote(t.storage+"_phon"), quote(t.storage)), nil); err != nil {
+		return nil, fmt.Errorf("spellfix1: create index: %w", err)
+	}
+	return t, nil
+}
+
+func connectCtor(c *sqlite.Conn, _, schema, vtabName string, _ []string) (sqlite.VTab, error) {
+	t := newTable(c, schema, vtabName)
+	if err := c.DeclareVTab(declSQL); err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+func newTable(c *sqlite.Conn, schema, vtabName string) *table {
 	if schema == "" {
 		schema = "main"
 	}
-	t := &table{
+	return &table{
 		conn:    c,
 		schema:  schema,
 		storage: vtabName + "_storage",
 	}
-	if err := c.DeclareVTab(declSQL); err != nil {
-		return nil, err
-	}
-	// Create-or-connect: try a SELECT first; create if not present.
-	if _, err := c.Exec(fmt.Sprintf(
-		`SELECT 1 FROM %s LIMIT 1`, t.qualified()), nil); err != nil {
-		if _, err := c.Exec(fmt.Sprintf(
-			`CREATE TABLE %s (word TEXT NOT NULL, rank INTEGER NOT NULL DEFAULT 0, phonetic TEXT NOT NULL)`,
-			t.qualified()), nil); err != nil {
-			return nil, fmt.Errorf("spellfix1: create storage: %w", err)
-		}
-		// CREATE INDEX requires the index name to be schema-qualified,
-		// and the bare table name is inferred from that schema. Build
-		// `<schema>.<idxname> ON <tablename>(phonetic)`.
-		if _, err := c.Exec(fmt.Sprintf(
-			`CREATE INDEX IF NOT EXISTS %s.%s ON %s(phonetic)`,
-			quote(t.schema), quote(t.storage+"_phon"), quote(t.storage)), nil); err != nil {
-			return nil, fmt.Errorf("spellfix1: create index: %w", err)
-		}
-	}
-	return t, nil
 }
 
 type table struct {

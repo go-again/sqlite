@@ -35,7 +35,14 @@ import (
 	sqlite "github.com/go-again/sqlite"
 )
 
-// Register installs the readblob and writeblob scalar functions on c.
+// OpenCallback is the type for the openblob() callback. Bound via
+// [sqlite.Pointer], it receives the open [sqlite.Blob] handle plus any
+// trailing args from the SQL invocation. The handle is only valid for
+// the duration of the callback — callers cannot retain it.
+type OpenCallback func(*sqlite.Blob, ...any) error
+
+// Register installs the readblob, writeblob, and openblob scalar
+// functions on c.
 //
 // Registration is per-connection. For pool-wide install via
 // [sqlite.Driver.ConnectHook], blank-import the auto sub-package:
@@ -45,6 +52,7 @@ func Register(c *sqlite.Conn) error {
 	return errors.Join(
 		c.RegisterFunc("readblob", makeReadblob(c), false),
 		c.RegisterFunc("writeblob", makeWriteblob(c), false),
+		c.RegisterFunc("openblob", makeOpenblob(c), false),
 	)
 }
 
@@ -63,6 +71,67 @@ func makeReadblob(c *sqlite.Conn) func(string, string, string, int64, int64, int
 			return nil, fmt.Errorf("readblob: %w", err)
 		}
 		return buf, nil
+	}
+}
+
+// makeOpenblob returns the variadic openblob handler. SQL signature:
+//
+//	openblob(schema, table, column, rowid, write, callback, args...) → INTEGER
+//
+// The callback must be wrapped via sqlite.Pointer at bind time;
+// trailing args (variadic, any type the driver carries) are passed
+// through to the callback unchanged. Returns 0 on success, surfaces
+// any error from the callback via the SQL error path.
+func makeOpenblob(c *sqlite.Conn) func(args ...driver.Value) (int64, error) {
+	return func(args ...driver.Value) (int64, error) {
+		if len(args) < 6 {
+			return 0, fmt.Errorf("openblob: expected at least 6 arguments (schema, table, column, rowid, write, callback), got %d", len(args))
+		}
+		schema, ok := args[0].(string)
+		if !ok {
+			return 0, fmt.Errorf("openblob: schema must be TEXT, got %T", args[0])
+		}
+		table, ok := args[1].(string)
+		if !ok {
+			return 0, fmt.Errorf("openblob: table must be TEXT, got %T", args[1])
+		}
+		column, ok := args[2].(string)
+		if !ok {
+			return 0, fmt.Errorf("openblob: column must be TEXT, got %T", args[2])
+		}
+		rowid, ok := args[3].(int64)
+		if !ok {
+			return 0, fmt.Errorf("openblob: rowid must be INTEGER, got %T", args[3])
+		}
+		write := false
+		switch v := args[4].(type) {
+		case int64:
+			write = v != 0
+		case bool:
+			write = v
+		default:
+			return 0, fmt.Errorf("openblob: write must be INTEGER or BOOLEAN, got %T", v)
+		}
+		// The callback must have been bound via sqlite.Pointer at the
+		// call site; if it survived the SQL round-trip as a Go value,
+		// type-assert to OpenCallback.
+		cb, ok := args[5].(OpenCallback)
+		if !ok {
+			return 0, fmt.Errorf("openblob: callback must be bound via sqlite.Pointer(OpenCallback), got %T", args[5])
+		}
+		trailing := make([]any, len(args)-6)
+		for i, v := range args[6:] {
+			trailing[i] = v
+		}
+		b, err := c.OpenBlob(schema, table, column, rowid, write)
+		if err != nil {
+			return 0, fmt.Errorf("openblob: %w", err)
+		}
+		defer b.Close()
+		if err := cb(b, trailing...); err != nil {
+			return 0, fmt.Errorf("openblob callback: %w", err)
+		}
+		return 0, nil
 	}
 }
 

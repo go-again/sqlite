@@ -121,6 +121,38 @@ func TestBlobio_MissingRowError(t *testing.T) {
 	}
 }
 
+func TestBlobio_OpenblobCallback(t *testing.T) {
+	_, sc := openDB(t)
+	ctx := context.Background()
+	res, err := sc.ExecContext(ctx, `INSERT INTO blobs(b) VALUES (zeroblob(16))`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ := res.LastInsertId()
+
+	got := []byte(nil)
+	cb := blobio.OpenCallback(func(b *sqlite.Blob, args ...any) error {
+		// Write some bytes through the callback handle.
+		if _, err := b.WriteAt([]byte("openblob!"), 0); err != nil {
+			return err
+		}
+		// Read them back via the same handle.
+		buf := make([]byte, 9)
+		if _, err := b.ReadAt(buf, 0); err != nil {
+			return err
+		}
+		got = buf
+		return nil
+	})
+	if _, err := sc.ExecContext(ctx,
+		`SELECT openblob('main', 'blobs', 'b', ?, 1, ?)`, id, sqlite.Pointer(cb)); err != nil {
+		t.Fatalf("openblob: %v", err)
+	}
+	if string(got) != "openblob!" {
+		t.Errorf("callback observed %q, want %q", got, "openblob!")
+	}
+}
+
 func TestBlobio_TextWriteAccepted(t *testing.T) {
 	_, sc := openDB(t)
 	ctx := context.Background()

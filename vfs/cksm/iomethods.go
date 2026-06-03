@@ -8,11 +8,17 @@ import (
 )
 
 func defaultMethodsFor(pFile uintptr) *sqlite3.Tsqlite3_io_methods {
-	return (*sqlite3.Tsqlite3_io_methods)(unsafe.Pointer(perFileStateOf(pFile).defaultMethods))
+	fs := fsForFile(pFile)
+	if fs == nil {
+		return nil
+	}
+	return (*sqlite3.Tsqlite3_io_methods)(unsafe.Pointer(fs.perFileStateOf(pFile).defaultMethods))
 }
 
 func xCloseTrampoline(tls *libc.TLS, pFile uintptr) int32 {
-	return callXClose(tls, defaultMethodsFor(pFile).FxClose, pFile)
+	methods := defaultMethodsFor(pFile)
+	unregisterFile(pFile)
+	return callXClose(tls, methods.FxClose, pFile)
 }
 
 // xReadTrampoline reads into buf, then — if checksumming is enabled
@@ -22,7 +28,11 @@ func xCloseTrampoline(tls *libc.TLS, pFile uintptr) int32 {
 // byte.
 func xReadTrampoline(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Tsqlite3_int64) int32 {
 	rc := callXRead(tls, defaultMethodsFor(pFile).FxRead, pFile, buf, amt, off)
-	pst := perFileStateOf(pFile)
+	fs := fsForFile(pFile)
+	if fs == nil {
+		return sqlite3.SQLITE_IOERR
+	}
+	pst := fs.perFileStateOf(pFile)
 	if pst.isMain == 0 {
 		return rc
 	}
@@ -55,7 +65,11 @@ func xReadTrampoline(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.T
 // write covers a full page. The first write at offset 0 also primes
 // pst.enabled from the SQLite header.
 func xWriteTrampoline(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Tsqlite3_int64) int32 {
-	pst := perFileStateOf(pFile)
+	fs := fsForFile(pFile)
+	if fs == nil {
+		return sqlite3.SQLITE_IOERR
+	}
+	pst := fs.perFileStateOf(pFile)
 	if pst.isMain != 0 {
 		page := unsafe.Slice((*byte)(unsafe.Pointer(buf)), int(amt))
 		if off == 0 {

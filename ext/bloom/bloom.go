@@ -83,36 +83,20 @@ var (
 // ModuleName is the name the vtab registers under: `bloom`.
 const ModuleName = "bloom"
 
-// Register installs the bloom module on c.
+// Register installs the bloom module on c. xCreate (first CREATE
+// VIRTUAL TABLE) builds the shadow storage table; xConnect (every
+// subsequent open) just reads the persisted params from it.
 func Register(c *sqlite.Conn) error {
-	return c.CreateModule(ModuleName, ctor)
+	return c.CreateModuleSplit(ModuleName, createCtor, connectCtor)
 }
 
-func ctor(c *sqlite.Conn, _, schema, vtabName string, args []string) (sqlite.VTab, error) {
-	if schema == "" {
-		schema = "main"
-	}
-	storage := vtabName + "_storage"
+func createCtor(c *sqlite.Conn, _, schema, vtabName string, args []string) (sqlite.VTab, error) {
+	t := newTable(c, schema, vtabName)
 	if err := c.DeclareVTab(
 		`CREATE TABLE x(present, word TEXT HIDDEN NOT NULL PRIMARY KEY) WITHOUT ROWID`,
 	); err != nil {
 		return nil, err
 	}
-
-	// Try the connect path first: SELECT existing params from the
-	// shadow table. If the table doesn't exist yet, fall through to
-	// create-and-init.
-	t := &table{
-		conn:    c,
-		schema:  schema,
-		storage: storage,
-	}
-	if err := t.loadParams(); err == nil {
-		return t, nil
-	}
-
-	// Create path: build params from args, create the shadow table,
-	// insert the zeroblob row.
 	if err := parseArgs(t, args); err != nil {
 		return nil, err
 	}
@@ -120,6 +104,30 @@ func ctor(c *sqlite.Conn, _, schema, vtabName string, args []string) (sqlite.VTa
 		return nil, err
 	}
 	return t, nil
+}
+
+func connectCtor(c *sqlite.Conn, _, schema, vtabName string, _ []string) (sqlite.VTab, error) {
+	t := newTable(c, schema, vtabName)
+	if err := c.DeclareVTab(
+		`CREATE TABLE x(present, word TEXT HIDDEN NOT NULL PRIMARY KEY) WITHOUT ROWID`,
+	); err != nil {
+		return nil, err
+	}
+	if err := t.loadParams(); err != nil {
+		return nil, fmt.Errorf("bloom: connect: load params from %s: %w", t.qualified(), err)
+	}
+	return t, nil
+}
+
+func newTable(c *sqlite.Conn, schema, vtabName string) *table {
+	if schema == "" {
+		schema = "main"
+	}
+	return &table{
+		conn:    c,
+		schema:  schema,
+		storage: vtabName + "_storage",
+	}
 }
 
 type table struct {

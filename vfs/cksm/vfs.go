@@ -13,42 +13,34 @@ import (
 )
 
 // perFileState lives at the tail of each Tsqlite3_file allocation
-// SQLite hands to our xOpen. The default unix VFS writes its own
-// TunixFile into [0..defaultSzOsFile-1]; we tack our state on after
-// it. Tsqlite3_vfs.FszOsFile is the sum of both at registration.
+// SQLite hands to our xOpen. The wrapped VFS writes its own state into
+// [0..wrappedSzOsFile-1]; we tack our state on after it, at the offset
+// stored on the owning *FS.
 type perFileState struct {
-	defaultMethods uintptr // pMethods value the default VFS installed
-	fsToken        uintptr // registry handle for owning *FS; 0 = forward verbatim
-	pageSize       int32   // cached page size for the hot path
+	defaultMethods uintptr // pMethods value the wrapped VFS installed
+	fsToken        uintptr // registry handle; 0 = forward verbatim
+	pageSize       int32
 	// enabled is 1 once the file's SQLite header has been inspected
 	// and reserved_bytes==8 confirmed; 0 means pass-through.
-	// atomic.Int32 because xRead and xWrite can run concurrently
-	// against different pFile instances and the race detector would
-	// flag a plain int32 write.
+	// atomic.Int32 because xRead and xWrite can race across different
+	// pFiles for the same FS.
 	enabled atomic.Int32
 	isMain  int32   // 1 for main DB, 0 for everything else
 	_       [4]byte // pad to 8-byte alignment
 }
 
-// initOnce guards package-level VFS state populated from the default
-// VFS the first time New runs.
-var initOnce sync.Once
-
-var (
-	defaultSzOsFile atomic.Int32
-	defaultVfsPtr   atomic.Uintptr
-	ourIoMethodsPtr atomic.Uintptr
-
-	ourIoMethods sqlite3.Tsqlite3_io_methods
-)
-
-func initFromDefault(def *sqlite3.Tsqlite3_vfs) {
-	defaultSzOsFile.Store(def.FszOsFile)
-	defaultVfsPtr.Store(uintptr(unsafe.Pointer(def)))
-	// iVersion=2 + FxShmMap non-zero so WAL works through our wrapper.
-	// We forward every shm-related method 1:1 — checksums don't touch
-	// the WAL index.
-	ourIoMethods = sqlite3.Tsqlite3_io_methods{
+// initIoMethods fills the FS's owned io-methods table. The table is
+// allocated via libc so checkptr (-race) doesn't track its
+// arithmetic — modernc's transpiled lib does pointer-arithmetic
+// against the methods struct internally, and Go-heap allocations
+// would trip the analyzer.
+func (fs *FS) initIoMethods() {
+	p := libc.Xmalloc(fs.tls, libc.Tsize_t(unsafe.Sizeof(sqlite3.Tsqlite3_io_methods{})))
+	if p == 0 {
+		panic("cksm: alloc io-methods: out of memory")
+	}
+	fs.ourIoMethods = (*sqlite3.Tsqlite3_io_methods)(unsafe.Pointer(p))
+	*fs.ourIoMethods = sqlite3.Tsqlite3_io_methods{
 		FiVersion:               2,
 		FxClose:                 cabi.FuncPointer(xCloseTrampoline),
 		FxRead:                  cabi.FuncPointer(xReadTrampoline),
@@ -67,49 +59,76 @@ func initFromDefault(def *sqlite3.Tsqlite3_vfs) {
 		FxShmBarrier:            cabi.FuncPointer(xShmBarrierTrampoline),
 		FxShmUnmap:              cabi.FuncPointer(xShmUnmapTrampoline),
 	}
-	ourIoMethodsPtr.Store(uintptr(unsafe.Pointer(&ourIoMethods)))
 }
 
-func perFileStateOf(pFile uintptr) *perFileState {
-	return (*perFileState)(unsafe.Pointer(pFile + uintptr(defaultSzOsFile.Load())))
+func (fs *FS) perFileStateOf(pFile uintptr) *perFileState {
+	return (*perFileState)(unsafe.Pointer(pFile + uintptr(fs.wrappedSzOsFile)))
 }
 
-// xOpenTrampoline is SQLite's entry point for any file open via our
-// registered VFS. Forward to the default VFS, capture its installed
-// io-methods, swap the visible methods to our wrapping table, and
-// stash the registry token + pageSize for the io-method trampolines.
+// fileMap maps every pFile this package's xOpen handled to its
+// owning *FS. Trampolines look up by pFile pointer so chained
+// inner/outer VFSes (e.g. crypto-on-cksm) don't collide — each
+// package's file map is independent.
+var fileMap struct {
+	mu sync.RWMutex
+	m  map[uintptr]*FS
+}
+
+func init() { fileMap.m = make(map[uintptr]*FS) }
+
+func registerFile(pFile uintptr, fs *FS) {
+	fileMap.mu.Lock()
+	fileMap.m[pFile] = fs
+	fileMap.mu.Unlock()
+}
+
+func unregisterFile(pFile uintptr) {
+	fileMap.mu.Lock()
+	delete(fileMap.m, pFile)
+	fileMap.mu.Unlock()
+}
+
+func fsForFile(pFile uintptr) *FS {
+	fileMap.mu.RLock()
+	fs := fileMap.m[pFile]
+	fileMap.mu.RUnlock()
+	return fs
+}
+
+// xOpenTrampoline forwards to the wrapped VFS, captures its methods,
+// and installs our own.
 func xOpenTrampoline(tls *libc.TLS, pVfs, zName, pFile uintptr, flags int32, pOutFlags uintptr) int32 {
-	defPtr := defaultVfsPtr.Load()
-	def := (*sqlite3.Tsqlite3_vfs)(unsafe.Pointer(defPtr))
-	rc := callXOpen(tls, def.FxOpen, defPtr, zName, pFile, flags, pOutFlags)
+	ourVfs := (*sqlite3.Tsqlite3_vfs)(unsafe.Pointer(pVfs))
+	fs := lookupFS(ourVfs.FpAppData)
+	if fs == nil {
+		return sqlite3.SQLITE_INTERNAL
+	}
+	wrappedVfs := (*sqlite3.Tsqlite3_vfs)(unsafe.Pointer(fs.wrappedVfsPtr))
+	rc := callXOpen(tls, wrappedVfs.FxOpen, fs.wrappedVfsPtr, zName, pFile, flags, pOutFlags)
 	if rc != sqlite3.SQLITE_OK {
 		return rc
 	}
 
 	base := (*sqlite3.Tsqlite3_file)(unsafe.Pointer(pFile))
-	pst := perFileStateOf(pFile)
+	pst := fs.perFileStateOf(pFile)
 	pst.defaultMethods = base.FpMethods
 
 	if flags&sqlite3.SQLITE_OPEN_MAIN_DB != 0 {
-		ourVfs := (*sqlite3.Tsqlite3_vfs)(unsafe.Pointer(pVfs))
-		fs := lookupFS(ourVfs.FpAppData)
-		if fs != nil {
-			pst.fsToken = fs.token
-			pst.pageSize = fs.pageSize
-			pst.isMain = 1
-			// pst.enabled stays 0; the first xRead at offset 0 will
-			// inspect the header and set it.
-		}
+		pst.fsToken = fs.token
+		pst.pageSize = fs.pageSize
+		pst.isMain = 1
+		// pst.enabled stays 0; the first xRead at offset 0 will
+		// inspect the header and set it.
 	}
 
-	base.FpMethods = ourIoMethodsPtr.Load()
+	registerFile(pFile, fs)
+	base.FpMethods = uintptr(unsafe.Pointer(fs.ourIoMethods))
 	return sqlite3.SQLITE_OK
 }
 
 // initFromHeader inspects the first 100 bytes of a database file —
 // the SQLite header — and enables/disables checksumming based on byte
-// 20 (reserved_bytes). Called from xRead and xWrite when off==0 and
-// the buffer covers at least the 100-byte header.
+// 20 (reserved_bytes).
 func initFromHeader(pst *perFileState, page []byte) {
 	if len(page) < 100 {
 		return

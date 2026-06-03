@@ -68,6 +68,8 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [examples/ext-pivot](examples/ext-pivot/main.go): three-SELECT cross-tab (rows × columns × cell aggregate) over a small sales table.
 - [examples/ext-closure](examples/ext-closure/main.go): full and depth-bounded graph walks over an org chart via `transitive_closure`.
 - [examples/vfs-cksm](examples/vfs-cksm/main.go): detect simulated bit-rot via the checksum VFS — corrupt one byte, observe `SQLITE_IOERR_DATA` on read.
+- [examples/vfs-mvcc](examples/vfs-mvcc/main.go): SHARED (`file:/name`) vs PRIVATE (`file:name`) in-memory MVCC databases; reader / writer concurrency demo.
+- [examples/ext-spellfix1](examples/ext-spellfix1/main.go): fuzzy lookup of misspellings (`WHERE word MATCH ?`) with Soundex prefilter + Damerau-Levenshtein scoring + rank boost.
 - `ext/bloom` (now persistent via the shadow-blob upgrade) and `ext/lines` ship without dedicated examples — see `docs/coverage-ext.md` and the per-package doc.go for usage.
 
 ## Feature coverage matrices

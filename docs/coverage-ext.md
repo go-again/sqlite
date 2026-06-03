@@ -29,6 +29,10 @@ Status legend:
 
 `closure`, `pivot`, and `statement` are vtab modules that run nested SQL from inside `xCreate`/`xFilter` against the host `*Conn`. The reentrancy is pinned by `vtab_nested_prepare_test.go` at the root.
 
+### xCreate / xConnect split
+
+`bloom` and `spellfix1` use the [`(*Conn).CreateModuleSplit`](../module.go) two-callback form so they can run distinct logic for the first `CREATE VIRTUAL TABLE` (build the `<vtab>_storage` shadow table, seed the metadata row / index) and every subsequent `xConnect` reopen (declare the schema, fetch persisted params). Modules whose create and connect paths are identical should stick with the simpler `(*Conn).CreateModule`.
+
 `fileio` exposes `readfile` / `writefile` / `lsmode` scalars plus the `fsdir` recursive-walk vtab. Use `fileio.Register(c)` for the os-backed mode (read+write of the local filesystem) or `fileio.RegisterFS(c, fs.FS)` for a sandboxed variant; the latter intentionally omits `writefile` since `fs.FS` is read-only.
 
 `blobio` ships `readblob` / `writeblob` scalars over our incremental BLOB API. The openblob() callback form from upstream isn't ported; callers who want long-lived handles can use `(*Conn).OpenBlob` directly from Go.

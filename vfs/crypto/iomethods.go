@@ -53,12 +53,35 @@ func putScratch(bp *[]byte) {
 // All other methods always forward unchanged — locking, sync, file
 // control, sector size are orthogonal to crypto.
 
+// defaultMethodsFor returns the wrapped VFS's io-methods for pFile.
+// Identifies the owning *FS via the pMethods → *FS offset trick, then
+// reads the perFileState slot at fs.wrappedSzOsFile.
 func defaultMethodsFor(pFile uintptr) *sqlite3.Tsqlite3_io_methods {
-	return (*sqlite3.Tsqlite3_io_methods)(unsafe.Pointer(perFileStateOf(pFile).defaultMethods))
+	fs := fsForFile(pFile)
+	if fs == nil {
+		return nil
+	}
+	return (*sqlite3.Tsqlite3_io_methods)(unsafe.Pointer(fs.perFileStateOf(pFile).defaultMethods))
+}
+
+// encryptedFS returns the *FS responsible for crypto operations on
+// pFile, or nil if the file is one we forward verbatim (fileKind == 0,
+// e.g. the WAL -shm index).
+func encryptedFS(pFile uintptr) *FS {
+	fs := fsForFile(pFile)
+	if fs == nil {
+		return nil
+	}
+	if fs.perFileStateOf(pFile).fsToken == 0 {
+		return nil
+	}
+	return fs
 }
 
 func xCloseTrampoline(tls *libc.TLS, pFile uintptr) int32 {
-	return callXClose(tls, defaultMethodsFor(pFile).FxClose, pFile)
+	methods := defaultMethodsFor(pFile)
+	unregisterFile(pFile)
+	return callXClose(tls, methods.FxClose, pFile)
 }
 
 // xReadTrampoline reads `amt` bytes at `off` into `buf`. For
@@ -66,7 +89,7 @@ func xCloseTrampoline(tls *libc.TLS, pFile uintptr) int32 {
 // span, fetch and decrypt those pages, then copy the requested slice
 // to the caller.
 func xReadTrampoline(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Tsqlite3_int64) int32 {
-	fs := fsFor(pFile)
+	fs := encryptedFS(pFile)
 	if fs == nil {
 		return callXRead(tls, defaultMethodsFor(pFile).FxRead, pFile, buf, amt, off)
 	}
@@ -76,7 +99,7 @@ func xReadTrampoline(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.T
 	}
 	rc := readEncrypted(tls, pFile, buf, amt, off, fs)
 	if fs.recorder != nil {
-		fs.recorder.OnRead(perFileStateOf(pFile).fileKind, int64(off), int64(amt), time.Since(start), rc)
+		fs.recorder.OnRead(fs.perFileStateOf(pFile).fileKind, int64(off), int64(amt), time.Since(start), rc)
 	}
 	return rc
 }
@@ -85,7 +108,7 @@ func xReadTrampoline(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.T
 // encrypted files we encrypt each affected page (read-modify-write
 // for partial pages) and forward the page-aligned encrypted block.
 func xWriteTrampoline(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Tsqlite3_int64) int32 {
-	fs := fsFor(pFile)
+	fs := encryptedFS(pFile)
 	if fs == nil {
 		return callXWrite(tls, defaultMethodsFor(pFile).FxWrite, pFile, buf, amt, off)
 	}
@@ -95,7 +118,7 @@ func xWriteTrampoline(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.
 	}
 	rc := writeEncrypted(tls, pFile, buf, amt, off, fs)
 	if fs.recorder != nil {
-		fs.recorder.OnWrite(perFileStateOf(pFile).fileKind, int64(off), int64(amt), time.Since(start), rc)
+		fs.recorder.OnWrite(fs.perFileStateOf(pFile).fileKind, int64(off), int64(amt), time.Since(start), rc)
 	}
 	return rc
 }
@@ -109,13 +132,13 @@ func xTruncateTrampoline(tls *libc.TLS, pFile uintptr, size sqlite3.Tsqlite3_int
 }
 
 func xSyncTrampoline(tls *libc.TLS, pFile uintptr, flags int32) int32 {
-	fs := fsFor(pFile)
+	fs := encryptedFS(pFile)
 	if fs == nil || fs.recorder == nil {
 		return callXSync(tls, defaultMethodsFor(pFile).FxSync, pFile, flags)
 	}
 	start := time.Now()
 	rc := callXSync(tls, defaultMethodsFor(pFile).FxSync, pFile, flags)
-	fs.recorder.OnSync(perFileStateOf(pFile).fileKind, time.Since(start), rc)
+	fs.recorder.OnSync(fs.perFileStateOf(pFile).fileKind, time.Since(start), rc)
 	return rc
 }
 
@@ -188,7 +211,7 @@ func xShmUnmapTrampoline(tls *libc.TLS, pFile uintptr, deleteFlag int32) int32 {
 // SQLITE_IOERR_SHORT_READ to mirror the default VFS contract — SQLite
 // uses the SHORT_READ signal to decide a database is fresh.
 func readEncrypted(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Tsqlite3_int64, fs *FS) int32 {
-	pst := perFileStateOf(pFile)
+	pst := fs.perFileStateOf(pFile)
 	ps := int64(fs.pageSize)
 	pageStart := (int64(off) / ps) * ps
 	pageEnd := (int64(off) + int64(amt) + ps - 1) / ps * ps
@@ -233,7 +256,7 @@ func readEncrypted(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Tsq
 // the fast path is the common case; the RMW branch covers vacuum
 // quirks and any other mid-page DML the engine emits.
 func writeEncrypted(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Tsqlite3_int64, fs *FS) int32 {
-	pst := perFileStateOf(pFile)
+	pst := fs.perFileStateOf(pFile)
 	ps := int64(fs.pageSize)
 	pageStart := (int64(off) / ps) * ps
 	pageEnd := (int64(off) + int64(amt) + ps - 1) / ps * ps

@@ -32,6 +32,33 @@ produces distinct ciphertext. Encryption-at-rest covers everything that
 hits xRead/xWrite; the WAL `-shm` index file is plaintext because it is
 process-local coordination state, not row data.
 
+### Chaining
+
+`vfs/crypto` and `vfs/cksm` both accept an `Options.WrapVFS string`
+field that names another registered VFS to layer on top of (rather
+than the system default). The canonical stack is checksum-on-the-
+inside / encrypt-on-the-outside:
+
+```go
+cksmName, cksmFS, _ := cksm.New(cksm.Options{})
+defer cksmFS.Close()
+
+cryptoName, cryptoFS, _ := crypto.New(crypto.Options{
+    Key:     key,
+    WrapVFS: cksmName,                            // layer cksm beneath crypto
+})
+defer cryptoFS.Close()
+
+sql.Open("sqlite", "file:db.db?vfs="+cryptoName)
+```
+
+On write, crypto encrypts and forwards to cksm, which stamps the
+checksum trailer over the ciphertext and forwards to the system
+default. On read, the order reverses: cksm verifies first (proving
+the ciphertext arrived intact), then crypto decrypts. Per-file state
+in each layer lives at the wrapped VFS's `szOsFile` offset, so the
+layers don't collide.
+
 `vfs/cksm` is a page-level checksum VFS — every main-DB page write
 computes a 32-bit Fletcher-style rolling sum over the page body and
 stamps the 8-byte trailer; every read verifies it. Activates only when
