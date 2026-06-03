@@ -1,10 +1,8 @@
 package cksm
 
 import (
-	"database/sql/driver"
 	"encoding/binary"
 	"fmt"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -230,55 +228,26 @@ func isValidPageSize(n int) bool {
 	return n&(n-1) == 0
 }
 
-// Enabler is the subset of *sqlite.Conn methods EnableChecksums needs.
-// Accepting the interface (rather than *sqlite.Conn directly) keeps
-// vfs/cksm free of an import cycle: the root package can satisfy it
-// without vfs/cksm needing to import root.
+// Enabler is the subset of *sqlite.Conn that [EnableChecksums]
+// needs. Any type with the same shape can satisfy it — typically the
+// root package's *sqlite.Conn.
 type Enabler interface {
-	FileControlReserveBytes(schema string, n int) (int, error)
-	Exec(query string, args []driver.Value) (driver.Result, error)
+	EnableChecksums(schema string) error
 }
 
-// EnableChecksums sets reserved_bytes=8 on the named schema and runs
-// VACUUM so every existing page is rewritten with the 8-byte trailer
-// in place. Use this once on a fresh DB or any DB that hasn't been
-// configured for checksums yet; on subsequent opens the header byte
-// already reads 8 and the VFS activates itself automatically.
+// EnableChecksums is a thin wrapper around the root package's
+// (*sqlite.Conn).EnableChecksums method, kept for backwards
+// compatibility with older callers. New code should call the method
+// directly on the connection.
 //
 // schema is the attached-database name ("main" for the primary
 // database; "temp" or a name from ATTACH DATABASE otherwise). Pass
 // "main" if you only have the default database.
 //
-// Without the VACUUM step, existing page bodies do not have valid
-// trailers and the very next read would fail with SQLITE_IOERR_DATA.
-// VACUUM rewrites every page, stamping the trailer through our xWrite
-// trampoline.
-//
 // Mirrors the upstream cksum-vfs convention; see
 // https://sqlite.org/cksumvfs.html.
 func EnableChecksums(c Enabler, schema string) error {
-	r, err := c.FileControlReserveBytes(schema, -1)
-	if err != nil {
-		return fmt.Errorf("cksm: query reserved_bytes: %w", err)
-	}
-	if r == 8 {
-		return nil
-	}
-	if _, err := c.FileControlReserveBytes(schema, 8); err != nil {
-		return fmt.Errorf("cksm: set reserved_bytes: %w", err)
-	}
-	q := "VACUUM"
-	if schema != "" && schema != "main" {
-		q = "VACUUM " + quoteIdent(schema)
-	}
-	if _, err := c.Exec(q, nil); err != nil {
-		return fmt.Errorf("cksm: VACUUM after reserved_bytes change: %w", err)
-	}
-	return nil
-}
-
-func quoteIdent(s string) string {
-	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+	return c.EnableChecksums(schema)
 }
 
 // compute is the SQLite cksm_vtab Fletcher-style rolling 64-bit

@@ -26,10 +26,11 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [gorm/doc.go](gorm/doc.go): gorm dialector — drop-in for glebarez/sqlite and gorm.io/driver/sqlite. Also exposes `sqlitegorm.OpenConfig(sqlite.Config, ...gorm.Config) (*sqlitegorm.DB, error)` for the modern Go-typed entry.
 - [vec/gorm/doc.go](vec/gorm/doc.go): tag-driven sqlite-vec sidecars (`vec:"dim=N;metric=…"`) on gorm models.
 - [fts/gorm/doc.go](fts/gorm/doc.go): tag-driven FTS5 sidecars (`fts5:"tokenize=…;external=…;contentless=…"`) on gorm models.
-- [vfs/doc.go](vfs/doc.go): expose any `fs.FS` (embed.FS, fstest.MapFS, zip-fs) as a read-only SQLite VFS.
+- [vfs/doc.go](vfs/doc.go): expose any `fs.FS` (embed.FS, fstest.MapFS, zip-fs) as a read-only SQLite VFS, plus `vfs.NewReader(io.ReaderAt, size)` for direct-buffer immutable databases without an fs.FS wrapper.
 - [vfs/crypto/doc.go](vfs/crypto/doc.go): pure-Go encryption-at-rest VFS — Adiantum / AES-XTS-256, transparent page-level encryption of main DB + journal + WAL + temp files.
 - [vfs/cksm/doc.go](vfs/cksm/doc.go): page-level checksum VFS — Fletcher-style trailer on every main-DB page, surfaces silent corruption as SQLITE_IOERR_DATA. Composes with vfs/crypto.
 - [vfs/mvcc/doc.go](vfs/mvcc/doc.go): in-memory MVCC VFS — snapshot-isolation reads + atomic publish on commit; shared (`file:/name`) and private (`file:name`) DBs.
+- [vfs/memdb/doc.go](vfs/memdb/doc.go): plain in-memory VFS — direct per-page store with no MVCC; smaller-surface alternative to vfs/mvcc for tests and scratch DBs.
 - [fusion/doc.go](fusion/doc.go): rank-fusion helpers — combine vec.KNN and fts.Search results via Reciprocal Rank Fusion (Cormack 2009).
 - [ext/README.md](ext/README.md): loadable Go extensions umbrella — opt-in SQL scalar UDFs, table-valued functions, and vtab-based readers. Each sub-package independent; pick by need. Several are Go-native ports of ncruces/go-sqlite3 extensions. See [docs/coverage-ext.md](docs/coverage-ext.md) for the full matrix.
 - [ext/spellfix1/doc.go](ext/spellfix1/doc.go): fuzzy-text vtab — Soundex prefilter + Damerau-Levenshtein edit-distance ranking with persistent vocabulary shadow table. Go-native re-implementation of SQLite's spellfix1 (same SQL surface, simpler internals).

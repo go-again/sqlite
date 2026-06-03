@@ -5,6 +5,7 @@
 package sqlite // import "github.com/go-again/sqlite"
 
 import (
+	"fmt"
 	"unsafe"
 
 	"modernc.org/libc"
@@ -58,6 +59,55 @@ func (c *conn) FileControlReserveBytes(dbName string, n int) (int, error) {
 	*(*int32)(unsafe.Pointer(pi32)) = int32(n)
 	err := c.fileControl(dbName, sqlite3.SQLITE_FCNTL_RESERVE_BYTES, pi32)
 	return int(*(*int32)(unsafe.Pointer(pi32))), err
+}
+
+// EnableChecksums sets reserved_bytes=8 on the named schema ("main"
+// for the primary database) and VACUUMs so every existing page is
+// rewritten with the 8-byte trailer in place. After the call the
+// header's reserved_bytes byte reads 8 and any cksm-flavored VFS
+// wrapping the connection (typically [github.com/go-again/sqlite/vfs/cksm])
+// will start computing + verifying page checksums.
+//
+// Idempotent — if reserved_bytes is already 8 the call is a no-op.
+// Should be used once after opening a fresh database; on subsequent
+// opens the VFS auto-detects the on-disk format and EnableChecksums
+// does not need to be called again.
+//
+// Mirrors the same-named convenience on ncruces/go-sqlite3's *Conn.
+func (c *Conn) EnableChecksums(schema string) error {
+	if schema == "" {
+		schema = "main"
+	}
+	r, err := c.FileControlReserveBytes(schema, -1)
+	if err != nil {
+		return fmt.Errorf("sqlite: EnableChecksums: query reserved_bytes: %w", err)
+	}
+	if r == 8 {
+		return nil
+	}
+	if _, err := c.FileControlReserveBytes(schema, 8); err != nil {
+		return fmt.Errorf("sqlite: EnableChecksums: set reserved_bytes: %w", err)
+	}
+	q := "VACUUM"
+	if schema != "main" {
+		q = `VACUUM "` + escapeIdent(schema) + `"`
+	}
+	if _, err := c.Exec(q, nil); err != nil {
+		return fmt.Errorf("sqlite: EnableChecksums: VACUUM after reserved_bytes change: %w", err)
+	}
+	return nil
+}
+
+func escapeIdent(s string) string {
+	out := make([]byte, 0, len(s))
+	for i := range len(s) {
+		if s[i] == '"' {
+			out = append(out, '"', '"')
+		} else {
+			out = append(out, s[i])
+		}
+	}
+	return string(out)
 }
 
 func (c *conn) fileControl(dbName string, op int, pArg uintptr) error {

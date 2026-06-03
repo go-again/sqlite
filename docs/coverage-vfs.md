@@ -21,6 +21,8 @@ Status legend:
 | `vfs/crypto` | [ncruces vfs/adiantum](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs/adiantum) + [vfs/xts](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs/xts) | ✓ landed | `crypto.New(Options)` | `vfs/crypto/integration_test.go` |
 | `vfs/cksm` | [ncruces vfs/cksm.go](https://github.com/ncruces/go-sqlite3/blob/main/vfs/cksm.go) | ✓ landed | `cksm.New(Options)` + `cksm.EnableChecksums(conn, schema)` | `vfs/cksm/cksm_test.go` |
 | `vfs/mvcc` | [ncruces vfs/mvcc](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs/mvcc) | ✓ landed (Go-native re-implementation, no wbt dep) | `mvcc.New(Options)` | `vfs/mvcc/mvcc_test.go` |
+| `vfs/memdb` | [ncruces vfs/memdb](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs/memdb) | ✓ landed | `memdb.New(Options)` | `vfs/memdb/memdb_test.go` |
+| `vfs.NewReader(io.ReaderAt, size)` | [ncruces vfs/readervfs](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs/readervfs) | ✓ landed | `vfs.NewReader(r, n)` | `vfs/vfs_test.go` |
 
 `vfs/crypto` covers both ncruces sub-packages: pick between Adiantum
 (default, 32-byte key, length-preserving wide-block cipher) and
@@ -74,7 +76,6 @@ now pick one wrapper per DB.
 
 | feature | Reason |
 |---|---|
-| `vfs/memdb` (ncruces) | SQLite's native `:memory:` and shared-cache `file::memory:?cache=shared` URIs already cover this. |
 | ncruces `vfs/` core framework (api.go, file.go, lock_*.go, os_*.go, shm_*.go) | Specific to ncruces' Wazero-WASM runtime. We use `modernc.org/sqlite/vfs`, whose core framework is the transpiled SQLite default VFS — different runtime, same end behaviour. |
 
 ## Adding a new VFS wrapper

@@ -1,6 +1,7 @@
 package vfs_test
 
 import (
+	"bytes"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -72,5 +73,57 @@ INSERT INTO t (id, name) VALUES (1, 'alpha'), (2, 'beta');`); err != nil {
 	}
 	if len(got) != 2 || got[0].name != "alpha" || got[1].name != "beta" {
 		t.Errorf("got %+v, want [{1 alpha} {2 beta}]", got)
+	}
+}
+
+// TestVFS_OpenFromReaderAt confirms vfs.NewReader can serve a
+// SQLite database directly from an in-memory io.ReaderAt without
+// wrapping the bytes in a synthetic fs.FS.
+func TestVFS_OpenFromReaderAt(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "seed.db")
+	src, err := sql.Open("sqlite3", tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := src.Exec(`CREATE TABLE z (id INTEGER PRIMARY KEY, v TEXT);
+INSERT INTO z (id, v) VALUES (1, 'reader'), (2, 'at');`); err != nil {
+		t.Fatal(err)
+	}
+	src.Close()
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	name, _, err := vfs.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("NewReader: %v", err)
+	}
+
+	dsn := "file:db?vfs=" + name + "&mode=ro"
+	db, err := sql.Open("sqlite3", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM z`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Errorf("count=%d, want 2", n)
+	}
+}
+
+func TestVFS_NewReader_NilRejected(t *testing.T) {
+	if _, _, err := vfs.NewReader(nil, 0); err == nil {
+		t.Error("NewReader(nil) accepted; want error")
+	}
+}
+
+func TestVFS_NewReader_NegativeSizeRejected(t *testing.T) {
+	if _, _, err := vfs.NewReader(bytes.NewReader(nil), -1); err == nil {
+		t.Error("NewReader(size=-1) accepted; want error")
 	}
 }
