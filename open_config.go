@@ -106,6 +106,64 @@ func Open(cfg Config) (*DB, error) {
 	return &DB{DB: sqlDB, fs: fs}, nil
 }
 
+// OpenInMemory is the shortest path to a private in-memory database:
+// equivalent to [Open] with Config{Path: [InMemory]}. Convenient for
+// tests, REPLs, and scratch usage that doesn't need PRAGMAs,
+// encryption, or pool tuning.
+//
+//	db, err := sqlite.OpenInMemory()
+//	defer db.Close()
+//
+// For an in-memory DB shared across multiple connections in the same
+// process, use [OpenShared].
+func OpenInMemory() (*DB, error) {
+	return Open(Config{Path: InMemory})
+}
+
+// OpenWAL opens a file-backed database with the [RecommendedPragmas]
+// preset — WAL journaling, 5-second busy timeout, foreign keys
+// enforced. Equivalent to:
+//
+//	sqlite.Open(sqlite.Config{Path: path, Pragmas: sqlite.RecommendedPragmas()})
+//
+// Most production applications want exactly this. Tune the pool size
+// or other PRAGMAs by reaching for the full [Open]/[Config] form.
+func OpenWAL(path string) (*DB, error) {
+	return Open(Config{Path: path, Pragmas: RecommendedPragmas()})
+}
+
+// OpenReadOnly opens an existing file-backed database in read-only
+// mode. Refuses to create the file if missing — matches SQLite's
+// `mode=ro`. Equivalent to:
+//
+//	sqlite.Open(sqlite.Config{Path: path, Mode: sqlite.ModeReadOnly})
+//
+// Typical use: opening a shipped seed database or a read replica
+// without risking accidental writes.
+func OpenReadOnly(path string) (*DB, error) {
+	return Open(Config{Path: path, Mode: ModeReadOnly})
+}
+
+// OpenShared opens (or creates) a named in-memory database that
+// every connection in the same process pointing at the same name
+// shares. Equivalent to:
+//
+//	sqlite.Open(sqlite.Config{Path: name, Mode: sqlite.ModeMemory, Cache: sqlite.CacheShared})
+//
+// Unlike [OpenInMemory] / [InMemory] (which gives each conn its own
+// private store), OpenShared lets multiple *sql.DB handles see the
+// same in-memory rows — the standard SQLite recipe for multi-conn
+// in-memory tests. The shared store lives for the lifetime of the
+// process; opening the same name from a second goroutine re-attaches
+// to it.
+//
+// For snapshot isolation or richer semantics, use the
+// [github.com/go-again/sqlite/vfs/mvcc] or
+// [github.com/go-again/sqlite/vfs/memdb] sub-packages.
+func OpenShared(name string) (*DB, error) {
+	return Open(Config{Path: name, Mode: ModeMemory, Cache: CacheShared})
+}
+
 // Close drains the *sql.DB pool and (if Open registered a VFS for
 // encryption) unregisters it. Order matters per
 // [vfs/crypto/doc.go]: pool first, VFS second. Idempotent.
@@ -207,6 +265,9 @@ func buildDSN(cfg Config, vfsName string) string {
 	if cfg.Mode != "" && cfg.Path != ":memory:" {
 		q.Set("mode", string(cfg.Mode))
 	}
+	if cfg.Cache != "" {
+		q.Set("cache", string(cfg.Cache))
+	}
 	if vfsName != "" {
 		q.Set("vfs", vfsName)
 	}
@@ -247,13 +308,13 @@ func escapeDSNPath(p string) string {
 func pragmaURLValues(p Pragmas) []string {
 	var out []string
 	if p.JournalMode != "" {
-		out = append(out, fmt.Sprintf("journal_mode(%s)", p.JournalMode))
+		out = append(out, fmt.Sprintf("journal_mode(%s)", string(p.JournalMode)))
 	}
 	if p.BusyTimeout > 0 {
 		out = append(out, fmt.Sprintf("busy_timeout(%d)", p.BusyTimeout.Milliseconds()))
 	}
 	if p.Synchronous != "" {
-		out = append(out, fmt.Sprintf("synchronous(%s)", p.Synchronous))
+		out = append(out, fmt.Sprintf("synchronous(%s)", string(p.Synchronous)))
 	}
 	if p.ForeignKeys {
 		out = append(out, "foreign_keys(on)")
@@ -262,7 +323,7 @@ func pragmaURLValues(p Pragmas) []string {
 		out = append(out, fmt.Sprintf("cache_size(%d)", p.CacheSize))
 	}
 	if p.TempStore != "" {
-		out = append(out, fmt.Sprintf("temp_store(%s)", p.TempStore))
+		out = append(out, fmt.Sprintf("temp_store(%s)", string(p.TempStore)))
 	}
 	if len(p.Extra) > 0 {
 		keys := make([]string, 0, len(p.Extra))
@@ -283,13 +344,13 @@ func pragmaURLValues(p Pragmas) []string {
 func pragmaStatements(p Pragmas) []string {
 	var out []string
 	if p.JournalMode != "" {
-		out = append(out, fmt.Sprintf("PRAGMA journal_mode = %s", p.JournalMode))
+		out = append(out, fmt.Sprintf("PRAGMA journal_mode = %s", string(p.JournalMode)))
 	}
 	if p.BusyTimeout > 0 {
 		out = append(out, fmt.Sprintf("PRAGMA busy_timeout = %d", p.BusyTimeout.Milliseconds()))
 	}
 	if p.Synchronous != "" {
-		out = append(out, fmt.Sprintf("PRAGMA synchronous = %s", p.Synchronous))
+		out = append(out, fmt.Sprintf("PRAGMA synchronous = %s", string(p.Synchronous)))
 	}
 	if p.ForeignKeys {
 		out = append(out, "PRAGMA foreign_keys = ON")
@@ -298,7 +359,7 @@ func pragmaStatements(p Pragmas) []string {
 		out = append(out, fmt.Sprintf("PRAGMA cache_size = %d", p.CacheSize))
 	}
 	if p.TempStore != "" {
-		out = append(out, fmt.Sprintf("PRAGMA temp_store = %s", p.TempStore))
+		out = append(out, fmt.Sprintf("PRAGMA temp_store = %s", string(p.TempStore)))
 	}
 	if len(p.Extra) > 0 {
 		keys := make([]string, 0, len(p.Extra))

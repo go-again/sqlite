@@ -561,7 +561,8 @@ expose; existing code keeps working.
 ```
 
 Same dialector behaviour. The driver underneath is no longer modernc
-directly but our fork of it — the libc pin invariant above applies.
+directly but this module's wrapper layer on top of it — the libc pin
+invariant above applies.
 
 ## From gorm.io/driver/sqlite (mattn-based)
 

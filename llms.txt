@@ -45,6 +45,8 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [examples/gorm-fts](examples/gorm-fts/main.go): gorm + fts external-content (side-by-side, no plugin).
 - [examples/gorm-vec-tagged](examples/gorm-vec-tagged/main.go): tag-driven vec sidecars via vec/gorm plugin.
 - [examples/gorm-fts-tagged](examples/gorm-fts-tagged/main.go): tag-driven FTS5 sidecars via fts/gorm plugin.
+- [examples/gorm-ext-scalars](examples/gorm-ext-scalars/main.go): pair gorm with the scalar / aggregate / collation flavors of ext/ — `regexp`, `uuid`, `hash`, `ipaddr`, `zorder`, `stats`, `unicode` — all auto-registered per conn and driven through plain gorm Where/Order/Select.
+- [examples/gorm-ext-vtabs](examples/gorm-ext-vtabs/main.go): pair gorm with the virtual-table flavors of ext/ — `array` (via `sqlite.Pointer`), `lines`, `csv` (sandboxed via a `Driver.RegisterConnectionHook`), `statement`, `closure`, `bloom`, `spellfix1` — all driven through gorm Exec / Raw / Scan.
 - [examples/vec-search](examples/vec-search/main.go): raw `vec.Table` API.
 - [examples/fts-search](examples/fts-search/main.go): raw `fts.Index` API.
 - [examples/fusion-hybrid-search](examples/fusion-hybrid-search/main.go): combine vec.KNN + fts.Search rankings via fusion.RRF2.

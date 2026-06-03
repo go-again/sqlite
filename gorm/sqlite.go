@@ -8,7 +8,7 @@ import (
 
 	"gorm.io/gorm/callbacks"
 
-	_ "github.com/go-again/sqlite"
+	rootsqlite "github.com/go-again/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
 
 	"gorm.io/gorm"
@@ -60,6 +60,62 @@ type Dialector struct {
 // name. Equivalent to glebarez/sqlite's sqlite.Open.
 func Open(dsn string) gorm.Dialector {
 	return &Dialector{DSN: dsn}
+}
+
+// OpenInMemory returns a gorm.Dialector wired to a private in-memory
+// SQLite database — equivalent to [Open](":memory:"). Convenient for
+// gorm tests and scratch databases that don't need a file path:
+//
+//	db, _ := gorm.Open(sqlitegorm.OpenInMemory(), &gorm.Config{})
+//
+// For an in-memory DB shared across multiple connections, see
+// [OpenShared].
+func OpenInMemory() gorm.Dialector {
+	return Open(rootsqlite.InMemory)
+}
+
+// OpenWAL returns a gorm.Dialector wired to a file-backed database
+// with the [rootsqlite.RecommendedPragmas] preset — WAL journaling,
+// 5-second busy timeout, foreign keys enforced. The shortest path to
+// a production-shaped gorm open:
+//
+//	db, _ := gorm.Open(sqlitegorm.OpenWAL("app.db"), &gorm.Config{})
+//
+// For finer-grained control, use [OpenConfig] with the full
+// [rootsqlite.Config] shape.
+func OpenWAL(path string) gorm.Dialector {
+	return Open(rootsqlite.BuildDSN(rootsqlite.Config{
+		Path:    path,
+		Pragmas: rootsqlite.RecommendedPragmas(),
+	}))
+}
+
+// OpenReadOnly returns a gorm.Dialector wired to an existing
+// file-backed database in read-only mode. Refuses to create the file
+// if missing. Equivalent to opening the DSN
+// `file:path?mode=ro` via [Open]:
+//
+//	db, _ := gorm.Open(sqlitegorm.OpenReadOnly("seed.db"), &gorm.Config{})
+func OpenReadOnly(path string) gorm.Dialector {
+	return Open(rootsqlite.BuildDSN(rootsqlite.Config{
+		Path: path,
+		Mode: rootsqlite.ModeReadOnly,
+	}))
+}
+
+// OpenShared returns a gorm.Dialector wired to a named in-memory
+// database that every connection in the same process pointing at the
+// same name shares — the standard SQLite recipe for multi-conn
+// in-memory tests. Equivalent to opening
+// `file:NAME?mode=memory&cache=shared` via [Open]:
+//
+//	db, _ := gorm.Open(sqlitegorm.OpenShared("testdb"), &gorm.Config{})
+func OpenShared(name string) gorm.Dialector {
+	return Open(rootsqlite.BuildDSN(rootsqlite.Config{
+		Path:  name,
+		Mode:  rootsqlite.ModeMemory,
+		Cache: rootsqlite.CacheShared,
+	}))
 }
 
 // New returns a gorm.Dialector configured by the given Config. Equivalent to

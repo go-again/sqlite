@@ -1,8 +1,8 @@
 // Package sqlite is a CGo-free SQLite driver for Go's database/sql.
 // It is a drop-in replacement for both github.com/mattn/go-sqlite3
 // (the dominant CGo-based driver) and modernc.org/sqlite (the
-// upstream CGo-free wrapper this fork is built on top of), and serves
-// as the dialector source for the sibling gorm package.
+// upstream CGo-free wrapper this module is built on top of), and
+// serves as the dialector source for the sibling gorm package.
 //
 // # Modern Go-typed open (recommended)
 //
@@ -210,7 +210,8 @@
 // # SQLite version, libc pin
 //
 // The bundled SQLite is whatever build modernc.org/sqlite is pinned to
-// in this module's go.mod. We do not pin or fork SQLite itself.
+// in this module's go.mod. SQLite itself is not vendored or pinned by
+// this module.
 //
 // modernc.org/libc is a hard ABI dependency of modernc.org/sqlite's
 // transpiled C. Bumping one without the other breaks the generated

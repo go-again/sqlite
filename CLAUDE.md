@@ -197,6 +197,8 @@ github.com/go-again/sqlite/
     ├── gorm-fts/           # gorm + fts external-content (side-by-side pattern)
     ├── gorm-vec-tagged/    # gorm + vec via vec/gorm tag-driven plugin
     ├── gorm-fts-tagged/    # gorm + fts via fts/gorm tag-driven plugin
+    ├── gorm-ext-scalars/   # gorm + scalar/aggregate/collation exts (regexp, uuid, hash, ipaddr, zorder, stats, unicode)
+    ├── gorm-ext-vtabs/     # gorm + vtab exts (array via sqlite.Pointer, lines, csv via connect-hook, statement, closure, bloom, spellfix1)
     ├── vec-search/         # typed vec.Table
     ├── fts-search/         # typed fts.Index
     ├── window-function/    # Conn.RegisterWindowFunction demo
