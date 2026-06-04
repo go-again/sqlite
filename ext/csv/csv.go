@@ -320,7 +320,10 @@ func boolArg(key, val string) (bool, error) {
 }
 
 func uintArg(key, val string) (int, error) {
-	n, err := strconv.ParseUint(unquote(val), 10, 15)
+	// 31 bits = up to math.MaxInt32, which covers any realistic CSV
+	// column / row count. The previous 15-bit cap (max 32767) silently
+	// rejected larger values with a misleading "invalid uint" error.
+	n, err := strconv.ParseUint(unquote(val), 10, 31)
 	if err != nil {
 		return 0, fmt.Errorf("csv: invalid uint %q for %q", val, key)
 	}

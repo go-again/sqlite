@@ -76,7 +76,7 @@ func poolDB(db *gorm.DB) (*sql.DB, error) {
 //
 // When m.SoftDelete is set the statement also writes deleted=0, since
 // vec0 INTEGER metadata columns reject NULL.
-func batchInsertEmbeddings(ctx context.Context, db *gorm.DB, m meta, items []vec.Row) error {
+func batchInsertEmbeddings(ctx context.Context, db *gorm.DB, m meta, items []vec.Row) (err error) {
 	if len(items) == 0 {
 		return nil
 	}
@@ -94,7 +94,11 @@ func batchInsertEmbeddings(ctx context.Context, db *gorm.DB, m meta, items []vec
 		if err != nil {
 			return err
 		}
-		defer prep.Close()
+		defer func() {
+			if cerr := prep.Close(); cerr != nil && err == nil {
+				err = fmt.Errorf("vecgorm: close stmt: %w", cerr)
+			}
+		}()
 		for _, it := range items {
 			if _, err := prep.ExecContext(ctx, insertArgs(m, it)...); err != nil {
 				return fmt.Errorf("vecgorm: insert into %s: %w", m.Table, err)
@@ -116,7 +120,11 @@ func batchInsertEmbeddings(ctx context.Context, db *gorm.DB, m meta, items []vec
 	if err != nil {
 		return joinTxErr(fmt.Errorf("vecgorm: prepare insert into %s: %w", m.Table, err), tx.Rollback())
 	}
-	defer prep.Close()
+	defer func() {
+		if cerr := prep.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("vecgorm: close stmt: %w", cerr)
+		}
+	}()
 	for _, it := range items {
 		if _, err := prep.ExecContext(ctx, insertArgs(m, it)...); err != nil {
 			return joinTxErr(

@@ -106,7 +106,10 @@ func demoEncrypted(dbPath string) {
 	salt := make([]byte, 16)
 	io.ReadFull(rand.Reader, passphrase)
 	io.ReadFull(rand.Reader, salt)
-	key := crypto.DeriveKey(passphrase, salt, sqlite.Adiantum)
+	key, err := crypto.DeriveKey(passphrase, salt, sqlite.Adiantum)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	db, err := sqlitegorm.OpenConfig(sqlite.Config{
 		Path:    dbPath,

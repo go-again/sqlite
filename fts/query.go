@@ -27,6 +27,9 @@ func (r rawQ) Build() string { return string(r) }
 
 // Term matches a single token. FTS5 special characters in s are escaped by
 // double-quoting the whole term, which FTS5 treats as a string literal token.
+// Empty s produces an empty quoted string; FTS5 will reject that at exec
+// time — but library code never panics on user input. Pass the empty
+// string through and let the eventual Search call surface FTS5's error.
 func Term(s string) Query { return termQ(s) }
 
 type termQ string
@@ -40,6 +43,9 @@ func (t termQ) Build() string {
 // All tokens are joined inside a single pair of double-quotes so FTS5 treats
 // them as one phrase — adjacency required. (Separate quoted tokens would be
 // implicitly AND-ed instead, which is what Term + Term gives you.)
+// Zero tokens produces an empty quoted string; FTS5 rejects that at exec
+// time, but the builder does not panic — caller may be threading user
+// input through.
 func Phrase(tokens ...string) Query { return phraseQ(tokens) }
 
 type phraseQ []string
@@ -117,7 +123,8 @@ func (n notQ) Build() string {
 }
 
 // Near matches terms appearing within `distance` tokens of each other in any
-// order. FTS5 default distance is 10 if you pass 0.
+// order. FTS5 default distance is 10 if you pass 0. Zero terms produces
+// `NEAR()` which FTS5 rejects at exec time; the builder does not panic.
 func Near(distance int, terms ...string) Query {
 	return nearQ{dist: distance, terms: terms}
 }
@@ -139,13 +146,15 @@ func (n nearQ) Build() string {
 }
 
 // Column scopes a sub-query to a specific column of the FTS5 table.
-// Equivalent to FTS5's `{column}: query` syntax. Panics if name fails
-// [ValidIdent] — column names with FTS5 metacharacters would otherwise
-// be interpreted as part of the match query.
+// Equivalent to FTS5's `{column}: query` syntax.
+//
+// Note: the column name is interpolated unquoted into the FTS5 match
+// expression — FTS5's column-filter syntax doesn't accept quoted
+// identifiers. Callers passing names with FTS5 metacharacters (spaces,
+// colons, operators) will produce a malformed query that FTS5 rejects
+// at exec time. Use [ValidIdent] at the API boundary if you accept
+// column names from untrusted input.
 func Column(name string, q Query) Query {
-	if !validIdent(name) {
-		panic("fts.Column: " + name + " is not a valid SQL identifier")
-	}
 	return columnQ{col: name, q: q}
 }
 

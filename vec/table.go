@@ -235,18 +235,18 @@ func (t *Table) BatchInsert(ctx context.Context, items []Row) error {
 	}
 	stmt, err := tx.PrepareContext(ctx, t.insertSQL)
 	if err != nil {
-		tx.Rollback()
-		return err
+		return errors.Join(err, tx.Rollback())
 	}
 	defer stmt.Close()
 	for i, it := range items {
 		if len(it.Embedding) != t.dim {
-			tx.Rollback()
-			return fmt.Errorf("vec.BatchInsert[%d]: embedding length %d != dim %d", i, len(it.Embedding), t.dim)
+			return errors.Join(
+				fmt.Errorf("vec.BatchInsert[%d]: embedding length %d != dim %d", i, len(it.Embedding), t.dim),
+				tx.Rollback(),
+			)
 		}
 		if _, err := stmt.ExecContext(ctx, it.Rowid, encodeValue(it.Embedding, t.encoding)); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("vec.BatchInsert[%d]: %w", i, err)
+			return errors.Join(fmt.Errorf("vec.BatchInsert[%d]: %w", i, err), tx.Rollback())
 		}
 	}
 	return tx.Commit()

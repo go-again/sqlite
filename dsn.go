@@ -151,9 +151,11 @@ func translateMattnDSN(query string) (string, error) {
 
 	// _loc=auto is the mattn equivalent of _timezone. mattn's _loc=auto means
 	// "use the local time location"; we map that to Local. Any other value is
-	// treated as a timezone name. We only set _timezone if not already present.
+	// treated as a timezone name. Only set _timezone when the key is absent
+	// (Has check) — a present-but-empty `_timezone=` is the caller explicitly
+	// asking for "no override", and silently overwriting it would surprise.
 	if v := q.Get("_loc"); v != "" {
-		if q.Get("_timezone") == "" {
+		if !q.Has("_timezone") {
 			tz := v
 			if strings.EqualFold(v, "auto") {
 				tz = "Local"

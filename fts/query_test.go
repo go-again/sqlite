@@ -20,7 +20,8 @@ func TestBuild_Term(t *testing.T) {
 		{"NEAR", `"NEAR"`},
 		// Embedded double-quotes are doubled, per FTS5's escape rule.
 		{`a "b" c`, `"a ""b"" c"`},
-		// Empty term is still a valid quoted string.
+		// Empty term is still a valid quoted string — FTS5 may reject
+		// it at exec time but the builder never panics.
 		{"", `""`},
 	}
 	for _, tc := range cases {
@@ -41,7 +42,8 @@ func TestBuild_Phrase(t *testing.T) {
 		{[]string{"a", "b", "c"}, `"a b c"`},
 		// Quotes inside a phrase token are doubled, just like Term.
 		{[]string{`he said "hi"`}, `"he said ""hi"""`},
-		// Empty token list yields an empty quoted string.
+		// Empty token list yields an empty quoted string — FTS5 may
+		// reject, but the builder doesn't crash on user input.
 		{nil, `""`},
 	}
 	for _, tc := range cases {

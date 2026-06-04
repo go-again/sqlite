@@ -95,7 +95,10 @@ const (
 	colSoundsLike
 )
 
-func createCtor(c *sqlite.Conn, _, schema, vtabName string, _ []string) (sqlite.VTab, error) {
+func createCtor(c *sqlite.Conn, _, schema, vtabName string, args []string) (sqlite.VTab, error) {
+	if len(args) > 0 {
+		return nil, fmt.Errorf("spellfix1: this vtab does not accept module arguments, got %d", len(args))
+	}
 	t := newTable(c, schema, vtabName)
 	if err := c.DeclareVTab(declSQL); err != nil {
 		return nil, err
@@ -116,7 +119,10 @@ func createCtor(c *sqlite.Conn, _, schema, vtabName string, _ []string) (sqlite.
 	return t, nil
 }
 
-func connectCtor(c *sqlite.Conn, _, schema, vtabName string, _ []string) (sqlite.VTab, error) {
+func connectCtor(c *sqlite.Conn, _, schema, vtabName string, args []string) (sqlite.VTab, error) {
+	if len(args) > 0 {
+		return nil, fmt.Errorf("spellfix1: this vtab does not accept module arguments, got %d", len(args))
+	}
 	t := newTable(c, schema, vtabName)
 	if err := c.DeclareVTab(declSQL); err != nil {
 		return nil, err

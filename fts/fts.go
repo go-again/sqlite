@@ -256,8 +256,7 @@ func (i *Index[K, V]) Insert(ctx context.Context, items ...Attr[K, V]) error {
 	}
 	prep, err := tx.PrepareContext(ctx, i.insertSQL)
 	if err != nil {
-		tx.Rollback()
-		return err
+		return errors.Join(err, tx.Rollback())
 	}
 	defer prep.Close()
 	for n, a := range items {
@@ -272,8 +271,7 @@ func (i *Index[K, V]) Insert(ctx context.Context, items ...Attr[K, V]) error {
 			args = append(args, a.Extras[col])
 		}
 		if _, err := prep.ExecContext(ctx, args...); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("fts.Insert[%d]: %w", n, err)
+			return errors.Join(fmt.Errorf("fts.Insert[%d]: %w", n, err), tx.Rollback())
 		}
 	}
 	return tx.Commit()
@@ -291,14 +289,12 @@ func (i *Index[K, V]) Delete(ctx context.Context, keys ...K) error {
 	}
 	prep, err := tx.PrepareContext(ctx, i.deleteSQL)
 	if err != nil {
-		tx.Rollback()
-		return err
+		return errors.Join(err, tx.Rollback())
 	}
 	defer prep.Close()
 	for _, k := range keys {
 		if _, err := prep.ExecContext(ctx, k); err != nil {
-			tx.Rollback()
-			return err
+			return errors.Join(err, tx.Rollback())
 		}
 	}
 	return tx.Commit()

@@ -570,6 +570,8 @@ let `go mod tidy` resolve the transitive set.
 | How does `(*Conn).OpenBlob` work? | `blob.go::OpenBlob` + `*Blob` (io.ReaderAt / WriterAt over `sqlite3_blob_*`) |
 | Where are stmt introspection helpers (ColumnCount/Name/DeclType, BindCount/BindName)? | `stmt.go::ColumnCount` (added for `ext/statement` + `ext/pivot` to discover output/bind shape from a prepared stmt) |
 | How do I set reserved_bytes from Go? | `fcntl.go::FileControlReserveBytes` (wraps `SQLITE_FCNTL_RESERVE_BYTES`) |
+| How do vtab Go-side loops honor sqlite3_interrupt mid-iteration? | `(*Conn).IsInterrupted()` in `conn.go` polls the SQLite interrupt flag. Used by `ext/closure`, `ext/spellfix1`, `ext/pivot` between BFS / scan iterations so a parent `QueryContext` cancel is observed without waiting for the next SQLite call boundary. |
+| How do I read prepared-statement cache telemetry? | `(*Conn).StmtCacheStats()` in `stmt_cache.go` returns `{Hits, Misses, Evictions int64}` (monotonic per connection). Operators tune `_stmt_cache_size` against the hit rate. |
 | How does cksm/crypto chaining work? | `vfs/crypto/crypto.go::Options.WrapVFS` + per-package `fileMap` (a `cabi.PtrMap[FS]` in each `vfs.go`) maps pFile → owning `*FS`; per-FS `ourIoMethods` + `wrappedSzOsFile`. Both layers store state at their own offset and forward via the captured wrapped methods. Each layer owns its own PtrMap so chained inner/outer instances don't collide. |
 | Where's the vtab xCreate / xConnect split? | `module.go::CreateModuleSplit` (two-callback form). `ext/bloom` and `ext/spellfix1` use it to distinguish first-time shadow-table creation from subsequent reopens. |
 | Where's the shared NamedArg / Unquote parser? | `internal/sqlid/sqlid.go` (used by `ext/closure`, reusable by future named-arg vtabs) |

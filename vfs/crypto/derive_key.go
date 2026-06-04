@@ -1,6 +1,10 @@
 package crypto
 
-import "golang.org/x/crypto/argon2"
+import (
+	"fmt"
+
+	"golang.org/x/crypto/argon2"
+)
 
 // MinSaltLen is the minimum salt length DeriveKey accepts. Argon2's
 // salt-length recommendation is 16 bytes; shorter salts weaken the
@@ -17,22 +21,24 @@ const MinSaltLen = 16
 // alongside it. If the salt is lost the key cannot be re-derived;
 // rotating the salt forces a full re-encryption. The doc.go
 // "Key rotation recipe" section describes the offline migration.
-// DeriveKey panics if len(salt) < [MinSaltLen]; a too-short salt
+// Returns an error if len(salt) < [MinSaltLen]; a too-short salt
 // silently undermines the per-DB-uniqueness invariant the rest of
 // the package depends on.
 //
 // Use:
 //
 //	salt := loadOrGenerateSalt() // 16+ bytes, per-DB unique
-//	key := crypto.DeriveKey(passphrase, salt, crypto.Adiantum)
+//	key, err := crypto.DeriveKey(passphrase, salt, crypto.Adiantum)
+//	if err != nil { ... }
 //	name, fs, _ := crypto.New(crypto.Options{Key: key})
 //
 // For higher-stakes archive-grade keys bump time + memory beyond
 // the interactive defaults; for that case derive your key directly
 // via golang.org/x/crypto/argon2 instead of this helper.
-func DeriveKey(passphrase, salt []byte, cipher Cipher) []byte {
+func DeriveKey(passphrase, salt []byte, cipher Cipher) ([]byte, error) {
 	if len(salt) < MinSaltLen {
-		panic("crypto.DeriveKey: salt must be at least MinSaltLen bytes for per-DB uniqueness")
+		return nil, fmt.Errorf("crypto.DeriveKey: salt is %d bytes; want at least %d for per-DB uniqueness",
+			len(salt), MinSaltLen)
 	}
 	const (
 		time    uint32 = 3
@@ -46,5 +52,5 @@ func DeriveKey(passphrase, salt []byte, cipher Cipher) []byte {
 	default:
 		keyLen = 32
 	}
-	return argon2.IDKey(passphrase, salt, time, memory, threads, keyLen)
+	return argon2.IDKey(passphrase, salt, time, memory, threads, keyLen), nil
 }

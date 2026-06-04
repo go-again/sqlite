@@ -69,7 +69,10 @@ func main() {
 	// keep the example self-contained.
 	passphrase := []byte("not-a-real-secret")
 	salt := []byte("per-db-salt-16by")
-	key := crypto.DeriveKey(passphrase, salt, sqlite.Adiantum)
+	key, err := crypto.DeriveKey(passphrase, salt, sqlite.Adiantum)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelWarn, // Recorder events fire at Debug; bump for diagnosis.

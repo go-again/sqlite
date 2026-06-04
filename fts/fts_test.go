@@ -456,10 +456,10 @@ func keysOf(matches []fts.Hit[int64, string]) []int64 {
 	return out
 }
 
-// TestDegenerate_EmptyTerm covers fts.Term("") — should produce no
-// matches without crashing the query planner or panicking the
-// builder. Either an empty result set or a clean FTS5 error is
-// acceptable; the only contract violation is panic / driver crash.
+// TestDegenerate_EmptyTerm covers fts.Term("") — the builder must not
+// panic on empty user input. FTS5 may reject the resulting expression
+// at exec time (acceptable) but the library never crashes the host
+// process.
 func TestDegenerate_EmptyTerm(t *testing.T) {
 	db := openDB(t)
 	ctx := context.Background()
@@ -483,8 +483,7 @@ func TestDegenerate_EmptyTerm(t *testing.T) {
 }
 
 // TestDegenerate_ZeroTokenPhrase covers fts.Phrase() — zero positional
-// args. Builder must produce a syntactically valid (or rejected)
-// query, never crash.
+// args. Builder must not panic.
 func TestDegenerate_ZeroTokenPhrase(t *testing.T) {
 	db := openDB(t)
 	ctx := context.Background()
@@ -498,8 +497,6 @@ func TestDegenerate_ZeroTokenPhrase(t *testing.T) {
 		}
 	}()
 	_, err := idx.SearchSlice(ctx, fts.Phrase())
-	// Either an FTS5 syntax error or an empty result is acceptable;
-	// a panic or driver error is not.
 	if err != nil {
 		t.Logf("Phrase(): error (acceptable): %v", err)
 	}

@@ -128,7 +128,17 @@ func makeOpenblob(c *sqlite.Conn) func(args ...driver.Value) (int64, error) {
 		write := false
 		switch v := args[4].(type) {
 		case int64:
-			write = v != 0
+			// Restrict to {0, 1}: arbitrary truthy integers (e.g. -1
+			// from a typo) silently meant "write" before. Forcing the
+			// caller to pick 0/1 surfaces typos.
+			switch v {
+			case 0:
+				write = false
+			case 1:
+				write = true
+			default:
+				return 0, fmt.Errorf("openblob: write must be 0 or 1, got %d", v)
+			}
 		case bool:
 			write = v
 		default:
