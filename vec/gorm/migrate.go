@@ -2,6 +2,8 @@ package vecgorm
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -95,7 +97,14 @@ func ensureSidecar(ctx context.Context, db *gorm.DB, _ any, _ modelMeta, m meta)
 	// vec0-internal _info table that sqlite-vec exposes; if a future
 	// version drops that, this falls back to a no-op warning path.
 	if err := checkDimMismatch(db, m); err != nil {
-		db.Logger.Warn(db.Statement.Context, "%v", err)
+		// db.Statement may be nil when Migrate is called outside any
+		// statement context (e.g. plain DB.Use()); fall back to a
+		// fresh ctx so the logger still fires.
+		ctx := context.Background()
+		if db.Statement != nil {
+			ctx = db.Statement.Context
+		}
+		db.Logger.Warn(ctx, "%v", err)
 	}
 	return nil
 }
@@ -116,7 +125,15 @@ func checkDimMismatch(db *gorm.DB, m meta) error {
 		quoteIdent(shadow),
 	)).Row()
 	if err := row.Scan(&key, &val); err != nil {
-		return nil // shadow table moved or never existed; nothing to compare against.
+		// Only swallow "no row" — that's the documented "shadow table
+		// moved or never existed; nothing to compare against" path.
+		// Real failures (driver error, schema mismatch on the shadow
+		// table) need to surface so the operator sees them instead of
+		// silently losing the dim-mismatch warning.
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("vecgorm: probe %s for dim-mismatch: %w", shadow, err)
 	}
 	// CREATE_VTAB contains the original CREATE statement; we look for
 	// "float[N]" with N matching our dim.

@@ -195,8 +195,15 @@ func (d *Driver) Open(name string) (conn driver.Conn, err error) {
 			}
 		}
 	}
-	if d.ConnectHook != nil {
-		if err := d.ConnectHook(c); err != nil {
+	// Snapshot ConnectHook under d.mu so RegisterAutoHook's concurrent
+	// write doesn't race with the read (the race detector flags the
+	// otherwise-atomic pointer load otherwise). Invoke outside the lock
+	// so a slow hook can't block other connection opens.
+	d.mu.Lock()
+	hook := d.ConnectHook
+	d.mu.Unlock()
+	if hook != nil {
+		if err := hook(c); err != nil {
 			c.Close()
 			return nil, fmt.Errorf("connect hook: %w", err)
 		}
@@ -229,12 +236,11 @@ func (d *Driver) RegisterConnectionHook(fn ConnectionHookFn) {
 //	}
 //
 // Concurrency: safe to call from init() (single goroutine) or after.
-// The write through [Driver.ConnectHook] races with Open's read of
-// the same field; function-pointer writes are atomic on every
-// Go-supported architecture, so a torn read is impossible — the
-// window is just whether a given Open sees the old or the new hook
-// chain. Pool-wide consistency requires installing all hooks before
-// the first sql.Open, which the blank-import pattern guarantees.
+// Both the write here and the read in [Driver.Open] are guarded by
+// d.mu, so concurrent registration and connection-opening compose
+// without races. Pool-wide consistency requires installing all hooks
+// before the first sql.Open, which the blank-import pattern
+// guarantees.
 func RegisterAutoHook(reg func(*Conn) error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()

@@ -267,6 +267,12 @@ func (c *cursor) Next() error {
 		c.eof = true
 		return nil
 	}
+	// Honor the enclosing statement's cancellation between row-key
+	// advances; the pivot can otherwise iterate R*C cells without
+	// observing sqlite3_interrupt.
+	if c.table.conn.IsInterrupted() {
+		return fmt.Errorf("pivot: interrupted")
+	}
 	if err := c.scan.Next(c.row); err != nil {
 		if errors.Is(err, io.EOF) {
 			c.eof = true

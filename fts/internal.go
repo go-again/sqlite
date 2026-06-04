@@ -19,9 +19,9 @@ func QuoteIdent(name string) string { return sqlid.QuoteIdentBacktick(name) }
 // names. Thin re-export of [internal/sqlid.ValidIdent].
 func ValidIdent(s string) bool { return sqlid.ValidIdent(s) }
 
-// quote / validIdent are legacy private aliases — kept so the rest of
-// the fts package compiles unchanged. Sub-packages like fts/gorm use
-// the exported names directly.
+// Package-local short aliases for the exported helpers — kept because
+// every SQL-emitting helper in this package interpolates identifiers
+// inline, and using the short forms keeps the formatted SQL readable.
 func quote(name string) string { return QuoteIdent(name) }
 func validIdent(s string) bool { return ValidIdent(s) }
 

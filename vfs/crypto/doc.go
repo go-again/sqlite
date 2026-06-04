@@ -39,6 +39,11 @@
 //     flip ciphertext bytes; SQLite sees corruption (page checksum
 //     failure, header parse error). Pair with disk-level integrity
 //     (LUKS dm-integrity, ZFS checksums) if active tampering is in scope.
+//     Note that composing with `vfs/cksm` does NOT close this gap —
+//     cksm's Fletcher trailer detects bit-rot / cosmic-ray flips, not
+//     adversarial tampering, and is trivially forged by a write-
+//     capable attacker. `crypto + cksm` is still not authenticated
+//     encryption against a write-capable adversary.
 //   - Cross-file substitution between distinct file KINDS is detected:
 //     the tweak includes the file-kind tag (main DB / journal / WAL /
 //     temp / sub-journal), so a ciphertext block from one file kind

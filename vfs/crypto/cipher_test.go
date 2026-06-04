@@ -132,3 +132,19 @@ func TestCipher_FileKindDomainSeparation(t *testing.T) {
 		})
 	}
 }
+
+func TestCipher_String(t *testing.T) {
+	for _, tc := range []struct {
+		in   Cipher
+		want string
+	}{
+		{Adiantum, "Adiantum"},
+		{AESXTS, "AES-XTS"},
+		{Cipher(99), "Cipher(99)"},
+		{Cipher(-1), "Cipher(-1)"},
+	} {
+		if got := tc.in.String(); got != tc.want {
+			t.Errorf("Cipher(%d).String() = %q, want %q", int(tc.in), got, tc.want)
+		}
+	}
+}

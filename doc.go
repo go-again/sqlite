@@ -103,7 +103,8 @@
 //   - (*Conn).RegisterCommitHook / RegisterRollbackHook
 //   - (*Conn).RegisterPreUpdateHook
 //   - (*Conn).SetTrace
-//   - (*Conn).Backup / SerializeNoCopy / Deserialize
+//   - (*Conn).Backup / SerializeSchema / Deserialize
+//   - top-level Serialize(ctx, *sql.DB) → []byte
 //
 // Hooks are per-connection. To install one on a known *Conn, pin the
 // pool to one with db.SetMaxOpenConns(1), grab a *sql.Conn, and use

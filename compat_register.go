@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"reflect"
+	"sync"
 
 	"modernc.org/libc"
 	sqlite3 "modernc.org/sqlite/lib"
@@ -186,8 +187,21 @@ func reflectScalar(impl any) (func(*FunctionContext, []driver.Value) (driver.Val
 		return nil, 0, fmt.Errorf("impl second return must be error, got %v", t.Out(1))
 	}
 
+	// Pool per-UDF-registration. The closure runs per row of every
+	// query using this UDF, and the reflect.Value slice it allocates
+	// dominates the per-row cost for trivial UDFs. Pool keyed by the
+	// fixed `nin` lets us reuse the buffer across calls; variadic
+	// UDFs grow past nin and discard rather than shrink-and-put.
+	argsPool := sync.Pool{
+		New: func() any {
+			s := make([]reflect.Value, nin)
+			return &s
+		},
+	}
+
 	scalar := func(ctx *FunctionContext, args []driver.Value) (driver.Value, error) {
 		var callArgs []reflect.Value
+		var pooled *[]reflect.Value
 		if variadic {
 			fixed := nin - 1
 			if len(args) < fixed {
@@ -213,16 +227,21 @@ func reflectScalar(impl any) (func(*FunctionContext, []driver.Value) (driver.Val
 			if len(args) != nin {
 				return nil, fmt.Errorf("expected %d args, got %d", nin, len(args))
 			}
-			callArgs = make([]reflect.Value, nin)
+			pooled = argsPool.Get().(*[]reflect.Value)
+			callArgs = (*pooled)[:nin]
 			for i := range nin {
 				rv, err := converters[i](args[i])
 				if err != nil {
+					argsPool.Put(pooled)
 					return nil, fmt.Errorf("arg %d: %w", i, err)
 				}
 				callArgs[i] = rv
 			}
 		}
 		out := v.Call(callArgs)
+		if pooled != nil {
+			argsPool.Put(pooled)
+		}
 		if nout == 2 && !out[1].IsNil() {
 			return nil, out[1].Interface().(error)
 		}

@@ -2,6 +2,8 @@ package sqlite_test
 
 import (
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	sqlite "github.com/go-again/sqlite"
@@ -68,5 +70,40 @@ func TestRegisterAutoHook_StopOnPriorError(t *testing.T) {
 	}
 	if fired {
 		t.Error("later hook ran after earlier one returned error")
+	}
+}
+
+// TestRegisterAutoHook_ConcurrentRegistration pins the invariant that
+// concurrent calls to RegisterAutoHook all land in the final chain —
+// none of them are lost to a torn read of d.ConnectHook. The chain
+// order is not deterministic under concurrency, but every registered
+// hook MUST fire exactly once when the resulting ConnectHook is
+// invoked. Run with -race to also catch the read/write race between
+// RegisterAutoHook (writer) and Driver.Open (reader).
+func TestRegisterAutoHook_ConcurrentRegistration(t *testing.T) {
+	d := sqlite.DefaultDriver()
+	saved := d.ConnectHook
+	t.Cleanup(func() { d.ConnectHook = saved })
+	d.ConnectHook = nil
+
+	const goroutines = 32
+	var fires atomic.Int64
+
+	var wg sync.WaitGroup
+	for range goroutines {
+		wg.Go(func() {
+			sqlite.RegisterAutoHook(func(c *sqlite.Conn) error {
+				fires.Add(1)
+				return nil
+			})
+		})
+	}
+	wg.Wait()
+
+	if err := d.ConnectHook(nil); err != nil {
+		t.Fatalf("ConnectHook: %v", err)
+	}
+	if got := fires.Load(); got != int64(goroutines) {
+		t.Errorf("fires = %d, want %d (some hooks were lost to a torn write)", got, goroutines)
 	}
 }

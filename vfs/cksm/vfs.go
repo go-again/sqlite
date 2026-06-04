@@ -2,7 +2,6 @@ package cksm
 
 import (
 	"bytes"
-	"sync"
 	"sync/atomic"
 	"unsafe"
 
@@ -68,32 +67,12 @@ func (fs *FS) perFileStateOf(pFile uintptr) *perFileState {
 // fileMap maps every pFile this package's xOpen handled to its
 // owning *FS. Trampolines look up by pFile pointer so chained
 // inner/outer VFSes (e.g. crypto-on-cksm) don't collide — each
-// package's file map is independent.
-var fileMap struct {
-	mu sync.RWMutex
-	m  map[uintptr]*FS
-}
+// package's PtrMap is independent.
+var fileMap = cabi.NewPtrMap[FS]()
 
-func init() { fileMap.m = make(map[uintptr]*FS) }
-
-func registerFile(pFile uintptr, fs *FS) {
-	fileMap.mu.Lock()
-	fileMap.m[pFile] = fs
-	fileMap.mu.Unlock()
-}
-
-func unregisterFile(pFile uintptr) {
-	fileMap.mu.Lock()
-	delete(fileMap.m, pFile)
-	fileMap.mu.Unlock()
-}
-
-func fsForFile(pFile uintptr) *FS {
-	fileMap.mu.RLock()
-	fs := fileMap.m[pFile]
-	fileMap.mu.RUnlock()
-	return fs
-}
+func registerFile(pFile uintptr, fs *FS) { fileMap.Set(pFile, fs) }
+func unregisterFile(pFile uintptr)       { fileMap.Delete(pFile) }
+func fsForFile(pFile uintptr) *FS        { return fileMap.Get(pFile) }
 
 // xOpenTrampoline forwards to the wrapped VFS, captures its methods,
 // and installs our own.

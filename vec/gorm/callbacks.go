@@ -216,6 +216,17 @@ func embeddingFrom(row reflect.Value, index []int) ([]float32, bool) {
 	if v.Kind() != reflect.Slice || v.Type().Elem().Kind() != reflect.Float32 {
 		return nil, false
 	}
+	// Fast path: the common case is a field declared as exactly
+	// `[]float32` (or `Embedding` which is a `type Embedding []float32`
+	// — also kind=Slice with elem Kind=Float32 and Interface convertible).
+	// Skip the per-element reflect.Value walk.
+	if emb, ok := v.Interface().([]float32); ok {
+		// Defensive copy: caller may stash this past the source row's
+		// lifetime, and gorm reuses row buffers between iterations.
+		out := make([]float32, len(emb))
+		copy(out, emb)
+		return out, true
+	}
 	out := make([]float32, v.Len())
 	for i := 0; i < v.Len(); i++ {
 		out[i] = float32(v.Index(i).Float())

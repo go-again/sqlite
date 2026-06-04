@@ -27,6 +27,23 @@ type stmtCache struct {
 	cap int                        // 0 means disabled
 	m   map[string]*stmtCacheEntry // SQL → entry
 	ord *list.List                 // *stmtCacheEntry, front = most-recently used
+
+	// Counters exposed via (*Conn).StmtCacheStats. Operators tuning
+	// _stmt_cache_size need a hit-rate signal to decide whether to
+	// grow / shrink the cap; without these the cache is opaque.
+	hits      int64
+	misses    int64
+	evictions int64
+}
+
+// StmtCacheStats is a snapshot of the per-connection prepared-statement
+// cache counters at the moment of the call. Returned by
+// [(*Conn).StmtCacheStats]; the fields are monotonic since connection
+// open.
+type StmtCacheStats struct {
+	Hits      int64 // cached pstmt reused
+	Misses    int64 // SQL not cached, fresh prepare
+	Evictions int64 // LRU eviction to make room
 }
 
 // newStmtCache returns a cache with the given capacity. cap <= 0 yields a
@@ -61,8 +78,10 @@ func (s *stmtCache) take(sql string) *stmtCacheEntry {
 	key := normalize(sql)
 	entry, ok := s.m[key]
 	if !ok {
+		s.misses++
 		return nil
 	}
+	s.hits++
 	delete(s.m, key)
 	s.ord.Remove(entry.elem)
 	entry.elem = nil
@@ -96,6 +115,7 @@ func (s *stmtCache) put(sql string, psql, pstmt uintptr) (evicted *stmtCacheEntr
 		oldest := back.Value.(*stmtCacheEntry)
 		s.ord.Remove(back)
 		delete(s.m, oldest.key)
+		s.evictions++
 		evicted = oldest
 	}
 	entry := &stmtCacheEntry{key: key, psql: psql, pstmt: pstmt}
@@ -126,4 +146,21 @@ func (s *stmtCache) len() int {
 		return 0
 	}
 	return s.ord.Len()
+}
+
+// StmtCacheStats returns a snapshot of the per-connection prepared-
+// statement cache counters: hits, misses, evictions. All three are
+// monotonic since connection open. Useful for operators tuning the
+// `_stmt_cache_size` DSN parameter — a low hit rate is the signal to
+// grow the cap; a high eviction rate means the working set exceeds
+// the current cap.
+func (c *conn) StmtCacheStats() StmtCacheStats {
+	if c.stmts == nil || !c.stmts.enabled() {
+		return StmtCacheStats{}
+	}
+	return StmtCacheStats{
+		Hits:      c.stmts.hits,
+		Misses:    c.stmts.misses,
+		Evictions: c.stmts.evictions,
+	}
 }

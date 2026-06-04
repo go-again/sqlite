@@ -53,6 +53,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 
 	sqlite "github.com/go-again/sqlite"
 	"github.com/go-again/sqlite/internal/sqlid"
@@ -309,7 +310,16 @@ func (c *cursor) Filter(idxNumInt int, idxStr string, args []driver.Value) error
 	}
 	row := make([]driver.Value, 2)
 	c.results = c.results[:0]
+	scanned := 0
 	for {
+		// Poll the conn's interrupt flag every 256 candidates so a
+		// large vocabulary scan honors the enclosing QueryContext's
+		// cancellation. The vtab Filter API doesn't pass ctx in.
+		if scanned&0xff == 0 && c.table.conn.IsInterrupted() {
+			_ = rs.Close()
+			return fmt.Errorf("spellfix1: interrupted")
+		}
+		scanned++
 		if err := rs.Next(row); err != nil {
 			if errors.Is(err, io.EOF) {
 				break
@@ -427,6 +437,32 @@ func soundex(s string) string {
 	return string(out)
 }
 
+// dlScratchPool pools the three working slices damerauLevenshtein
+// needs so a vocabulary-wide spelling pass doesn't allocate three
+// fresh []int per scored candidate. Each scored candidate borrows
+// the same three buffers; concurrent goroutines get their own
+// scratch via Pool.
+var dlScratchPool = sync.Pool{
+	New: func() any { return &dlScratch{} },
+}
+
+type dlScratch struct{ prev2, prev1, curr []int }
+
+func (s *dlScratch) reset(n int) {
+	if cap(s.prev2) < n {
+		s.prev2 = make([]int, n)
+		s.prev1 = make([]int, n)
+		s.curr = make([]int, n)
+		return
+	}
+	s.prev2 = s.prev2[:n]
+	s.prev1 = s.prev1[:n]
+	s.curr = s.curr[:n]
+	for i := range s.prev2 {
+		s.prev2[i] = 0
+	}
+}
+
 // damerauLevenshtein computes the edit distance between a and b
 // allowing single-character transpositions in addition to insert /
 // delete / substitute. Bounded to `cap+1` (early-exit when the running
@@ -442,9 +478,10 @@ func damerauLevenshtein(a, b string, cap int) int {
 	if cap < 0 {
 		cap = la + lb
 	}
-	prev2 := make([]int, lb+1)
-	prev1 := make([]int, lb+1)
-	curr := make([]int, lb+1)
+	s := dlScratchPool.Get().(*dlScratch)
+	defer dlScratchPool.Put(s)
+	s.reset(lb + 1)
+	prev2, prev1, curr := s.prev2, s.prev1, s.curr
 	for j := 0; j <= lb; j++ {
 		prev1[j] = j
 	}

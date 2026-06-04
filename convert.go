@@ -204,7 +204,7 @@ func convertAssign(dest, src any) error {
 		i64, err := strconv.ParseInt(s, 10, dv.Type().Bits())
 		if err != nil {
 			err = strconvErr(err)
-			return fmt.Errorf("converting driver.Value type %T (%q) to a %s: %v", src, s, dv.Kind(), err)
+			return fmt.Errorf("converting driver.Value type %T (%q) to a %s: %w", src, s, dv.Kind(), err)
 		}
 		dv.SetInt(i64)
 		return nil
@@ -213,7 +213,7 @@ func convertAssign(dest, src any) error {
 		u64, err := strconv.ParseUint(s, 10, dv.Type().Bits())
 		if err != nil {
 			err = strconvErr(err)
-			return fmt.Errorf("converting driver.Value type %T (%q) to a %s: %v", src, s, dv.Kind(), err)
+			return fmt.Errorf("converting driver.Value type %T (%q) to a %s: %w", src, s, dv.Kind(), err)
 		}
 		dv.SetUint(u64)
 		return nil
@@ -222,7 +222,7 @@ func convertAssign(dest, src any) error {
 		f64, err := strconv.ParseFloat(s, dv.Type().Bits())
 		if err != nil {
 			err = strconvErr(err)
-			return fmt.Errorf("converting driver.Value type %T (%q) to a %s: %v", src, s, dv.Kind(), err)
+			return fmt.Errorf("converting driver.Value type %T (%q) to a %s: %w", src, s, dv.Kind(), err)
 		}
 		dv.SetFloat(f64)
 		return nil

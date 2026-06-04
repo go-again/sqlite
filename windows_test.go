@@ -54,7 +54,7 @@ func (s *winRunningSum) Final(_ *FunctionContext) {}
 // frame here is the current row plus the prior one, so each output
 // row sees a two-element sum.
 func TestRegisterWindowFunction_SlidingFrame(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	if err := c.RegisterWindowFunction("rsum", 1,
 		func() WindowAccumulator { return &winRunningSum{} }, true); err != nil {
 		t.Fatal(err)
@@ -99,7 +99,7 @@ func TestRegisterWindowFunction_SlidingFrame(t *testing.T) {
 // an independent accumulator instance — the running sum for partition
 // "a" must not bleed into partition "b".
 func TestRegisterWindowFunction_PartitionBy(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	if err := c.RegisterWindowFunction("rsum", 1,
 		func() WindowAccumulator { return &winRunningSum{} }, true); err != nil {
 		t.Fatal(err)
@@ -162,7 +162,7 @@ func (erroringStep) Final(*FunctionContext)                         {}
 // from Step surfaces to the SQL caller rather than being silently
 // dropped.
 func TestRegisterWindowFunction_StepErrorPropagates(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	if err := c.RegisterWindowFunction("efail", 1,
 		func() WindowAccumulator { return erroringStep{} }, true); err != nil {
 		t.Fatal(err)
@@ -196,7 +196,7 @@ func TestRegisterWindowFunction_StepErrorPropagates(t *testing.T) {
 // TestRegisterWindowFunction_NilConstructorRejected ensures the
 // public API guards against the obvious misuse.
 func TestRegisterWindowFunction_NilConstructorRejected(t *testing.T) {
-	_, _, c := withMattnConn(t, ":memory:")
+	_, _, c := withSQLite3Conn(t, ":memory:")
 	err := c.RegisterWindowFunction("nope", 1, nil, true)
 	if err == nil {
 		t.Fatal("expected error on nil constructor, got nil")
@@ -229,7 +229,7 @@ func (s *noFinalSum) Value(_ *FunctionContext) (driver.Value, error) {
 // successfully — the adapter's Final no-ops when the impl doesn't
 // satisfy WindowFinalizer.
 func TestRegisterWindowFunction_FinalIsOptional(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	if err := c.RegisterWindowFunction("nfsum", 1,
 		func() WindowAccumulator { return &noFinalSum{} }, true); err != nil {
 		t.Fatalf("register: %v", err)
@@ -286,7 +286,7 @@ func (s *finalizingSum) Final(_ *FunctionContext) { *s.finalCalled = true }
 // adapter type-asserts and calls Final when the accumulator
 // implements WindowFinalizer.
 func TestRegisterWindowFunction_FinalCalledWhenImplemented(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	var called bool
 	if err := c.RegisterWindowFunction("fsum", 1,
 		func() WindowAccumulator { return &finalizingSum{finalCalled: &called} }, true); err != nil {

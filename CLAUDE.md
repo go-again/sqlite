@@ -67,6 +67,7 @@ github.com/go-again/sqlite/
 ├── LICENSE.modernc         # preserved upstream BSD-style (modernc.org/sqlite)
 ├── LICENSE.mattn           # preserved upstream MIT (mattn/go-sqlite3)
 ├── LICENSE.glebarez        # preserved upstream MIT (glebarez/sqlite)
+├── LICENSE.ncruces         # preserved upstream MIT (ncruces/go-sqlite3 — ext/* ports)
 ├── NOTICE                  # third-party attribution required by Apache 2.0 §4(d)
 ├── .golangci.yml           # lint config (read this before adding lints)
 ├── .github/workflows/ci.yml
@@ -94,7 +95,11 @@ github.com/go-again/sqlite/
 ├── dmesg.go / nodmesg.go   # debug logging gated by `sqlite.dmesg` build tag
 ├── dsn.go                  # mattn `_*` DSN-flag translator
 ├── constants.go            # SQLITE_* re-exports + ErrNo / ErrNoExtended types
-├── compat_mattn.go         # type aliases (SQLiteDriver = Driver, etc.)
+├── compat_sqlite3.go       # type aliases (SQLiteDriver = Driver, etc.) + public Stmt/Rows/Result/Tx
+├── doc.go                  # package doc (pkg.go.dev landing)
+├── module.go               # (*Conn).CreateModule / CreateModuleSplit (vtab module registration)
+├── pointer.go              # sqlite.Pointer for binding Go values into SQL params
+├── windows.go              # Windows-specific helpers (build-tagged)
 ├── compat_register.go      # reflective RegisterFunc / RegisterAggregator
 ├── compat_convert.go       # reflection-driven Go ↔ driver.Value conversion
 ├── stmt_cache.go           # per-conn prepared-stmt LRU
@@ -107,6 +112,7 @@ github.com/go-again/sqlite/
 │   ├── migrator.go         # full Migrator (HasTable, AlterColumn, …)
 │   ├── ddlmod.go           # DDL regex parser used by recreateTable
 │   ├── errors.go
+│   ├── open_config.go      # OpenConfig(sqlite.Config) → gorm.Dialector
 │   └── integration_*_test.go  # also covers vfs/vec/fts side-by-side composition
 │
 ├── vec/                    # sqlite-vec vector search
@@ -177,9 +183,19 @@ github.com/go-again/sqlite/
 │
 ├── internal/
 │   ├── cabi/               # shared Go↔C ABI helpers (only this module can import)
-│   │   └── funcptr.go      # FuncPointer[T]: producer side of the modernc-trampoline trick
-│   └── sqlid/              # SQLite arg-parsing helpers (NamedArg, Unquote)
-│       └── sqlid.go        # used by ext/closure (and any future named-arg vtab)
+│   │   ├── funcptr.go      # FuncPointer[T] / AsFunc[F]: modernc-trampoline producer + consumer
+│   │   ├── registry.go     # Registry[T]: token→*T map with internally-minted tokens (Set/Lookup/Unregister)
+│   │   ├── ptrmap.go       # PtrMap[T]: uintptr→*T map keyed by caller-supplied pointers (fileMap usage)
+│   │   ├── uniquename.go   # UniqueName(prefix): process-global counter for VFS/module name suffixes
+│   │   └── callx.go        # CallX* family: typed wrappers for every sqlite3_io_methods slot
+│   ├── sqlid/              # SQLite arg-parsing helpers
+│   │   └── sqlid.go        # NamedArg, Unquote, QuoteIdent, QuoteIdentBacktick, ValidIdent, ToNamedValues
+│   ├── raceskip/           # raceskip.Enabled bool const (build-tag gated)
+│   │   ├── raceskip.go     # package doc
+│   │   ├── raceenabled_off.go # //go:build !race
+│   │   └── raceenabled_on.go  # //go:build race
+│   └── testhelp/           # test fixture helpers — OpenPinned, RegisterOn, WithConnectHook, RawConn
+│       └── testhelp.go
 │
 ├── ext/                    # loadable Go extensions (opt-in per sub-package)
 │   ├── README.md           # index + registration shapes
@@ -274,20 +290,21 @@ we silence the warning via `-unsafeptr=false` (justfile/CI/`.golangci.yml`).
 **Do not** try to "fix" these casts. The pattern is the contract for
 talking to `modernc.org/sqlite/lib`.
 
-The producer-side dance — turning a Go function value into a uintptr
-SQLite can store in a function-pointer slot and later invoke — is
-consolidated at `internal/cabi/FuncPointer[T]` (`internal/cabi/funcptr.go`).
-`sqlite.go`'s `cFuncPointer` is a thin generic alias delegating there
-so existing call sites don't churn. Both root and `vfs/crypto/` consume
-the helper; touching one means touching the other. The Go runtime's
-function-value memory layout (see https://golang.org/s/go11func) is the
-unstated assumption — if a Go release ever changes it, the cabi
-helper is the single point of repair.
+Both sides of the Go↔C function-pointer dance live in `internal/cabi`:
+`cabi.FuncPointer[T]` (producer) and `cabi.AsFunc[F]` (consumer). The
+trampoline-call wrappers (`cabi.CallX*` in `callx.go`) layer typed
+io-methods slot dispatch on top of `AsFunc`. Every wrap-forward VFS
+sub-package (`vfs/crypto`, `vfs/cksm`) and the root package consume
+these helpers — touching one means touching the other.
 
-The consumer side (calling a stored uintptr back from Go) is duplicated
-at `vfs/crypto/iomethods.go::asFunc[F]` and `vfs/cksm/iomethods.go::asFunc[F]`.
-Two consumers makes it borderline; if a third appears, promote it to
-`internal/cabi`.
+Related helpers in the same package:
+`cabi.Registry[T]` mints fresh tokens for `Tsqlite3_vfs.FpAppData`-style
+slots; `cabi.PtrMap[T]` stores caller-allocated pointers (the per-VFS
+`fileMap` use); `cabi.UniqueName(prefix)` hands out collision-free
+suffixes for VFS / module names. The Go runtime's function-value
+memory layout (https://golang.org/s/go11func) is the unstated
+assumption — if a Go release ever changes it, `internal/cabi` is the
+single point of repair.
 
 **The same coupling extends to `vfs/crypto/` and `vfs/cksm/`.** Both
 sub-packages reach into the same lib-level exported struct types
@@ -544,13 +561,16 @@ let `go mod tidy` resolve the transitive set.
 | How does `RegisterFunc` work? | `compat_register.go::RegisterFunc` and `compat_convert.go` |
 | Where are trampolines from C callbacks to Go? | `hooks.go`, `pre_update_hook.go`, `vtab.go` |
 | Producer side of the Go→C function-pointer dance? | `internal/cabi/funcptr.go::FuncPointer` (root + vfs/crypto + vfs/cksm delegate here) |
-| Consumer side (calling a stored uintptr back from Go)? | `vfs/crypto/iomethods.go::asFunc[F]` and `vfs/cksm/iomethods.go::asFunc[F]` (duplicated; promote to cabi at the third consumer) |
+| Consumer side (calling a stored uintptr back from Go)? | `internal/cabi/funcptr.go::AsFunc[F]` + the typed `cabi.CallX*` family in `internal/cabi/callx.go` |
+| Token→\*T registries with internally-minted keys? | `internal/cabi/registry.go::Registry[T]` (FS-instance maps in every vfs sub-package) |
+| Pointer→\*T maps keyed by caller-allocated addresses? | `internal/cabi/ptrmap.go::PtrMap[T]` (`fileMap` shape in `vfs/crypto` + `vfs/cksm`) |
+| Process-global unique VFS / module name suffixes? | `internal/cabi/uniquename.go::UniqueName(prefix)` |
 | Where does encryption-at-rest live? | `vfs/crypto/`, see also `vfs/crypto/doc.go` for the on-disk format + threat model |
 | Where does corruption detection live? | `vfs/cksm/`, see `vfs/cksm/doc.go` for the trailer format. `(*Conn).EnableChecksums(schema)` in `fcntl.go` is the one-call activation recipe. |
 | How does `(*Conn).OpenBlob` work? | `blob.go::OpenBlob` + `*Blob` (io.ReaderAt / WriterAt over `sqlite3_blob_*`) |
 | Where are stmt introspection helpers (ColumnCount/Name/DeclType, BindCount/BindName)? | `stmt.go::ColumnCount` (added for `ext/statement` + `ext/pivot` to discover output/bind shape from a prepared stmt) |
 | How do I set reserved_bytes from Go? | `fcntl.go::FileControlReserveBytes` (wraps `SQLITE_FCNTL_RESERVE_BYTES`) |
-| How does cksm/crypto chaining work? | `vfs/crypto/crypto.go::Options.WrapVFS` + per-package `fileMap` (in `vfs.go`) maps pFile → owning `*FS`; per-FS `ourIoMethods` + `wrappedSzOsFile`. Both layers store state at their own offset and forward via the captured wrapped methods. |
+| How does cksm/crypto chaining work? | `vfs/crypto/crypto.go::Options.WrapVFS` + per-package `fileMap` (a `cabi.PtrMap[FS]` in each `vfs.go`) maps pFile → owning `*FS`; per-FS `ourIoMethods` + `wrappedSzOsFile`. Both layers store state at their own offset and forward via the captured wrapped methods. Each layer owns its own PtrMap so chained inner/outer instances don't collide. |
 | Where's the vtab xCreate / xConnect split? | `module.go::CreateModuleSplit` (two-callback form). `ext/bloom` and `ext/spellfix1` use it to distinguish first-time shadow-table creation from subsequent reopens. |
 | Where's the shared NamedArg / Unquote parser? | `internal/sqlid/sqlid.go` (used by `ext/closure`, reusable by future named-arg vtabs) |
 | What's the prepared-statement cache? | `stmt_cache.go` + the `stmts` field on `conn` |
@@ -645,6 +665,9 @@ in living-document tables under `docs/`:
   (✓ landed / ⚠ partial / ✗ deferred / ✗ skipped), upstream reference,
   and the test pin. Includes the per-extension scaffolding checklist
   for adding new ones.
+- `docs/coverage-vfs.md` — every `vfs/` sub-package (crypto, cksm,
+  mvcc, memdb, vfs.NewReader) with the VFS contract it satisfies,
+  on-disk format pointers, and the test pin.
 - `docs/gorm-upstream.md` / `docs/modernc-upstream.md` /
   `docs/mattn-upstream.md` — reproduction recipes for the three
   CI-enforced upstream-suite lanes.

@@ -57,6 +57,24 @@ type Index[K, V SQLType] struct {
 	name    string
 	columns []string
 	ext     *External
+
+	// Pre-rendered SQL for the per-row Insert / Delete paths. Computed
+	// once from (name, columns) at New/Open time; saves repeating the
+	// fmt.Sprintf + strings.Repeat dance on every call.
+	insertSQL string
+	deleteSQL string
+}
+
+// buildSQL pre-renders the per-row SQL strings for Insert/Delete.
+func (i *Index[K, V]) buildSQL() {
+	cols := append([]string{"rowid"}, i.columns...)
+	placeholders := strings.Repeat("?, ", len(cols))
+	placeholders = placeholders[:len(placeholders)-2]
+	i.insertSQL = fmt.Sprintf(
+		"INSERT OR REPLACE INTO %s (%s) VALUES (%s)",
+		quote(i.name), strings.Join(cols, ", "), placeholders,
+	)
+	i.deleteSQL = fmt.Sprintf("DELETE FROM %s WHERE rowid = ?", quote(i.name))
 }
 
 // ErrAlreadyExists wraps the error returned by New when the named FTS5
@@ -112,6 +130,20 @@ func New[K, V SQLType](ctx context.Context, db *sql.DB, name string, opts Option
 		}
 		cols[i] = c.Name
 	}
+	// External content-table / content-rowid get interpolated into the
+	// content='…' option as single-quoted strings; without identifier
+	// validation a name containing `'` would inject SQL into the
+	// CREATE VIRTUAL TABLE statement.
+	if opts.External != nil {
+		if !validIdent(opts.External.ContentTable) {
+			return nil, fmt.Errorf("fts.New: External.ContentTable %q is not a valid SQL identifier",
+				opts.External.ContentTable)
+		}
+		if opts.External.ContentRowid != "" && !validIdent(opts.External.ContentRowid) {
+			return nil, fmt.Errorf("fts.New: External.ContentRowid %q is not a valid SQL identifier",
+				opts.External.ContentRowid)
+		}
+	}
 	cfg := &createConfig{}
 	for _, opt := range createOpts {
 		opt(cfg)
@@ -160,7 +192,9 @@ func New[K, V SQLType](ctx context.Context, db *sql.DB, name string, opts Option
 		}
 	}
 
-	return &Index[K, V]{db: db, name: name, columns: cols, ext: opts.External}, nil
+	idx := &Index[K, V]{db: db, name: name, columns: cols, ext: opts.External}
+	idx.buildSQL()
+	return idx, nil
 }
 
 // isAlreadyExistsErr reports whether err carries SQLite's "table X
@@ -190,7 +224,9 @@ func Open[K, V SQLType](db *sql.DB, name string, cols ...string) (*Index[K, V], 
 			return nil, fmt.Errorf("fts.Open: column %q is not a valid SQL identifier", c)
 		}
 	}
-	return &Index[K, V]{db: db, name: name, columns: cols}, nil
+	idx := &Index[K, V]{db: db, name: name, columns: cols}
+	idx.buildSQL()
+	return idx, nil
 }
 
 // Name returns the underlying table name.
@@ -213,26 +249,19 @@ func (i *Index[K, V]) Insert(ctx context.Context, items ...Attr[K, V]) error {
 	if len(items) == 0 {
 		return nil
 	}
-	cols := append([]string{"rowid"}, i.columns...)
-	placeholders := strings.Repeat("?, ", len(cols))
-	placeholders = placeholders[:len(placeholders)-2]
-	stmt := fmt.Sprintf(
-		"INSERT OR REPLACE INTO %s (%s) VALUES (%s)",
-		quote(i.name), strings.Join(cols, ", "), placeholders,
-	)
 
 	tx, err := i.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	prep, err := tx.PrepareContext(ctx, stmt)
+	prep, err := tx.PrepareContext(ctx, i.insertSQL)
 	if err != nil {
 		tx.Rollback()
 		return err
 	}
 	defer prep.Close()
 	for n, a := range items {
-		args := make([]any, 0, len(cols))
+		args := make([]any, 0, 1+len(i.columns))
 		args = append(args, a.Key)
 		// Primary column = Value; remaining columns drawn from Extras.
 		for k, col := range i.columns {
@@ -256,12 +285,11 @@ func (i *Index[K, V]) Delete(ctx context.Context, keys ...K) error {
 	if len(keys) == 0 {
 		return nil
 	}
-	stmt := fmt.Sprintf("DELETE FROM %s WHERE rowid = ?", quote(i.name))
 	tx, err := i.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	prep, err := tx.PrepareContext(ctx, stmt)
+	prep, err := tx.PrepareContext(ctx, i.deleteSQL)
 	if err != nil {
 		tx.Rollback()
 		return err
@@ -626,7 +654,11 @@ func (i *Index[K, V]) buildSearchSQL(q Query, cfg *searchConfig) (string, []any,
 		}
 		b.WriteString(c)
 	}
-	args := []any{}
+	// Cap hint covers the typical max: bm25 weights, 4 snippet args,
+	// 1 highlight col, 1 MATCH placeholder, and the user-supplied
+	// whereArgs. Slight over-allocation is cheaper than the regrowth
+	// dance of starting at capacity 0.
+	args := make([]any, 0, len(cfg.bm25Weights)+4+1+1+len(cfg.whereArgs))
 
 	if cfg.withRank {
 		if len(cfg.bm25Weights) == 0 {

@@ -267,6 +267,14 @@ func (c *cursor) Filter(idxNumInt int, _ string, args []driver.Value) error {
 	visited := map[int64]bool{root: true}
 
 	for i := 0; i < len(c.nodes); i++ {
+		// The vtab Filter API doesn't pass ctx in, so we honor the
+		// enclosing statement's cancellation by polling the conn's
+		// interrupt flag between BFS expansions. Without this poll
+		// the BFS can't observe sqlite3_interrupt until the next
+		// SQLite call inside the loop body.
+		if c.table.conn.IsInterrupted() {
+			return fmt.Errorf("transitive_closure: interrupted")
+		}
 		curr := c.nodes[i]
 		if curr.depth >= maxDepth {
 			continue

@@ -25,6 +25,28 @@ type Table struct {
 	dim       int
 	metric    Metric
 	encoding  Encoding
+
+	// Pre-rendered SQL strings for the per-row Insert / Update /
+	// Delete paths. They depend only on (name, embedding, encoding)
+	// which are immutable after Create / Open, so caching at
+	// construction avoids re-running fmt.Sprintf on every call.
+	insertSQL string
+	updateSQL string
+	deleteSQL string
+}
+
+// buildSQL prepares the cached SQL strings; called from Create and
+// Open after every Table field is populated.
+func (t *Table) buildSQL() {
+	t.insertSQL = fmt.Sprintf(
+		"INSERT INTO %s (rowid, %s) VALUES (?, %s)",
+		quote(t.name), quote(t.embedding), matchPlaceholder(t.encoding),
+	)
+	t.updateSQL = fmt.Sprintf(
+		"UPDATE %s SET %s = %s WHERE rowid = ?",
+		quote(t.name), quote(t.embedding), matchPlaceholder(t.encoding),
+	)
+	t.deleteSQL = fmt.Sprintf("DELETE FROM %s WHERE rowid = ?", quote(t.name))
 }
 
 // QuoteIdent returns name in backticks, escaping any embedded backticks.
@@ -45,8 +67,9 @@ func QuoteIdent(name string) string { return sqlid.QuoteIdentBacktick(name) }
 // column names. Thin re-export of [internal/sqlid.ValidIdent].
 func ValidIdent(s string) bool { return sqlid.ValidIdent(s) }
 
-// quote / validIdent are the legacy private aliases — kept so the rest
-// of the vec package compiles unchanged.
+// Package-local short aliases for the exported helpers — kept because
+// every SQL-emitting helper in this package interpolates identifiers
+// inline, and using the short forms keeps the formatted SQL readable.
 func quote(name string) string { return QuoteIdent(name) }
 func validIdent(s string) bool { return ValidIdent(s) }
 
@@ -123,14 +146,16 @@ func Create(ctx context.Context, db *sql.DB, name string, dim int, opts Options,
 		}
 		return nil, fmt.Errorf("vec.Create %q: %w", name, err)
 	}
-	return &Table{
+	t := &Table{
 		db:        db,
 		name:      name,
 		embedding: col,
 		dim:       dim,
 		metric:    opts.Metric,
 		encoding:  opts.Encoding,
-	}, nil
+	}
+	t.buildSQL()
+	return t, nil
 }
 
 // isAlreadyExistsErr reports whether err carries SQLite's "table X
@@ -156,14 +181,16 @@ func Open(db *sql.DB, name string, dim int, opts Options) (*Table, error) {
 	if name == "" {
 		return nil, errors.New("vec.Open: name is required")
 	}
-	return &Table{
+	t := &Table{
 		db:        db,
 		name:      name,
 		embedding: "embedding",
 		dim:       dim,
 		metric:    opts.Metric,
 		encoding:  opts.Encoding,
-	}, nil
+	}
+	t.buildSQL()
+	return t, nil
 }
 
 // Name returns the table name as known to SQLite.
@@ -188,11 +215,7 @@ func (t *Table) Insert(ctx context.Context, rowid int64, embedding []float32) er
 	if len(embedding) != t.dim {
 		return fmt.Errorf("vec.Insert: embedding length %d != dim %d", len(embedding), t.dim)
 	}
-	q := fmt.Sprintf(
-		"INSERT INTO %s (rowid, %s) VALUES (?, %s)",
-		quote(t.name), quote(t.embedding), matchPlaceholder(t.encoding),
-	)
-	_, err := t.db.ExecContext(ctx, q, rowid, encodeValue(embedding, t.encoding))
+	_, err := t.db.ExecContext(ctx, t.insertSQL, rowid, encodeValue(embedding, t.encoding))
 	return err
 }
 
@@ -210,11 +233,7 @@ func (t *Table) BatchInsert(ctx context.Context, items []Row) error {
 	if err != nil {
 		return err
 	}
-	q := fmt.Sprintf(
-		"INSERT INTO %s (rowid, %s) VALUES (?, %s)",
-		quote(t.name), quote(t.embedding), matchPlaceholder(t.encoding),
-	)
-	stmt, err := tx.PrepareContext(ctx, q)
+	stmt, err := tx.PrepareContext(ctx, t.insertSQL)
 	if err != nil {
 		tx.Rollback()
 		return err
@@ -244,18 +263,14 @@ func (t *Table) Update(ctx context.Context, rowid int64, embedding []float32) er
 	if len(embedding) != t.dim {
 		return fmt.Errorf("vec.Update: embedding length %d != dim %d", len(embedding), t.dim)
 	}
-	q := fmt.Sprintf(
-		"UPDATE %s SET %s = %s WHERE rowid = ?",
-		quote(t.name), quote(t.embedding), matchPlaceholder(t.encoding),
-	)
-	_, err := t.db.ExecContext(ctx, q, encodeValue(embedding, t.encoding), rowid)
+	_, err := t.db.ExecContext(ctx, t.updateSQL, encodeValue(embedding, t.encoding), rowid)
 	return err
 }
 
 // Delete removes the row with the given rowid. Returns nil if the row didn't
 // exist.
 func (t *Table) Delete(ctx context.Context, rowid int64) error {
-	_, err := t.db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE rowid = ?", quote(t.name)), rowid)
+	_, err := t.db.ExecContext(ctx, t.deleteSQL, rowid)
 	return err
 }
 
@@ -415,10 +430,12 @@ func (t *Table) buildKNNSQL(query []float32, k int, cfg *queryConfig) (string, [
 	if joining {
 		fmt.Fprintf(&b, " AND k = %d", k)
 	}
+	emitWhereArgs := false
 	if cfg.whereSQL != "" {
 		b.WriteString(" AND (")
 		b.WriteString(cfg.whereSQL)
 		b.WriteString(")")
+		emitWhereArgs = true
 	}
 	if cfg.orderByExpr != "" {
 		b.WriteString(" ORDER BY ")
@@ -432,8 +449,19 @@ func (t *Table) buildKNNSQL(query []float32, k int, cfg *queryConfig) (string, [
 	// the join expands cardinality.
 	fmt.Fprintf(&b, " LIMIT %d", k)
 
-	args := make([]any, 0, 1+len(cfg.whereArgs))
+	// Bind args mirror placeholders: 1 for MATCH, then the WHERE args
+	// only when the WHERE clause was actually emitted. WithFilter("", x, y)
+	// stripping the SQL but still binding x, y would smuggle extra
+	// positional binds into the prepared statement; gate on the boolean
+	// so the two move together.
+	argCap := 1
+	if emitWhereArgs {
+		argCap += len(cfg.whereArgs)
+	}
+	args := make([]any, 0, argCap)
 	args = append(args, encodeValue(query, t.encoding))
-	args = append(args, cfg.whereArgs...)
+	if emitWhereArgs {
+		args = append(args, cfg.whereArgs...)
+	}
 	return b.String(), args, nil
 }

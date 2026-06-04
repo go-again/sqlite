@@ -125,19 +125,21 @@ func BenchmarkBatchInsert_JSON(b *testing.B) {
 	for i := range corpus {
 		corpus[i].Rowid = int64(i + 1)
 	}
-	b.ResetTimer()
+	ctx := context.Background()
 	b.ReportAllocs()
-	for n := range b.N {
+	for n := 0; n < b.N; n++ {
 		// Fresh table per iteration (vec0 INSERT rejects duplicate
-		// rowids and we want N independent batches measured).
+		// rowids and we want N independent batches measured); the
+		// CREATE VIRTUAL TABLE cost is excluded from the timed window.
+		b.StopTimer()
 		db := openBenchDB(b)
-		ctx := context.Background()
 		tbl, err := vec.Create(ctx, db, fmt.Sprintf("bench_%d", n), benchDim, vec.Options{
 			Encoding: vec.JSON,
 		})
 		if err != nil {
 			b.Fatal(err)
 		}
+		b.StartTimer()
 		if err := tbl.BatchInsert(ctx, corpus); err != nil {
 			b.Fatal(err)
 		}
@@ -151,17 +153,18 @@ func BenchmarkBatchInsert_Binary(b *testing.B) {
 	for i := range corpus {
 		corpus[i].Rowid = int64(i + 1)
 	}
-	b.ResetTimer()
+	ctx := context.Background()
 	b.ReportAllocs()
-	for n := range b.N {
+	for n := 0; n < b.N; n++ {
+		b.StopTimer()
 		db := openBenchDB(b)
-		ctx := context.Background()
 		tbl, err := vec.Create(ctx, db, fmt.Sprintf("bench_%d", n), benchDim, vec.Options{
 			Encoding: vec.Binary,
 		})
 		if err != nil {
 			b.Fatal(err)
 		}
+		b.StartTimer()
 		if err := tbl.BatchInsert(ctx, corpus); err != nil {
 			b.Fatal(err)
 		}

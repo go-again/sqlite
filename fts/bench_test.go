@@ -102,20 +102,24 @@ func BenchmarkSearch_WithRanking(b *testing.B) {
 }
 
 // BenchmarkInsert measures inserting a 1000-doc batch in one Insert
-// call (which uses a single transaction internally).
+// call (which uses a single transaction internally). Each iteration
+// uses a fresh table; setup is excluded from the timed window via
+// StopTimer / StartTimer so the measurement is the insert cost, not
+// the CREATE VIRTUAL TABLE cost.
 func BenchmarkInsert(b *testing.B) {
 	docs := benchDocs(1000)
-	b.ResetTimer()
+	ctx := context.Background()
 	b.ReportAllocs()
-	for n := range b.N {
+	for n := 0; n < b.N; n++ {
+		b.StopTimer()
 		db := openBenchDB(b)
-		ctx := context.Background()
 		idx, err := fts.New[int64, string](ctx, db, fmt.Sprintf("bench_%d", n), fts.Options{
 			Tokenizer: fts.Porter{Base: fts.Unicode61{}},
 		})
 		if err != nil {
 			b.Fatal(err)
 		}
+		b.StartTimer()
 		if err := idx.Insert(ctx, docs...); err != nil {
 			b.Fatal(err)
 		}

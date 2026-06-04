@@ -139,8 +139,13 @@ func (n nearQ) Build() string {
 }
 
 // Column scopes a sub-query to a specific column of the FTS5 table.
-// Equivalent to FTS5's `{column}: query` syntax.
+// Equivalent to FTS5's `{column}: query` syntax. Panics if name fails
+// [ValidIdent] — column names with FTS5 metacharacters would otherwise
+// be interpreted as part of the match query.
 func Column(name string, q Query) Query {
+	if !validIdent(name) {
+		panic("fts.Column: " + name + " is not a valid SQL identifier")
+	}
 	return columnQ{col: name, q: q}
 }
 

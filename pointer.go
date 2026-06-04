@@ -66,7 +66,7 @@ type pointerArg struct {
 // SQLite drops the binding. Tokens never collide because next is
 // monotonic.
 var pointerRegistry = struct {
-	mu   sync.Mutex
+	mu   sync.RWMutex
 	m    map[uintptr]any
 	next atomic.Uintptr
 }{m: make(map[uintptr]any)}
@@ -82,9 +82,9 @@ func storePointer(v any) uintptr {
 }
 
 func loadPointer(token uintptr) (any, bool) {
-	pointerRegistry.mu.Lock()
+	pointerRegistry.mu.RLock()
 	v, ok := pointerRegistry.m[token]
-	pointerRegistry.mu.Unlock()
+	pointerRegistry.mu.RUnlock()
 	return v, ok
 }
 

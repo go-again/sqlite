@@ -73,6 +73,21 @@ func makeReadblob(c *sqlite.Conn) func(string, string, string, int64, int64, int
 			return nil, fmt.Errorf("readblob: %w", err)
 		}
 		defer func() { _ = b.Close() }()
+		// Reject overlarge reads BEFORE allocating: an arbitrary SQL
+		// caller passing `SELECT readblob(..., 0, 1e12)` would
+		// otherwise allocate 1 TiB before io.ReadFull's bounds check
+		// fires. Clamp to the BLOB's tail length.
+		if offset < 0 {
+			return nil, fmt.Errorf("readblob: negative offset %d", offset)
+		}
+		blobSize := b.Size()
+		if offset > blobSize {
+			return nil, fmt.Errorf("readblob: offset %d past blob size %d", offset, blobSize)
+		}
+		if n > blobSize-offset {
+			return nil, fmt.Errorf("readblob: requested %d bytes but only %d available from offset %d",
+				n, blobSize-offset, offset)
+		}
 		buf := make([]byte, n)
 		if _, err := io.ReadFull(io.NewSectionReader(b, offset, n), buf); err != nil {
 			return nil, fmt.Errorf("readblob: %w", err)

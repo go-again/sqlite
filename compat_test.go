@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// withMattnConn opens an in-memory DB through the mattn-style driver name and
+// withSQLite3Conn opens an in-memory DB through the mattn-style driver name and
 // returns a *sql.Conn pinned to the same goroutine plus a *Conn the test can
 // call low-level mattn methods on.
 //
@@ -20,7 +20,7 @@ import (
 //
 // For convenience, *sql.DB is also returned; tests that don't install
 // per-connection hooks can use it freely.
-func withMattnConn(t *testing.T, dsn string) (*sql.DB, *sql.Conn, *Conn) {
+func withSQLite3Conn(t *testing.T, dsn string) (*sql.DB, *sql.Conn, *Conn) {
 	t.Helper()
 	db, err := sql.Open(DriverNameSQLite3, dsn)
 	if err != nil {
@@ -55,7 +55,7 @@ func withMattnConn(t *testing.T, dsn string) (*sql.DB, *sql.Conn, *Conn) {
 // across the common argument and return types. UDFs registered via *Conn live
 // on that connection only, so the test queries via sc.QueryRowContext.
 func TestRegisterFunc_Scalar(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	ctx := context.Background()
 
 	if err := c.RegisterFunc("addi", func(a, b int64) int64 { return a + b }, true); err != nil {
@@ -92,7 +92,7 @@ func TestRegisterFunc_Scalar(t *testing.T) {
 // TestRegisterFunc_Variadic verifies that variadic Go functions work as SQLite
 // user functions accepting any number of args.
 func TestRegisterFunc_Variadic(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	ctx := context.Background()
 	if err := c.RegisterFunc("sumAll", func(xs ...int64) int64 {
 		var s int64
@@ -125,7 +125,7 @@ func TestRegisterFunc_Variadic(t *testing.T) {
 // TestRegisterFunc_Errored confirms returning an error from a UDF surfaces as
 // a query error, not a panic.
 func TestRegisterFunc_Errored(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	ctx := context.Background()
 	if err := c.RegisterFunc("boom", func() (int64, error) {
 		return 0, errors.New("kaboom")
@@ -147,7 +147,7 @@ func (r *runningSum) Step(v int64) { r.total += v }
 func (r *runningSum) Done() int64  { return r.total }
 
 func TestRegisterAggregator(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	ctx := context.Background()
 	if err := c.RegisterAggregator("rsum", func() *runningSum { return &runningSum{} }, true); err != nil {
 		t.Fatal(err)
@@ -176,7 +176,7 @@ func TestRegisterAggregator(t *testing.T) {
 // callers to use the lower-level RegisterFunction(name, &FunctionImpl{...})
 // path with an AggregateFunction that implements WindowInverse.
 func TestRegisterAggregator_WindowRecomputes(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	ctx := context.Background()
 	if err := c.RegisterAggregator("rsum2", func() *runningSum { return &runningSum{} }, true); err != nil {
 		t.Fatal(err)
@@ -223,7 +223,7 @@ func TestRegisterAggregator_WindowRecomputes(t *testing.T) {
 }
 
 func TestRegisterCollation_ReverseOrder(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	ctx := context.Background()
 	if err := c.RegisterCollation("rev", func(a, b string) int {
 		switch {
@@ -267,7 +267,7 @@ func TestRegisterCollation_ReverseOrder(t *testing.T) {
 //
 // Update hooks are per-connection, so exec runs on the pinned *sql.Conn.
 func TestUpdateHook_FiresOnInsertUpdateDelete(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 
 	type event struct {
 		op    int
@@ -308,7 +308,7 @@ DELETE FROM t WHERE id = 1;`); err != nil {
 // TestAuthorizer_DenyReadColumn shows that returning SQLITE_DENY surfaces as a
 // statement-prep error citing the denied resource.
 func TestAuthorizer_DenyReadColumn(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	ctx := context.Background()
 
 	if _, err := sc.ExecContext(ctx, `CREATE TABLE t (id INTEGER, secret TEXT)`); err != nil {
@@ -342,7 +342,7 @@ func TestAuthorizer_DenyReadColumn(t *testing.T) {
 // TestAuthorizer_IgnoreColumnReturnsNull verifies SQLITE_IGNORE returns NULL
 // in place of the would-be-read column value.
 func TestAuthorizer_IgnoreColumnReturnsNull(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	ctx := context.Background()
 
 	if _, err := sc.ExecContext(ctx, `CREATE TABLE t (id INTEGER, secret TEXT); INSERT INTO t VALUES (1, 'shh')`); err != nil {
@@ -372,7 +372,7 @@ func TestAuthorizer_IgnoreColumnReturnsNull(t *testing.T) {
 // sc.ExecContext on the *sql.Conn that the hooks were installed on, not via
 // db.Exec which goes through the pool.
 func TestCommitRollbackHook_Fire(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 
 	var commits, rollbacks int32
 	c.RegisterCommitHook(func() int32 { atomic.AddInt32(&commits, 1); return 0 })
@@ -408,7 +408,7 @@ func TestCommitRollbackHook_Fire(t *testing.T) {
 // Trace handlers are per-connection; the test exercises them on the pinned
 // *sql.Conn the trace handler was installed on.
 func TestSetTrace_StmtEventReceived(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 
 	var got []string
 	if err := c.SetTrace(&TraceConfig{
@@ -435,7 +435,7 @@ func TestSetTrace_StmtEventReceived(t *testing.T) {
 // statement finishes (so timing is captured), unlike TraceStmt which fires
 // at start.
 func TestSetTrace_ProfileEventReceived(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 
 	type profile struct {
 		stmt string
@@ -541,7 +541,7 @@ func TestGetLimit_RoundTrip(t *testing.T) {
 	}
 	for _, lim := range limits {
 		t.Run(lim.name, func(t *testing.T) {
-			_, _, c := withMattnConn(t, ":memory:")
+			_, _, c := withSQLite3Conn(t, ":memory:")
 			orig := c.GetLimit(lim.id)
 			if orig < 0 {
 				t.Fatalf("GetLimit(%s) returned %d, want >= 0", lim.name, orig)
@@ -611,9 +611,9 @@ func TestCoexistence_CustomNameAlongsideMattn(t *testing.T) {
 	}
 }
 
-// TestMattnDriverLiteral exercises the mattn idiom of registering a custom
+// TestSQLite3DriverLiteral exercises the mattn idiom of registering a custom
 // driver name via &sqlite3.SQLiteDriver{ConnectHook: ...}.
-func TestMattnDriverLiteral(t *testing.T) {
+func TestSQLite3DriverLiteral(t *testing.T) {
 	const custom = "go-again-custom-1"
 	var hookFired atomic.Int32
 	sql.Register(custom, &SQLiteDriver{

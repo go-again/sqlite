@@ -1,12 +1,25 @@
-// Package cabi holds tiny helpers for bridging Go function values to
-// the modernc-transpiled C ABI used by modernc.org/sqlite/lib. The
-// shape is unstable in Go terms (relies on the Go runtime's function-
-// value memory layout described at https://golang.org/s/go11func) but
-// stable in practice — the root package and vfs/crypto both rely on
-// it for VFS / hook / UDF callback registration.
+// Package cabi consolidates the small helpers our packages need for
+// talking to the modernc-transpiled SQLite C ABI. Everything here is
+// internal to the module — the helpers reach into Go-runtime ABI
+// details that downstream consumers must never depend on.
 //
-// Internal package by design: consumers should not depend on this
-// shape, since it leaks Go-runtime ABI choices.
+// What lives here:
+//
+//   - [FuncPointer] / [AsFunc] — the unsafe.Pointer dance that turns a
+//     Go function value into a uintptr the transpiled C can store in a
+//     function-pointer slot, and the inverse for calling one back.
+//     Relies on the Go runtime's function-value memory layout
+//     (https://golang.org/s/go11func) — stable in practice, unstable
+//     in theory.
+//   - [Registry][T] — a generic token→*T map with an atomic counter,
+//     used by every VFS sub-package to thread FS instances through a
+//     uintptr that SQLite stores in `FpAppData` or a per-file tail
+//     allocation.
+//   - [UniqueName] — process-global counter for handing out unique
+//     VFS / module names at registration time.
+//   - The CallX* family in callx.go — dispatchers for each
+//     [sqlite3.Tsqlite3_io_methods] slot, used by VFS sub-packages
+//     that wrap-and-forward to an existing VFS.
 package cabi
 
 import "unsafe"

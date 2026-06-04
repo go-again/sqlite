@@ -329,6 +329,14 @@ func (s *stmt) Query(args []driver.Value) (driver.Rows, error) { //TODO StmtQuer
 	return s.query(context.Background(), toNamedValues(args))
 }
 
+// query backs Stmt.Query / Stmt.QueryContext. The ctx-watcher lifecycle
+// note: interruptOnDone spawns a goroutine that fires sqlite3_interrupt
+// when ctx is canceled; its cleanup runs when query() returns. Once
+// *rows is handed to database/sql, the watcher is gone, and SQL
+// interrupt is no longer fired from our side — database/sql owns the
+// row-iteration ctx and closes the rows on cancel. Vtab Filter loops
+// that need mid-iteration cancellability must poll
+// (*Conn).IsInterrupted between SQLite calls.
 func (s *stmt) query(ctx context.Context, args []driver.NamedValue) (r driver.Rows, err error) {
 	var pstmt uintptr
 	var done int32

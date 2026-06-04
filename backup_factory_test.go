@@ -14,7 +14,7 @@ func TestBackup_LiveDBToFile(t *testing.T) {
 	ctx := context.Background()
 
 	// Populate a source in-memory database.
-	srcDB, srcSC, srcConn := withMattnConn(t, ":memory:")
+	srcDB, srcSC, srcConn := withSQLite3Conn(t, ":memory:")
 	if _, err := srcSC.ExecContext(ctx, `CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT);
 INSERT INTO t (id, name) VALUES (1, 'alpha'), (2, 'beta'), (3, 'gamma');`); err != nil {
 		t.Fatal(err)
@@ -105,7 +105,7 @@ INSERT INTO t (id, name) VALUES (1, 'alpha'), (2, 'beta'), (3, 'gamma');`); err 
 // TestBackup_NilSourceConn ensures Backup rejects a nil source rather than
 // segfaulting.
 func TestBackup_NilSourceConn(t *testing.T) {
-	_, _, c := withMattnConn(t, ":memory:")
+	_, _, c := withSQLite3Conn(t, ":memory:")
 	_, err := c.Backup("main", nil, "main")
 	if err == nil {
 		t.Fatal("expected error from nil src conn")
@@ -186,7 +186,7 @@ func TestLoadExtension_Disabled(t *testing.T) {
 	if loadExtensionUnsupported {
 		t.Skip("modernc.org/libc dlopen/LoadLibraryW shim unimplemented on this OS")
 	}
-	_, _, c := withMattnConn(t, ":memory:")
+	_, _, c := withSQLite3Conn(t, ":memory:")
 	err := c.LoadExtension("/nonexistent/path/foo", "")
 	if err == nil {
 		t.Fatal("expected error loading a disabled/missing extension")
@@ -213,7 +213,7 @@ func TestLoadExtension_EnabledBadPath(t *testing.T) {
 	if raceEnabled {
 		t.Skip("modernc.org/sqlite's _sqlite3LoadExtension trips Go's checkptr under -race")
 	}
-	_, _, c := withMattnConn(t, ":memory:")
+	_, _, c := withSQLite3Conn(t, ":memory:")
 	if err := c.EnableLoadExtension(true); err != nil {
 		t.Fatal(err)
 	}

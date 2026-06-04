@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/go-again/sqlite/fts"
@@ -184,9 +185,9 @@ func Search[T any](ctx context.Context, db *gorm.DB, q fts.Query, opts ...Option
 	// snippet/highlight follow as optional columns.
 	selects := []string{"rowid"}
 	if len(o.weights) > 0 {
-		var w []string
-		for _, x := range o.weights {
-			w = append(w, fmt.Sprintf("%v", x))
+		w := make([]string, len(o.weights))
+		for i, x := range o.weights {
+			w[i] = strconv.FormatFloat(x, 'g', -1, 64)
 		}
 		selects = append(selects, fmt.Sprintf("bm25(%s, %s) AS rank_", quoteIdent(mm.Table), strings.Join(w, ", ")))
 	} else {
@@ -229,18 +230,24 @@ func Search[T any](ctx context.Context, db *gorm.DB, q fts.Query, opts ...Option
 		args = append(args, o.extraArgs...)
 	}
 
-	query := fmt.Sprintf(
-		"SELECT %s FROM %s WHERE %s ORDER BY rank_",
-		strings.Join(selects, ", "),
-		quoteIdent(mm.Table),
-		strings.Join(wheres, " AND "),
-	)
+	var qb strings.Builder
+	qb.Grow(64 + len(o.extraWhere))
+	qb.WriteString("SELECT ")
+	qb.WriteString(strings.Join(selects, ", "))
+	qb.WriteString(" FROM ")
+	qb.WriteString(quoteIdent(mm.Table))
+	qb.WriteString(" WHERE ")
+	qb.WriteString(strings.Join(wheres, " AND "))
+	qb.WriteString(" ORDER BY rank_")
 	if o.limit > 0 {
-		query += fmt.Sprintf(" LIMIT %d", o.limit)
+		qb.WriteString(" LIMIT ")
+		qb.WriteString(strconv.Itoa(o.limit))
 	}
 	if o.offset > 0 {
-		query += fmt.Sprintf(" OFFSET %d", o.offset)
+		qb.WriteString(" OFFSET ")
+		qb.WriteString(strconv.Itoa(o.offset))
 	}
+	query := qb.String()
 
 	rows, err := pool.QueryContext(ctx, query, args...)
 	if err != nil {

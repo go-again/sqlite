@@ -182,6 +182,13 @@ func (t *table) create() error {
 	if _, err := t.conn.ExecContext(ctx, fmt.Sprintf(
 		`INSERT INTO %s (rowid, data, p, n, m, k) VALUES (1, zeroblob(%d), %f, %d, %d, %d)`,
 		t.qualified(), t.bytes, t.prob, t.nElem, 8*t.bytes, t.hashes), nil); err != nil {
+		// Seed failed after CREATE TABLE already committed; drop the
+		// half-initialised shadow table so the schema doesn't leak. If
+		// the drop itself fails the seed error is still primary.
+		if _, dropErr := t.conn.ExecContext(ctx,
+			`DROP TABLE `+t.qualified(), nil); dropErr != nil {
+			return fmt.Errorf("bloom: seed storage: %w (and drop after failure: %v)", err, dropErr)
+		}
 		return fmt.Errorf("bloom: seed storage: %w", err)
 	}
 	return nil

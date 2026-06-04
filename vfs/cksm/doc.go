@@ -62,5 +62,13 @@
 //     and is dwarfed by I/O cost.
 //   - Main DB pages only. Journal and WAL pages do not get the trailer
 //     because SQLite already tracks per-frame integrity for those
-//     formats.
+//     formats. Sub-page reads of main DB pages also bypass verification
+//     (gate at iomethods.go's xRead is `amt == pageSize`); SQLite
+//     normally issues full-page reads, but any sub-page probe slips
+//     through unverified by design.
+//   - Not authenticated. Fletcher rolling sums detect bit-flips
+//     and torn writes; they are not adversarial MACs. An attacker
+//     who can write the file bytes can forge a matching trailer.
+//     Composing with `vfs/crypto` does NOT close this gap — crypto
+//     adds confidentiality only, not authentication.
 package cksm

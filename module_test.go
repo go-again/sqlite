@@ -63,7 +63,7 @@ func numbersCtor(c *Conn, _, _, _ string, args []string) (VTab, error) {
 }
 
 func TestCreateModule_ReadOnlyScan(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	if err := c.CreateModule("numbers", numbersCtor); err != nil {
 		t.Fatalf("CreateModule: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestCreateModule_ReadOnlyScan(t *testing.T) {
 }
 
 func TestCreateModule_ReadOnlyRejectsWrite(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	if err := c.CreateModule("numbers", numbersCtor); err != nil {
 		t.Fatalf("CreateModule: %v", err)
 	}
@@ -203,7 +203,7 @@ func kvCtor(c *Conn, _, _, _ string, _ []string) (VTab, error) {
 }
 
 func TestCreateModule_UpdaterRoundTrip(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	if err := c.CreateModule("kv", kvCtor); err != nil {
 		t.Fatalf("CreateModule: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestCreateModule_UpdaterRoundTrip(t *testing.T) {
 }
 
 func TestCreateModule_Validation(t *testing.T) {
-	_, _, c := withMattnConn(t, ":memory:")
+	_, _, c := withSQLite3Conn(t, ":memory:")
 	if err := c.CreateModule("", numbersCtor); err == nil {
 		t.Error("CreateModule with empty name: expected error, got nil")
 	}
@@ -261,7 +261,7 @@ func TestCreateModule_Validation(t *testing.T) {
 }
 
 func TestCreateModule_CtorError(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	failCtor := func(*Conn, string, string, string, []string) (VTab, error) {
 		return nil, fmt.Errorf("constructor refused to build")
 	}
@@ -282,7 +282,7 @@ func TestDeclareVTab_OutsideCtorFails(t *testing.T) {
 	// sqlite3_declare_vtab returns SQLITE_MISUSE when not called from inside
 	// xCreate / xConnect. The exact wording varies by SQLite version; we only
 	// pin that it errors.
-	_, _, c := withMattnConn(t, ":memory:")
+	_, _, c := withSQLite3Conn(t, ":memory:")
 	if err := c.DeclareVTab(`CREATE TABLE x(value)`); err == nil {
 		t.Error("DeclareVTab outside ctor: expected error, got nil")
 	}

@@ -1,7 +1,6 @@
 package crypto
 
 import (
-	"sync"
 	"unsafe"
 
 	"modernc.org/libc"
@@ -92,35 +91,14 @@ func (fs *FS) perFileStateOf(pFile uintptr) *perFileState {
 // pMethods-reverse-mapping because the latter only identifies the
 // OUTERMOST VFS in a chain — an inner VFS called via the outer's
 // callXFoo sees the outer's pMethods, not its own. Map keyed by pFile
-// pointer is layering-agnostic.
-var fileMap struct {
-	mu sync.RWMutex
-	m  map[uintptr]*FS
-}
+// pointer is layering-agnostic. Each crypto.New() call maintains its
+// own pFile entries; chained inner / outer FSes from other packages
+// have their own PtrMaps and don't collide.
+var fileMap = cabi.NewPtrMap[FS]()
 
-func init() { fileMap.m = make(map[uintptr]*FS) }
-
-func registerFile(pFile uintptr, fs *FS) {
-	fileMap.mu.Lock()
-	fileMap.m[pFile] = fs
-	fileMap.mu.Unlock()
-}
-
-func unregisterFile(pFile uintptr) {
-	fileMap.mu.Lock()
-	delete(fileMap.m, pFile)
-	fileMap.mu.Unlock()
-}
-
-// fsForFile recovers the owning *FS for pFile. Each crypto.New() call
-// maintains its own pFile entries; chained inner / outer FSes from
-// other packages have their own maps and don't collide.
-func fsForFile(pFile uintptr) *FS {
-	fileMap.mu.RLock()
-	fs := fileMap.m[pFile]
-	fileMap.mu.RUnlock()
-	return fs
-}
+func registerFile(pFile uintptr, fs *FS) { fileMap.Set(pFile, fs) }
+func unregisterFile(pFile uintptr)       { fileMap.Delete(pFile) }
+func fsForFile(pFile uintptr) *FS        { return fileMap.Get(pFile) }
 
 // xOpenTrampoline is SQLite's entry point for any file open via our
 // registered VFS. Forward to the wrapped VFS, capture its installed

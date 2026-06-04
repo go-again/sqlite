@@ -71,7 +71,7 @@ func (nc *nestedPrepareCursor) Close() error          { return nil }
 // (closure / pivot / statement) compile child SQL inside xCreate / xFilter
 // and would silently break if this stopped working after a modernc bump.
 func TestVTab_NestedPrepareFromFilter(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	if err := c.CreateModule("np", func(cc *Conn, _, _, _ string, _ []string) (VTab, error) {
 		if err := cc.DeclareVTab(`CREATE TABLE x(v INTEGER)`); err != nil {
 			return nil, err

@@ -69,6 +69,28 @@ func syncInsert(db *gorm.DB, mm *modelMeta, rows []reflect.Value) error {
 		return err
 	}
 	ctx := helperContext(db)
+	// SQL shape depends only on mm — invariant across rows. Build once
+	// outside the loop so a 1000-row Create isn't rebuilding the same
+	// INSERT statement 1000 times.
+	placeholders := strings.Repeat("?,", len(mm.Fields))
+	placeholders = strings.TrimSuffix(placeholders, ",")
+	colNames := make([]string, len(mm.Fields))
+	for i, f := range mm.Fields {
+		colNames[i] = quoteIdent(f.Column)
+	}
+	colList := strings.Join(colNames, ", ")
+	var stmt string
+	if mm.SoftDelete {
+		stmt = fmt.Sprintf(
+			"INSERT INTO %s(rowid, %s, deleted) VALUES (?, %s, 0)",
+			quoteIdent(mm.Table), colList, placeholders,
+		)
+	} else {
+		stmt = fmt.Sprintf(
+			"INSERT INTO %s(rowid, %s) VALUES (?, %s)",
+			quoteIdent(mm.Table), colList, placeholders,
+		)
+	}
 	for _, row := range rows {
 		rowid, ok := pkAsInt64(mm.PKField, row)
 		if !ok {
@@ -77,26 +99,6 @@ func syncInsert(db *gorm.DB, mm *modelMeta, rows []reflect.Value) error {
 		vals, err := columnValues(mm, row)
 		if err != nil {
 			return err
-		}
-		placeholders := strings.Repeat("?,", len(mm.Fields))
-		placeholders = strings.TrimSuffix(placeholders, ",")
-		colNames := make([]string, len(mm.Fields))
-		for i, f := range mm.Fields {
-			colNames[i] = quoteIdent(f.Column)
-		}
-		stmt := fmt.Sprintf(
-			"INSERT INTO %s(rowid, %s) VALUES (?, %s)",
-			quoteIdent(mm.Table),
-			strings.Join(colNames, ", "),
-			placeholders,
-		)
-		if mm.SoftDelete {
-			stmt = fmt.Sprintf(
-				"INSERT INTO %s(rowid, %s, deleted) VALUES (?, %s, 0)",
-				quoteIdent(mm.Table),
-				strings.Join(colNames, ", "),
-				placeholders,
-			)
 		}
 		args := append([]any{rowid}, vals...)
 		if _, err := pool.ExecContext(ctx, stmt, args...); err != nil {

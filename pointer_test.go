@@ -11,7 +11,7 @@ import (
 // receives the original Go value when invoked with sqlite.Pointer(v) —
 // not a nil, not a primitive cast.
 func TestPointer_UDFReceivesWrappedValue(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 
 	var captured []any
 	if err := c.RegisterFunc("capture",
@@ -57,7 +57,7 @@ func TestPointer_UDFReceivesWrappedValue(t *testing.T) {
 // TestPointer_DestructorRunsOnFinalize confirms that closing the rows
 // (which finalizes the statement) drains the pointer registry.
 func TestPointer_DestructorRunsOnFinalize(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	if err := c.RegisterFunc("noop", func(any) int64 { return 0 }, false); err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestPointer_DestructorRunsOnFinalize(t *testing.T) {
 // reading it back yields nil — not a non-nil interface holding a typed
 // nil. UDF code can rely on `v == nil` checks.
 func TestPointer_NilUnwrappedAsNil(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	var seen any
 	if err := c.RegisterFunc("recv", func(v any) int64 { seen = v; return 1 }, false); err != nil {
 		t.Fatal(err)
@@ -133,7 +133,7 @@ func TestValuePointer_PrimitiveReturnsFalse(t *testing.T) {
 // sqlite3_reset does NOT clear bindings — a prepared statement reused
 // via Reset keeps its Pointer binding until rebound or finalized.
 func TestPointer_ResetPreservesBinding(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	var captured []any
 	if err := c.RegisterFunc("capture",
 		func(v any) int64 {
@@ -173,7 +173,7 @@ func TestPointer_ResetPreservesBinding(t *testing.T) {
 // parameter slot drops the old binding from the registry (destructor
 // fires).
 func TestPointer_RebindReleasesPriorEntry(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	if err := c.RegisterFunc("noop", func(any) int64 { return 0 }, false); err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestPointer_RebindReleasesPriorEntry(t *testing.T) {
 // panic occurs and the UDF receives SOMETHING distinguishable from a
 // non-nil slice.
 func TestPointer_TypedNilSlice(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	var captured any
 	if err := c.RegisterFunc("capture",
 		func(v any) int64 {
@@ -236,7 +236,7 @@ func TestPointer_TypedNilSlice(t *testing.T) {
 // store/load/release path across the bind / functionArgs / destructor
 // goroutine stacks.
 func TestPointer_HighVolume(t *testing.T) {
-	_, sc, c := withMattnConn(t, ":memory:")
+	_, sc, c := withSQLite3Conn(t, ":memory:")
 	if err := c.RegisterFunc("noop", func(any) int64 { return 0 }, false); err != nil {
 		t.Fatal(err)
 	}

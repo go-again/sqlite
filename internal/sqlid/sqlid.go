@@ -79,13 +79,16 @@ func ToNamedValues(args []driver.Value) []driver.NamedValue {
 
 // NamedArg splits a `key=value` argument into its two halves and trims
 // surrounding whitespace from each. If arg contains no '=', the whole
-// string is returned as key with value="" — callers can then decide
-// whether the arg is positional or malformed.
+// string is returned as the value with key="" — callers reading the
+// result as `if key == ""` then correctly detect "positional or
+// malformed arg" rather than seeing a bare token slip through as a
+// (key, "") pair with empty value.
 func NamedArg(arg string) (key, value string) {
-	key, value, _ = strings.Cut(arg, "=")
-	key = strings.TrimSpace(key)
-	value = strings.TrimSpace(value)
-	return key, value
+	k, v, ok := strings.Cut(arg, "=")
+	if !ok {
+		return "", strings.TrimSpace(k)
+	}
+	return strings.TrimSpace(k), strings.TrimSpace(v)
 }
 
 // Unquote strips one layer of SQLite-style quoting from val. The

@@ -696,6 +696,23 @@ func (c *conn) interrupt(pdb uintptr) (err error) {
 	return nil
 }
 
+// IsInterrupted reports whether [sqlite3_is_interrupted] returns true
+// for this connection — i.e. whether a prior call to [sqlite3_interrupt]
+// has set the interrupt flag but the running operation hasn't observed
+// it yet.
+//
+// Use case: virtual-table implementations that loop in Go between
+// SQLite calls (BFS walks, full-vocab scans, pivot expansions) won't
+// observe an interrupt fired against the parent statement until the
+// next SQLite call boundary. Polling IsInterrupted between loop
+// iterations lets such vtabs honor cancellation of the enclosing
+// QueryContext.
+//
+// Returns false if the connection is closed.
+func (c *conn) IsInterrupted() bool {
+	return c.db != 0 && sqlite3.Xsqlite3_is_interrupted(c.tls, c.db) != 0
+}
+
 // C documentation
 //
 //	int sqlite3_extended_result_codes(sqlite3*, int onoff);
