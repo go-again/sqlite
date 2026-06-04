@@ -72,7 +72,7 @@ func Open(cfg Config) (*DB, error) {
 
 	dsn := buildDSN(cfg, vfsName)
 
-	sqlDB, err := sql.Open("sqlite", dsn)
+	sqlDB, err := sql.Open(DriverName, dsn)
 	if err != nil {
 		if fs != nil {
 			_ = fs.Close()
@@ -262,7 +262,7 @@ func buildDSN(cfg Config, vfsName string) string {
 	b.WriteString(escapeDSNPath(cfg.Path))
 
 	q := url.Values{}
-	if cfg.Mode != "" && cfg.Path != ":memory:" {
+	if cfg.Mode != "" && cfg.Path != InMemory {
 		q.Set("mode", string(cfg.Mode))
 	}
 	if cfg.Cache != "" {
@@ -308,22 +308,22 @@ func escapeDSNPath(p string) string {
 func pragmaURLValues(p Pragmas) []string {
 	var out []string
 	if p.JournalMode != "" {
-		out = append(out, fmt.Sprintf("journal_mode(%s)", string(p.JournalMode)))
+		out = append(out, fmt.Sprintf("%s(%s)", PragmaJournalMode, string(p.JournalMode)))
 	}
 	if p.BusyTimeout > 0 {
-		out = append(out, fmt.Sprintf("busy_timeout(%d)", p.BusyTimeout.Milliseconds()))
+		out = append(out, fmt.Sprintf("%s(%d)", PragmaBusyTimeout, p.BusyTimeout.Milliseconds()))
 	}
 	if p.Synchronous != "" {
-		out = append(out, fmt.Sprintf("synchronous(%s)", string(p.Synchronous)))
+		out = append(out, fmt.Sprintf("%s(%s)", PragmaSynchronous, string(p.Synchronous)))
 	}
 	if p.ForeignKeys {
-		out = append(out, "foreign_keys(on)")
+		out = append(out, fmt.Sprintf("%s(on)", PragmaForeignKeys))
 	}
 	if p.CacheSize != 0 {
-		out = append(out, fmt.Sprintf("cache_size(%d)", p.CacheSize))
+		out = append(out, fmt.Sprintf("%s(%d)", PragmaCacheSize, p.CacheSize))
 	}
 	if p.TempStore != "" {
-		out = append(out, fmt.Sprintf("temp_store(%s)", string(p.TempStore)))
+		out = append(out, fmt.Sprintf("%s(%s)", PragmaTempStore, string(p.TempStore)))
 	}
 	if len(p.Extra) > 0 {
 		keys := make([]string, 0, len(p.Extra))
@@ -344,22 +344,22 @@ func pragmaURLValues(p Pragmas) []string {
 func pragmaStatements(p Pragmas) []string {
 	var out []string
 	if p.JournalMode != "" {
-		out = append(out, fmt.Sprintf("PRAGMA journal_mode = %s", string(p.JournalMode)))
+		out = append(out, fmt.Sprintf("PRAGMA %s = %s", PragmaJournalMode, string(p.JournalMode)))
 	}
 	if p.BusyTimeout > 0 {
-		out = append(out, fmt.Sprintf("PRAGMA busy_timeout = %d", p.BusyTimeout.Milliseconds()))
+		out = append(out, fmt.Sprintf("PRAGMA %s = %d", PragmaBusyTimeout, p.BusyTimeout.Milliseconds()))
 	}
 	if p.Synchronous != "" {
-		out = append(out, fmt.Sprintf("PRAGMA synchronous = %s", string(p.Synchronous)))
+		out = append(out, fmt.Sprintf("PRAGMA %s = %s", PragmaSynchronous, string(p.Synchronous)))
 	}
 	if p.ForeignKeys {
-		out = append(out, "PRAGMA foreign_keys = ON")
+		out = append(out, fmt.Sprintf("PRAGMA %s = ON", PragmaForeignKeys))
 	}
 	if p.CacheSize != 0 {
-		out = append(out, fmt.Sprintf("PRAGMA cache_size = %d", p.CacheSize))
+		out = append(out, fmt.Sprintf("PRAGMA %s = %d", PragmaCacheSize, p.CacheSize))
 	}
 	if p.TempStore != "" {
-		out = append(out, fmt.Sprintf("PRAGMA temp_store = %s", string(p.TempStore)))
+		out = append(out, fmt.Sprintf("PRAGMA %s = %s", PragmaTempStore, string(p.TempStore)))
 	}
 	if len(p.Extra) > 0 {
 		keys := make([]string, 0, len(p.Extra))
@@ -377,5 +377,5 @@ func pragmaStatements(p Pragmas) []string {
 // isMemoryPath returns true when the requested open targets an
 // in-memory database, in either of the two equivalent forms.
 func isMemoryPath(path string, mode AccessMode) bool {
-	return path == ":memory:" || mode == ModeMemory
+	return path == InMemory || mode == ModeMemory
 }

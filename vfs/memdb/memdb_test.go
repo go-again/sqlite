@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"testing"
 
-	_ "github.com/go-again/sqlite"
+	sqlite "github.com/go-again/sqlite"
 	"github.com/go-again/sqlite/vfs/memdb"
 )
 
@@ -16,7 +16,7 @@ func TestMemdb_RoundTrip(t *testing.T) {
 	}
 	defer fs.Close()
 
-	db, err := sql.Open("sqlite", "file:/x?vfs="+name)
+	db, err := sql.Open(sqlite.DriverName, "file:/x?vfs="+name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestMemdb_SharedDBSeenByMultipleHandles(t *testing.T) {
 	}
 	defer fs.Close()
 
-	writer, err := sql.Open("sqlite", "file:/shared?vfs="+name)
+	writer, err := sql.Open(sqlite.DriverName, "file:/shared?vfs="+name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestMemdb_SharedDBSeenByMultipleHandles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reader, err := sql.Open("sqlite", "file:/shared?vfs="+name)
+	reader, err := sql.Open(sqlite.DriverName, "file:/shared?vfs="+name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,9 +83,9 @@ func TestMemdb_PrivateDBIsolated(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer fs.Close()
-	w1, _ := sql.Open("sqlite", "file:scratch?vfs="+name)
+	w1, _ := sql.Open(sqlite.DriverName, "file:scratch?vfs="+name)
 	defer w1.Close()
-	w2, _ := sql.Open("sqlite", "file:scratch?vfs="+name)
+	w2, _ := sql.Open(sqlite.DriverName, "file:scratch?vfs="+name)
 	defer w2.Close()
 	w1.SetMaxOpenConns(1)
 	w2.SetMaxOpenConns(1)
@@ -112,9 +112,9 @@ func TestMemdb_WriteVisibleImmediately(t *testing.T) {
 	}
 	defer fs.Close()
 
-	a, _ := sql.Open("sqlite", "file:/race?vfs="+name)
+	a, _ := sql.Open(sqlite.DriverName, "file:/race?vfs="+name)
 	defer a.Close()
-	b, _ := sql.Open("sqlite", "file:/race?vfs="+name)
+	b, _ := sql.Open(sqlite.DriverName, "file:/race?vfs="+name)
 	defer b.Close()
 	a.SetMaxOpenConns(1)
 	b.SetMaxOpenConns(1)
@@ -161,7 +161,7 @@ func TestMemdb_QueryAfterFSCloseFailsCleanly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	db, err := sql.Open("sqlite", "file:/x?vfs="+name)
+	db, err := sql.Open(sqlite.DriverName, "file:/x?vfs="+name)
 	if err != nil {
 		t.Fatal(err)
 	}

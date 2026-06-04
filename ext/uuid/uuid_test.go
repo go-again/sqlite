@@ -18,7 +18,7 @@ var rfc4122re = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 
 func openDB(t *testing.T) (*sql.DB, *sql.Conn) {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
+	db, err := sql.Open(sqlite.DriverName, ":memory:")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

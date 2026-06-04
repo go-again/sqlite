@@ -20,7 +20,7 @@ import (
 // The two sub-benchmarks share fixture setup so the only delta is the
 // authorizer install.
 func BenchmarkAuthorizer_NoOp(b *testing.B) {
-	db, err := sql.Open(DriverNameMattn, ":memory:")
+	db, err := sql.Open(DriverNameSQLite3, ":memory:")
 	if err != nil {
 		b.Fatal(err)
 	}

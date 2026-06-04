@@ -16,7 +16,7 @@ import (
 // through) live for the process lifetime and a stale callback can fire
 // on a recycled uintptr handle.
 func TestAudit_HookHandlersDrainedOnClose(t *testing.T) {
-	db, err := sql.Open("sqlite", ":memory:")
+	db, err := sql.Open(sqlite.DriverName, ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestAudit_VecKNNSliceNegativeKDoesNotPanic(t *testing.T) {
 // Regression: Backup.Finish followed by Backup.Close (or vice versa)
 // must not double-finish the underlying sqlite3_backup handle.
 func TestAudit_BackupFinishIsIdempotent(t *testing.T) {
-	src, err := sql.Open("sqlite", "file::memory:?cache=shared&_pragma=journal_mode(WAL)")
+	src, err := sql.Open(sqlite.DriverName, "file::memory:?cache=shared&_pragma=journal_mode(WAL)")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestAudit_BackupFinishIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dst, err := sql.Open("sqlite", ":memory:")
+	dst, err := sql.Open(sqlite.DriverName, ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestAudit_FunctionReturnValueHonorsIntegerTimeFormat(t *testing.T) {
 		t.Fatalf("RegisterFunction: %v", err)
 	}
 
-	db, err := sql.Open("sqlite", ":memory:?_time_integer_format=unix_nano")
+	db, err := sql.Open(sqlite.DriverName, ":memory:?_time_integer_format=unix_nano")
 	if err != nil {
 		t.Fatal(err)
 	}

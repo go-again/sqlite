@@ -7,6 +7,47 @@ import (
 	"strings"
 )
 
+// Mattn-compat DSN flag names. Exposed so callers building DSN strings
+// or filtering query parameters can reference the canonical spelling
+// without re-hardcoding it. Aliases (e.g. `_fk` ↔ `_foreign_keys`)
+// share the underlying pragma; both names are valid in DSNs.
+const (
+	FlagPragma                 = "_pragma"
+	FlagForeignKeys            = "_foreign_keys"
+	FlagFK                     = "_fk"
+	FlagBusyTimeout            = "_busy_timeout"
+	FlagTimeout                = "_timeout"
+	FlagJournalMode            = "_journal_mode"
+	FlagJournal                = "_journal"
+	FlagSynchronous            = "_synchronous"
+	FlagSync                   = "_sync"
+	FlagLockingMode            = "_locking_mode"
+	FlagLocking                = "_locking"
+	FlagSecureDelete           = "_secure_delete"
+	FlagRecursiveTriggers      = "_recursive_triggers"
+	FlagRT                     = "_rt"
+	FlagCacheSize              = "_cache_size"
+	FlagAutoVacuum             = "_auto_vacuum"
+	FlagVacuum                 = "_vacuum"
+	FlagDeferForeignKeys       = "_defer_foreign_keys"
+	FlagDeferFK                = "_defer_fk"
+	FlagIgnoreCheckConstraints = "_ignore_check_constraints"
+	FlagCaseSensitiveLike      = "_case_sensitive_like"
+	FlagCSLike                 = "_cslike"
+	FlagQueryOnly              = "_query_only"
+	FlagWritableSchema         = "_writable_schema"
+	FlagMutex                  = "_mutex"
+	FlagLoc                    = "_loc"
+	FlagTimezone               = "_timezone"
+	FlagTimeFormat             = "_time_format"
+	FlagTimeIntegerFormat      = "_time_integer_format"
+	FlagIntToTime              = "_inttotime"
+	FlagTextToTime             = "_texttotime"
+	FlagTxLock                 = "_txlock"
+	FlagStmtCacheSize          = "_stmt_cache_size"
+	FlagStrict                 = "_strict"
+)
+
 // translateMattnDSN takes a DSN query string (everything after "?") and
 // returns a normalized form where mattn-style `_*` flags are translated to
 // equivalent modernc-style flags (mostly `_pragma=…` values) understood by

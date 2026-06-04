@@ -25,7 +25,7 @@ func TestWAL_ConcurrentReadersAndWriters(t *testing.T) {
 	// WAL needs an on-disk DB; the busy_timeout PRAGMA softens contention.
 	dsn := "file:" + dbPath + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(2000)"
 
-	db, err := sql.Open(DriverNameMattn, dsn)
+	db, err := sql.Open(DriverNameSQLite3, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}

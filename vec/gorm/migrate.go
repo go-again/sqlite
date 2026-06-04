@@ -21,8 +21,10 @@ import (
 //
 // Repeat calls are idempotent: existing sidecars are left alone, and
 // dim-mismatches between the tag and the existing sidecar are logged
-// to db.Logger (not silently corrected — see plan-gorm-integration.md
-// for the rationale).
+// to db.Logger rather than silently corrected: a dim change means the
+// stored vectors no longer match the model, and migrating that
+// silently would erase the operator's chance to spot the schema
+// drift before queries start failing.
 func Migrate(db *gorm.DB, models ...any) error {
 	p, err := pluginFrom(db)
 	if err != nil {

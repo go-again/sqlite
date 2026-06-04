@@ -12,7 +12,7 @@ import (
 // benchmarks.
 func benchSetup(b *testing.B) (*sql.DB, *sql.Conn) {
 	b.Helper()
-	db, err := sql.Open(DriverNameMattn, ":memory:")
+	db, err := sql.Open(DriverNameSQLite3, ":memory:")
 	if err != nil {
 		b.Fatal(err)
 	}

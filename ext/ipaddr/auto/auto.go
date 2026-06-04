@@ -11,14 +11,5 @@ import (
 )
 
 func init() {
-	d := sqlite.DefaultDriver()
-	prev := d.ConnectHook
-	d.ConnectHook = func(c *sqlite.Conn) error {
-		if prev != nil {
-			if err := prev(c); err != nil {
-				return err
-			}
-		}
-		return ipaddr.Register(c)
-	}
+	sqlite.RegisterAutoHook(ipaddr.Register)
 }

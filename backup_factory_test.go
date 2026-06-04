@@ -23,7 +23,7 @@ INSERT INTO t (id, name) VALUES (1, 'alpha'), (2, 'beta'), (3, 'gamma');`); err 
 
 	// Open a destination on-disk database.
 	dstPath := filepath.Join(t.TempDir(), "backup.db")
-	dstDB, err := sql.Open(DriverNameMattn, dstPath)
+	dstDB, err := sql.Open(DriverNameSQLite3, dstPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestBackup_NilSourceConn(t *testing.T) {
 func TestSerializeDeserialize_RoundTrip(t *testing.T) {
 	ctx := context.Background()
 
-	src, err := sql.Open(DriverNameMattn, ":memory:")
+	src, err := sql.Open(DriverNameSQLite3, ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ INSERT INTO m (k, v) VALUES (1, 'one'), (2, 'two');`); err != nil {
 		t.Fatal("Serialize returned empty bytes")
 	}
 
-	dst, err := sql.Open(DriverNameMattn, ":memory:")
+	dst, err := sql.Open(DriverNameSQLite3, ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}

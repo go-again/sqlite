@@ -8,7 +8,7 @@ import (
 // TestDriverNamesRegistered ensures both "sqlite" and "sqlite3" point at this
 // driver, so both modernc-style and mattn-style sql.Open calls work.
 func TestDriverNamesRegistered(t *testing.T) {
-	for _, name := range []string{DriverName, DriverNameMattn} {
+	for _, name := range []string{DriverName, DriverNameSQLite3} {
 		t.Run(name, func(t *testing.T) {
 			db, err := sql.Open(name, ":memory:")
 			if err != nil {
@@ -30,7 +30,7 @@ func TestDriverNamesRegistered(t *testing.T) {
 // TestBasicCRUD exercises the common path: CREATE, INSERT, SELECT, with a
 // parameterized query and result scanning.
 func TestBasicCRUD(t *testing.T) {
-	db, err := sql.Open(DriverNameMattn, ":memory:")
+	db, err := sql.Open(DriverNameSQLite3, ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}

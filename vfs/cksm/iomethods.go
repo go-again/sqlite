@@ -20,7 +20,7 @@ func defaultMethodsFor(pFile uintptr) *sqlite3.Tsqlite3_io_methods {
 func xCloseTrampoline(tls *libc.TLS, pFile uintptr) int32 {
 	methods := defaultMethodsFor(pFile)
 	unregisterFile(pFile)
-	return callXClose(tls, methods.FxClose, pFile)
+	return cabi.CallXClose(tls, methods.FxClose, pFile)
 }
 
 // xReadTrampoline reads into buf, then — if checksumming is enabled
@@ -29,7 +29,7 @@ func xCloseTrampoline(tls *libc.TLS, pFile uintptr) int32 {
 // also primes pst.enabled from the SQLite header's reserved_bytes
 // byte.
 func xReadTrampoline(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Tsqlite3_int64) int32 {
-	rc := callXRead(tls, defaultMethodsFor(pFile).FxRead, pFile, buf, amt, off)
+	rc := cabi.CallXRead(tls, defaultMethodsFor(pFile).FxRead, pFile, buf, amt, off)
 	fs := fsForFile(pFile)
 	if fs == nil {
 		return sqlite3.SQLITE_IOERR
@@ -82,43 +82,43 @@ func xWriteTrampoline(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.
 			copy(page[len(page)-8:], cksm[:])
 		}
 	}
-	return callXWrite(tls, defaultMethodsFor(pFile).FxWrite, pFile, buf, amt, off)
+	return cabi.CallXWrite(tls, defaultMethodsFor(pFile).FxWrite, pFile, buf, amt, off)
 }
 
 func xTruncateTrampoline(tls *libc.TLS, pFile uintptr, size sqlite3.Tsqlite3_int64) int32 {
-	return callXTruncate(tls, defaultMethodsFor(pFile).FxTruncate, pFile, size)
+	return cabi.CallXTruncate(tls, defaultMethodsFor(pFile).FxTruncate, pFile, size)
 }
 
 func xSyncTrampoline(tls *libc.TLS, pFile uintptr, flags int32) int32 {
-	return callXSync(tls, defaultMethodsFor(pFile).FxSync, pFile, flags)
+	return cabi.CallXSync(tls, defaultMethodsFor(pFile).FxSync, pFile, flags)
 }
 
 func xFileSizeTrampoline(tls *libc.TLS, pFile, pSize uintptr) int32 {
-	return callXFileSize(tls, defaultMethodsFor(pFile).FxFileSize, pFile, pSize)
+	return cabi.CallXFileSize(tls, defaultMethodsFor(pFile).FxFileSize, pFile, pSize)
 }
 
 func xLockTrampoline(tls *libc.TLS, pFile uintptr, level int32) int32 {
-	return callXLock(tls, defaultMethodsFor(pFile).FxLock, pFile, level)
+	return cabi.CallXLock(tls, defaultMethodsFor(pFile).FxLock, pFile, level)
 }
 
 func xUnlockTrampoline(tls *libc.TLS, pFile uintptr, level int32) int32 {
-	return callXLock(tls, defaultMethodsFor(pFile).FxUnlock, pFile, level)
+	return cabi.CallXLock(tls, defaultMethodsFor(pFile).FxUnlock, pFile, level)
 }
 
 func xCheckReservedLockTrampoline(tls *libc.TLS, pFile, pResOut uintptr) int32 {
-	return callXCheckReservedLock(tls, defaultMethodsFor(pFile).FxCheckReservedLock, pFile, pResOut)
+	return cabi.CallXCheckReservedLock(tls, defaultMethodsFor(pFile).FxCheckReservedLock, pFile, pResOut)
 }
 
 func xFileControlTrampoline(tls *libc.TLS, pFile uintptr, op int32, pArg uintptr) int32 {
-	return callXFileControl(tls, defaultMethodsFor(pFile).FxFileControl, pFile, op, pArg)
+	return cabi.CallXFileControl(tls, defaultMethodsFor(pFile).FxFileControl, pFile, op, pArg)
 }
 
 func xSectorSizeTrampoline(tls *libc.TLS, pFile uintptr) int32 {
-	return callXSectorSize(tls, defaultMethodsFor(pFile).FxSectorSize, pFile)
+	return cabi.CallXSectorSize(tls, defaultMethodsFor(pFile).FxSectorSize, pFile)
 }
 
 func xDeviceCharacteristicsTrampoline(tls *libc.TLS, pFile uintptr) int32 {
-	return callXSectorSize(tls, defaultMethodsFor(pFile).FxDeviceCharacteristics, pFile)
+	return cabi.CallXSectorSize(tls, defaultMethodsFor(pFile).FxDeviceCharacteristics, pFile)
 }
 
 func xShmMapTrampoline(tls *libc.TLS, pFile uintptr, iPage, pgsz, bExtend int32, pp uintptr) int32 {
@@ -141,45 +141,5 @@ func xShmUnmapTrampoline(tls *libc.TLS, pFile uintptr, deleteFlag int32) int32 {
 		defaultMethodsFor(pFile).FxShmUnmap)(tls, pFile, deleteFlag)
 }
 
-func callXClose(tls *libc.TLS, fp, pFile uintptr) int32 {
-	return cabi.AsFunc[func(*libc.TLS, uintptr) int32](fp)(tls, pFile)
-}
-
-func callXRead(tls *libc.TLS, fp, pFile, buf uintptr, amt int32, off sqlite3.Tsqlite3_int64) int32 {
-	return cabi.AsFunc[func(*libc.TLS, uintptr, uintptr, int32, sqlite3.Tsqlite3_int64) int32](fp)(tls, pFile, buf, amt, off)
-}
-
-func callXWrite(tls *libc.TLS, fp, pFile, buf uintptr, amt int32, off sqlite3.Tsqlite3_int64) int32 {
-	return cabi.AsFunc[func(*libc.TLS, uintptr, uintptr, int32, sqlite3.Tsqlite3_int64) int32](fp)(tls, pFile, buf, amt, off)
-}
-
-func callXTruncate(tls *libc.TLS, fp, pFile uintptr, size sqlite3.Tsqlite3_int64) int32 {
-	return cabi.AsFunc[func(*libc.TLS, uintptr, sqlite3.Tsqlite3_int64) int32](fp)(tls, pFile, size)
-}
-
-func callXSync(tls *libc.TLS, fp, pFile uintptr, flags int32) int32 {
-	return cabi.AsFunc[func(*libc.TLS, uintptr, int32) int32](fp)(tls, pFile, flags)
-}
-
-func callXFileSize(tls *libc.TLS, fp, pFile, pSize uintptr) int32 {
-	return cabi.AsFunc[func(*libc.TLS, uintptr, uintptr) int32](fp)(tls, pFile, pSize)
-}
-
-// callXCheckReservedLock shares the (tls, pFile, *int → int32)
-// signature with callXFileSize; named alias keeps the grep trail
-// honest at trampoline call sites.
-func callXCheckReservedLock(tls *libc.TLS, fp, pFile, pResOut uintptr) int32 {
-	return cabi.AsFunc[func(*libc.TLS, uintptr, uintptr) int32](fp)(tls, pFile, pResOut)
-}
-
-func callXLock(tls *libc.TLS, fp, pFile uintptr, level int32) int32 {
-	return cabi.AsFunc[func(*libc.TLS, uintptr, int32) int32](fp)(tls, pFile, level)
-}
-
-func callXFileControl(tls *libc.TLS, fp, pFile uintptr, op int32, pArg uintptr) int32 {
-	return cabi.AsFunc[func(*libc.TLS, uintptr, int32, uintptr) int32](fp)(tls, pFile, op, pArg)
-}
-
-func callXSectorSize(tls *libc.TLS, fp, pFile uintptr) int32 {
-	return cabi.AsFunc[func(*libc.TLS, uintptr) int32](fp)(tls, pFile)
-}
+// All consumer-side function-pointer casts go through cabi.CallX*; see
+// internal/cabi/callx.go.

@@ -10,6 +10,8 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
+
+	"github.com/go-again/sqlite/fts"
 )
 
 const pluginName = "ftsgorm"
@@ -40,8 +42,11 @@ type modelMeta struct {
 	// Table is the FTS5 table name.
 	Table string
 
-	// Tokenize, Prefix, Detail come from the merged tableMeta.
-	Tokenize, Prefix, Detail string
+	// Tokenize and Prefix come from the merged tableMeta.
+	Tokenize, Prefix string
+
+	// Detail picks FTS5's `detail=` option; empty defaults to DetailFull.
+	Detail fts.Detail
 
 	// Mode picks how the FTS5 table relates to the gorm source: external
 	// (default), in-table, or contentless. See the Mode constants for

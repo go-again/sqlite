@@ -8,7 +8,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	_ "github.com/go-again/sqlite"
+	sqlite "github.com/go-again/sqlite"
 	"github.com/go-again/sqlite/vfs"
 )
 
@@ -20,7 +20,7 @@ func TestVFS_OpenFromTestingFS(t *testing.T) {
 	// layout. Doing this once per test is cheap and avoids hard-coding the
 	// SQLite header in the test source.
 	tmp := filepath.Join(t.TempDir(), "seed.db")
-	src, err := sql.Open("sqlite3", tmp)
+	src, err := sql.Open(sqlite.DriverNameSQLite3, tmp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ INSERT INTO t (id, name) VALUES (1, 'alpha'), (2, 'beta');`); err != nil {
 
 	// Step 3: open the DB through the registered VFS and read back.
 	dsn := "file:seed.db?vfs=" + name + "&mode=ro"
-	db, err := sql.Open("sqlite3", dsn)
+	db, err := sql.Open(sqlite.DriverNameSQLite3, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ INSERT INTO t (id, name) VALUES (1, 'alpha'), (2, 'beta');`); err != nil {
 // wrapping the bytes in a synthetic fs.FS.
 func TestVFS_OpenFromReaderAt(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "seed.db")
-	src, err := sql.Open("sqlite3", tmp)
+	src, err := sql.Open(sqlite.DriverNameSQLite3, tmp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ INSERT INTO z (id, v) VALUES (1, 'reader'), (2, 'at');`); err != nil {
 	}
 
 	dsn := "file:db?vfs=" + name + "&mode=ro"
-	db, err := sql.Open("sqlite3", dsn)
+	db, err := sql.Open(sqlite.DriverNameSQLite3, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}

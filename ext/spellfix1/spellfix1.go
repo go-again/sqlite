@@ -55,27 +55,17 @@ import (
 	"strings"
 
 	sqlite "github.com/go-again/sqlite"
+	"github.com/go-again/sqlite/internal/sqlid"
 )
 
-// toNamedValues maps a positional []driver.Value to []driver.NamedValue
-// for the non-deprecated QueryContext / ExecContext path. Ordinals are
-// 1-based.
-func toNamedValues(args []driver.Value) []driver.NamedValue {
-	if len(args) == 0 {
-		return nil
-	}
-	out := make([]driver.NamedValue, len(args))
-	for i, v := range args {
-		out[i] = driver.NamedValue{Ordinal: i + 1, Value: v}
-	}
-	return out
-}
+// ModuleName is the name the vtab registers under: `spellfix1`.
+const ModuleName = "spellfix1"
 
 // Register installs the spellfix1 vtab on c. Vocabulary is persisted
 // via `(*Conn).OpenBlob` and a shadow table; survives `db.Close()` /
 // reconnect.
 func Register(c *sqlite.Conn) error {
-	return c.CreateModuleSplit("spellfix1", createCtor, connectCtor)
+	return c.CreateModuleSplit(ModuleName, createCtor, connectCtor)
 }
 
 const declSQL = `CREATE TABLE x(
@@ -243,7 +233,7 @@ func (t *table) Insert(cols []driver.Value, _ *int64) error {
 	ph := soundex(word)
 	_, err := t.conn.ExecContext(context.Background(), fmt.Sprintf(
 		`INSERT INTO %s (word, rank, phonetic) VALUES (?, ?, ?)`, t.qualified()),
-		toNamedValues([]driver.Value{word, rank, ph}))
+		sqlid.ToNamedValues([]driver.Value{word, rank, ph}))
 	if err != nil {
 		return fmt.Errorf("spellfix1: insert: %w", err)
 	}
@@ -313,7 +303,7 @@ func (c *cursor) Filter(idxNumInt int, idxStr string, args []driver.Value) error
 		return fmt.Errorf("spellfix1: scan prepare: %w", err)
 	}
 	defer func() { _ = stmt.Close() }()
-	rs, err := stmt.(*sqlite.Stmt).QueryContext(context.Background(), toNamedValues([]driver.Value{ph, ph}))
+	rs, err := stmt.(*sqlite.Stmt).QueryContext(context.Background(), sqlid.ToNamedValues([]driver.Value{ph, ph}))
 	if err != nil {
 		return fmt.Errorf("spellfix1: scan query: %w", err)
 	}
@@ -510,9 +500,7 @@ func score(r matchRow) int64 {
 
 // --- helpers ---
 
-func quote(s string) string {
-	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
-}
+func quote(s string) string { return sqlid.QuoteIdent(s) }
 
 func stringOf(v driver.Value) string {
 	switch x := v.(type) {

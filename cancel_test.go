@@ -18,7 +18,7 @@ import (
 // driver's sqlite3_interrupt plumbing wired in correctly, canceling after
 // 50ms returns an error within ~200ms.
 func TestContext_CancelInterruptsRecursiveCTE(t *testing.T) {
-	db, err := sql.Open(DriverNameMattn, ":memory:")
+	db, err := sql.Open(DriverNameSQLite3, ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ SELECT count(*) FROM c
 // deadline instead of explicit cancellation. Same expectations: error
 // within ~200ms, related to the deadline.
 func TestContext_DeadlineExceeded(t *testing.T) {
-	db, err := sql.Open(DriverNameMattn, ":memory:")
+	db, err := sql.Open(DriverNameSQLite3, ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}

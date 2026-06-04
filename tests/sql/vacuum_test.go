@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	_ "github.com/go-again/sqlite"
+	sqlite "github.com/go-again/sqlite"
 )
 
 func TestVacuum_Basic(t *testing.T) {
@@ -31,7 +31,7 @@ func TestVacuum_Into(t *testing.T) {
 	defer os.Remove(tmp)
 
 	// Open the new file and confirm rows were copied.
-	db2, err := sql.Open("sqlite", tmp)
+	db2, err := sql.Open(sqlite.DriverName, tmp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestVacuum_AutoVacuumFull(t *testing.T) {
 	// AutoVacuum FULL must be set before any table creation. Use a fresh
 	// file-backed DB so the setting persists across the test.
 	tmp := filepath.Join(t.TempDir(), "auto-vacuum.db")
-	db, err := sql.Open("sqlite", tmp)
+	db, err := sql.Open(sqlite.DriverName, tmp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestVacuum_AutoVacuumFull(t *testing.T) {
 
 func TestVacuum_IncrementalVacuum(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "incr-vacuum.db")
-	db, err := sql.Open("sqlite", tmp)
+	db, err := sql.Open(sqlite.DriverName, tmp)
 	if err != nil {
 		t.Fatal(err)
 	}

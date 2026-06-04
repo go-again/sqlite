@@ -69,6 +69,7 @@ import (
 	"strings"
 
 	sqlite "github.com/go-again/sqlite"
+	"github.com/go-again/sqlite/internal/sqlid"
 )
 
 // Stable 8-byte salts prepended to the FNV input to derive two
@@ -374,16 +375,10 @@ func parseArgs(t *table, args []string) error {
 	return nil
 }
 
-func quote(ident string) string {
-	return `"` + strings.ReplaceAll(ident, `"`, `""`) + `"`
-}
-
-func unquote(s string) string {
-	if len(s) >= 2 && (s[0] == '\'' || s[0] == '"') && s[len(s)-1] == s[0] {
-		return s[1 : len(s)-1]
-	}
-	return s
-}
+// quote / unquote forward to [internal/sqlid] so this extension shares
+// the canonical implementations with the rest of the ext/* fleet.
+func quote(ident string) string { return sqlid.QuoteIdent(ident) }
+func unquote(s string) string   { return sqlid.Unquote(s) }
 
 func optimalK(p float64) int {
 	k := math.Round(-math.Log2(p))

@@ -65,7 +65,7 @@ func TestTime_RoundTripMatrix(t *testing.T) {
 				add("_inttotime", "1")
 			}
 
-			db, err := sql.Open(DriverNameMattn, dsn)
+			db, err := sql.Open(DriverNameSQLite3, dsn)
 			if err != nil {
 				t.Fatalf("open: %v", err)
 			}
@@ -106,7 +106,7 @@ func TestTime_RoundTripMatrix(t *testing.T) {
 // won't be converted even with _inttotime=1.
 func TestTime_InttotimeReadsBackInts(t *testing.T) {
 	dsn := ":memory:?_inttotime=1"
-	db, err := sql.Open(DriverNameMattn, dsn)
+	db, err := sql.Open(DriverNameSQLite3, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}

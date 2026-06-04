@@ -41,34 +41,16 @@ type memDB struct {
 	refs  atomic.Int32
 }
 
-var newVfsID atomic.Uint64
 var stateMu sync.Mutex
 
-var (
-	fsRegistryMu sync.RWMutex
-	fsRegistry   = map[uintptr]*FS{}
-	nextToken    atomic.Uintptr
-)
+// fsRegistry maps the opaque token stored in pVfs->FpAppData back to
+// the owning *FS. Promoted into [cabi.Registry] so the four VFS
+// sub-packages share one copy of the lookup machinery.
+var fsRegistry = cabi.NewRegistry[FS]()
 
-func registerFS(fs *FS) uintptr {
-	tok := uintptr(nextToken.Add(1))
-	fsRegistryMu.Lock()
-	fsRegistry[tok] = fs
-	fsRegistryMu.Unlock()
-	return tok
-}
-
-func lookupFS(tok uintptr) *FS {
-	fsRegistryMu.RLock()
-	defer fsRegistryMu.RUnlock()
-	return fsRegistry[tok]
-}
-
-func unregisterFS(tok uintptr) {
-	fsRegistryMu.Lock()
-	delete(fsRegistry, tok)
-	fsRegistryMu.Unlock()
-}
+func registerFS(fs *FS) uintptr { return fsRegistry.Register(fs) }
+func lookupFS(tok uintptr) *FS  { return fsRegistry.Lookup(tok) }
+func unregisterFS(tok uintptr)  { fsRegistry.Unregister(tok) }
 
 // New registers an in-memory VFS and returns its name (slot into a
 // DSN as `?vfs=<name>`), a handle for cleanup, and any error.
@@ -85,7 +67,7 @@ func New(_ Options) (name string, fs *FS, err error) {
 	defVfs := (*sqlite3.Tsqlite3_vfs)(unsafe.Pointer(defPtr))
 	initOnce.Do(func() { initFromDefault(defVfs) })
 
-	name = fmt.Sprintf("memdb%x", newVfsID.Add(1))
+	name = cabi.UniqueName("memdb")
 	cname, e := libc.CString(name)
 	if e != nil {
 		tls.Close()

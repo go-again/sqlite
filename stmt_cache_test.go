@@ -131,7 +131,7 @@ func TestStmtCache_DrainAll(t *testing.T) {
 // We hook directly into a *Conn to count cache hits/misses without exposing
 // internal counters to the public API.
 func TestStmtCache_PrepareCacheHit(t *testing.T) {
-	db, err := sql.Open(DriverNameMattn, ":memory:")
+	db, err := sql.Open(DriverNameSQLite3, ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestStmtCache_PrepareCacheHit(t *testing.T) {
 // TestStmtCache_CapZeroDisablesViaDSN asserts that `_stmt_cache_size=0`
 // turns the cache off, and prepares are not retained between Close calls.
 func TestStmtCache_CapZeroDisablesViaDSN(t *testing.T) {
-	db, err := sql.Open(DriverNameMattn, ":memory:?_stmt_cache_size=0")
+	db, err := sql.Open(DriverNameSQLite3, ":memory:?_stmt_cache_size=0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +242,7 @@ func TestStmtCache_CapZeroDisablesViaDSN(t *testing.T) {
 // effect indirectly: a connection with retained prepares can be closed
 // without sqlite3_close returning SQLITE_BUSY.
 func TestStmtCache_FinalizesOnConnClose(t *testing.T) {
-	db, err := sql.Open(DriverNameMattn, ":memory:")
+	db, err := sql.Open(DriverNameSQLite3, ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ func TestStmtCache_FinalizesOnConnClose(t *testing.T) {
 // args UNbound — execution should use the new bindings (NULL) rather than
 // carry over the old ones.
 func TestStmtCache_ResetClearsBindingsBetweenUses(t *testing.T) {
-	db, err := sql.Open(DriverNameMattn, ":memory:")
+	db, err := sql.Open(DriverNameSQLite3, ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +329,7 @@ func TestStmtCache_ResetClearsBindingsBetweenUses(t *testing.T) {
 // is mostly a regression guard: an earlier draft of the cache could leave
 // `c.stmts` pointing at stale entries after Conn.Close.
 func TestStmtCache_DistinctErrorOnClosedConn(t *testing.T) {
-	db, err := sql.Open(DriverNameMattn, ":memory:")
+	db, err := sql.Open(DriverNameSQLite3, ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}

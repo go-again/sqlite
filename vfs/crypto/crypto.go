@@ -26,6 +26,19 @@ const (
 	AESXTS
 )
 
+// String renders a Cipher as a human label suitable for logs and
+// table-driven tests. The values match the canonical names used
+// throughout the package's docs.
+func (c Cipher) String() string {
+	switch c {
+	case Adiantum:
+		return "Adiantum"
+	case AESXTS:
+		return "AES-XTS"
+	}
+	return fmt.Sprintf("Cipher(%d)", int(c))
+}
+
 // Options configures [New].
 type Options struct {
 	// Key is the raw cipher key. Length depends on Cipher: 32 bytes
@@ -90,43 +103,19 @@ type FS struct {
 
 const defaultPageSize = 4096
 
-// newVfsID supplies the suffix for the registered VFS name. Multiple
-// [New] calls produce distinct VFSes; SQLite enforces unique names.
-var newVfsID atomic.Uint64
-
 // stateMu serializes [New] and [FS.Close] so libc TLS setup and the
 // global VFS registration table aren't raced.
 var stateMu sync.Mutex
 
 // fsRegistry maps the opaque token stored in pVfs->FpAppData (and
 // later copied into per-file state) back to the *FS that owns the
-// cipher. Goes through a registry rather than raw unsafe.Pointer so
-// the FS stays GC-reachable while C-side state holds a reference.
-var (
-	fsRegistryMu sync.RWMutex
-	fsRegistry   = map[uintptr]*FS{}
-	nextFSToken  atomic.Uint64
-)
+// cipher. Promoted into [cabi.Registry] so the four VFS sub-packages
+// share one copy of the lookup machinery.
+var fsRegistry = cabi.NewRegistry[FS]()
 
-func registerFS(fs *FS) uintptr {
-	tok := uintptr(nextFSToken.Add(1))
-	fsRegistryMu.Lock()
-	fsRegistry[tok] = fs
-	fsRegistryMu.Unlock()
-	return tok
-}
-
-func lookupFS(tok uintptr) *FS {
-	fsRegistryMu.RLock()
-	defer fsRegistryMu.RUnlock()
-	return fsRegistry[tok]
-}
-
-func unregisterFS(tok uintptr) {
-	fsRegistryMu.Lock()
-	delete(fsRegistry, tok)
-	fsRegistryMu.Unlock()
-}
+func registerFS(fs *FS) uintptr { return fsRegistry.Register(fs) }
+func lookupFS(tok uintptr) *FS  { return fsRegistry.Lookup(tok) }
+func unregisterFS(tok uintptr)  { fsRegistry.Unregister(tok) }
 
 // New registers an encryption VFS and returns its name (slot into a
 // DSN as `?vfs=<name>`), a handle for cleanup, and any error.
@@ -177,7 +166,7 @@ func New(opts Options) (name string, fs *FS, err error) {
 	}
 	defaultVfs := (*sqlite3.Tsqlite3_vfs)(unsafe.Pointer(defaultVfsPtr))
 
-	name = fmt.Sprintf("crypto%x", newVfsID.Add(1))
+	name = cabi.UniqueName("crypto")
 	cname, allocErr := libc.CString(name)
 	if allocErr != nil {
 		tls.Close()

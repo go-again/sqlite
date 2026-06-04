@@ -22,7 +22,7 @@ import (
 // per-connection hooks can use it freely.
 func withMattnConn(t *testing.T, dsn string) (*sql.DB, *sql.Conn, *Conn) {
 	t.Helper()
-	db, err := sql.Open(DriverNameMattn, dsn)
+	db, err := sql.Open(DriverNameSQLite3, dsn)
 	if err != nil {
 		t.Fatalf("sql.Open: %v", err)
 	}
@@ -478,7 +478,7 @@ func TestSetTrace_ProfileEventReceived(t *testing.T) {
 // TestError_CodeAndExtendedCode_OnUniqueViolation ensures the inserted UNIQUE
 // constraint surfaces both the primary and extended SQLite codes.
 func TestError_CodeAndExtendedCode_OnUniqueViolation(t *testing.T) {
-	db, err := sql.Open(DriverNameMattn, ":memory:")
+	db, err := sql.Open(DriverNameSQLite3, ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -598,7 +598,7 @@ func TestCoexistence_CustomNameAlongsideMattn(t *testing.T) {
 	// have grabbed "sqlite3" first and our init() would have panicked.
 	// (See README for the recommended pattern: link only one side under
 	// "sqlite3" or use mattn's `tag` build flag to suppress its init.)
-	db2, err := sql.Open(DriverNameMattn, ":memory:")
+	db2, err := sql.Open(DriverNameSQLite3, ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}

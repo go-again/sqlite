@@ -40,11 +40,17 @@ import (
 	sqlite "github.com/go-again/sqlite"
 )
 
+// Exported names of the SQL functions Register installs.
+const (
+	FuncZOrder   = "zorder"
+	FuncUnZOrder = "unzorder"
+)
+
 // Register installs zorder + unzorder on c.
 func Register(c *sqlite.Conn) error {
 	return errors.Join(
-		c.RegisterFunc("zorder", encode, true),
-		c.RegisterFunc("unzorder", decode, true),
+		c.RegisterFunc(FuncZOrder, encode, true),
+		c.RegisterFunc(FuncUnZOrder, decode, true),
 	)
 }
 

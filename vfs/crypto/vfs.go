@@ -133,7 +133,7 @@ func xOpenTrampoline(tls *libc.TLS, pVfs, zName, pFile uintptr, flags int32, pOu
 		return sqlite3.SQLITE_INTERNAL
 	}
 	wrappedVfs := (*sqlite3.Tsqlite3_vfs)(unsafe.Pointer(fs.wrappedVfsPtr))
-	rc := callXOpen(tls, wrappedVfs.FxOpen, fs.wrappedVfsPtr, zName, pFile, flags, pOutFlags)
+	rc := cabi.CallXOpen(tls, wrappedVfs.FxOpen, fs.wrappedVfsPtr, zName, pFile, flags, pOutFlags)
 	if rc != sqlite3.SQLITE_OK {
 		return rc
 	}
@@ -186,8 +186,4 @@ func fileKindFor(flags int32) byte {
 	default:
 		return 0
 	}
-}
-
-func callXOpen(tls *libc.TLS, fp, pVfs, zName, pFile uintptr, flags int32, pOutFlags uintptr) int32 {
-	return cabi.AsFunc[func(*libc.TLS, uintptr, uintptr, uintptr, int32, uintptr) int32](fp)(tls, pVfs, zName, pFile, flags, pOutFlags)
 }

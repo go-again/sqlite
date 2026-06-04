@@ -40,7 +40,11 @@ import (
 	"strings"
 
 	sqlite "github.com/go-again/sqlite"
+	"github.com/go-again/sqlite/internal/sqlid"
 )
+
+// ModuleName is the name the vtab registers under: `pivot`.
+const ModuleName = "pivot"
 
 // Register installs the `pivot` virtual table on c.
 //
@@ -49,7 +53,7 @@ import (
 //
 //	import _ "github.com/go-again/sqlite/ext/pivot/auto"
 func Register(c *sqlite.Conn) error {
-	return c.CreateModule("pivot", ctor)
+	return c.CreateModule(ModuleName, ctor)
 }
 
 func ctor(c *sqlite.Conn, _, _, _ string, args []string) (sqlite.VTab, error) {
@@ -228,7 +232,7 @@ func (c *cursor) Filter(_ int, idxStr string, args []driver.Value) error {
 	if err != nil {
 		return fmt.Errorf("pivot: prepare scan: %w", err)
 	}
-	rs, err := stmt.(*sqlite.Stmt).QueryContext(context.Background(), toNamedValues(args))
+	rs, err := stmt.(*sqlite.Stmt).QueryContext(context.Background(), sqlid.ToNamedValues(args))
 	if err != nil {
 		_ = stmt.Close()
 		return fmt.Errorf("pivot: run scan: %w", err)
@@ -292,7 +296,7 @@ func (c *cursor) Column(col int) (sqlite.Value, error) {
 	// dramatically cheaper than prepare/finalize per cell.
 	c.cellArgs = append(c.cellArgs[:0], c.row...)
 	c.cellArgs = append(c.cellArgs, c.table.cols[idx])
-	rs, err := c.cellStmt.QueryContext(context.Background(), toNamedValues(c.cellArgs))
+	rs, err := c.cellStmt.QueryContext(context.Background(), sqlid.ToNamedValues(c.cellArgs))
 	if err != nil {
 		return nil, fmt.Errorf("pivot: query cell: %w", err)
 	}
@@ -346,9 +350,7 @@ func opString(op sqlite.ConstraintOp) string {
 	return ""
 }
 
-func quote(s string) string {
-	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
-}
+func quote(s string) string { return sqlid.QuoteIdent(s) }
 
 func unquote(s string) string {
 	if len(s) >= 2 && s[0] == '\'' && s[len(s)-1] == '\'' {
@@ -373,18 +375,4 @@ func stringify(v driver.Value) string {
 		return fmt.Sprintf("%g", x)
 	}
 	return fmt.Sprint(v)
-}
-
-// toNamedValues maps a positional []driver.Value to the []driver.NamedValue
-// shape that the non-deprecated QueryContext / ExecContext path expects.
-// Ordinals are 1-based.
-func toNamedValues(args []driver.Value) []driver.NamedValue {
-	if len(args) == 0 {
-		return nil
-	}
-	out := make([]driver.NamedValue, len(args))
-	for i, v := range args {
-		out[i] = driver.NamedValue{Ordinal: i + 1, Value: v}
-	}
-	return out
 }

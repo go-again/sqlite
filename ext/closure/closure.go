@@ -45,11 +45,13 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"strings"
 
 	sqlite "github.com/go-again/sqlite"
 	"github.com/go-again/sqlite/internal/sqlid"
 )
+
+// ModuleName is the name the vtab registers under: `transitive_closure`.
+const ModuleName = "transitive_closure"
 
 // Register installs the `transitive_closure` virtual table on c.
 //
@@ -58,7 +60,7 @@ import (
 //
 //	import _ "github.com/go-again/sqlite/ext/closure/auto"
 func Register(c *sqlite.Conn) error {
-	return c.CreateModule("transitive_closure", ctor)
+	return c.CreateModule(ModuleName, ctor)
 }
 
 // Column indices in the declared schema.
@@ -319,9 +321,7 @@ func (c *cursor) Column(col int) (sqlite.Value, error) {
 func (c *cursor) Rowid() (int64, error) { return c.nodes[c.idx].id, nil }
 func (c *cursor) Close() error          { return nil }
 
-func quote(ident string) string {
-	return `"` + strings.ReplaceAll(ident, `"`, `""`) + `"`
-}
+func quote(ident string) string { return sqlid.QuoteIdent(ident) }
 
 func stringArg(v driver.Value) string {
 	switch x := v.(type) {

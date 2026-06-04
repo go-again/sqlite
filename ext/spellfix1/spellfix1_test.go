@@ -3,40 +3,17 @@ package spellfix1_test
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"path/filepath"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
 	"github.com/go-again/sqlite/ext/spellfix1"
+	"github.com/go-again/sqlite/internal/testhelp"
 )
 
 func openDB(t *testing.T) (*sql.DB, *sql.Conn) {
 	t.Helper()
-	d := sqlite.DefaultDriver()
-	prev := d.ConnectHook
-	d.ConnectHook = func(c *sqlite.Conn) error {
-		if prev != nil {
-			if err := prev(c); err != nil {
-				return err
-			}
-		}
-		return spellfix1.Register(c)
-	}
-	t.Cleanup(func() { d.ConnectHook = prev })
-
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-	sc, err := db.Conn(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = sc.Close() })
-	return db, sc
+	testhelp.WithConnectHook(t, spellfix1.Register)
+	return testhelp.OpenPinned(t, "sqlite", ":memory:")
 }
 
 func TestSpellfix1_BasicLookup(t *testing.T) {
@@ -142,29 +119,11 @@ func TestSpellfix1_RequiresMatch(t *testing.T) {
 func TestSpellfix1_PersistsAcrossReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "spell.db")
 	ctx := context.Background()
-	d := sqlite.DefaultDriver()
-	prev := d.ConnectHook
-	d.ConnectHook = func(c *sqlite.Conn) error {
-		if prev != nil {
-			if err := prev(c); err != nil {
-				return err
-			}
-		}
-		return spellfix1.Register(c)
-	}
-	t.Cleanup(func() { d.ConnectHook = prev })
+	testhelp.WithConnectHook(t, spellfix1.Register)
 
 	// Session 1: create, populate, close.
 	{
-		db, err := sql.Open("sqlite", path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		db.SetMaxOpenConns(1)
-		sc, err := db.Conn(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
+		db, sc := testhelp.OpenPinned(t, "sqlite", path)
 		if _, err := sc.ExecContext(ctx, `CREATE VIRTUAL TABLE persist USING spellfix1`); err != nil {
 			t.Fatal(err)
 		}
@@ -179,31 +138,17 @@ func TestSpellfix1_PersistsAcrossReopen(t *testing.T) {
 
 	// Session 2: reopen, look up "durabl" should match "durable" with
 	// distance 1.
-	{
-		db, err := sql.Open("sqlite", path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer db.Close()
-		db.SetMaxOpenConns(1)
-		sc, err := db.Conn(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer sc.Close()
-		var w string
-		var d int
-		if err := sc.QueryRowContext(ctx,
-			`SELECT word, distance FROM persist WHERE word MATCH 'durabl' LIMIT 1`).Scan(&w, &d); err != nil {
-			t.Fatalf("after reopen: %v", err)
-		}
-		if w != "durable" {
-			t.Errorf("after reopen: top=%q, want \"durable\"", w)
-		}
-		if d > 1 {
-			t.Errorf("after reopen: distance=%d, want <= 1", d)
-		}
+	_, sc := testhelp.OpenPinned(t, "sqlite", path)
+	var w string
+	var d int
+	if err := sc.QueryRowContext(ctx,
+		`SELECT word, distance FROM persist WHERE word MATCH 'durabl' LIMIT 1`).Scan(&w, &d); err != nil {
+		t.Fatalf("after reopen: %v", err)
+	}
+	if w != "durable" {
+		t.Errorf("after reopen: top=%q, want \"durable\"", w)
+	}
+	if d > 1 {
+		t.Errorf("after reopen: distance=%d, want <= 1", d)
 	}
 }
-
-var _ = errors.New

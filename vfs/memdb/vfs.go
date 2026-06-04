@@ -14,6 +14,11 @@ import (
 var (
 	fileHandlesMu sync.RWMutex
 	fileHandles   = map[uintptr]*fileHandle{}
+	// nextToken hands out unique pFile-state tokens. Independent of
+	// the cabi.Registry used for fsRegistry — fileHandles needs an
+	// FS-scoped iteration in Close() that the generic Registry
+	// doesn't expose, so the small map stays per-package.
+	nextToken atomic.Uintptr
 )
 
 type perFileState struct {

@@ -3,38 +3,16 @@ package pivot_test
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
 	"github.com/go-again/sqlite/ext/pivot"
+	"github.com/go-again/sqlite/internal/testhelp"
 )
 
 func openDB(t *testing.T) (*sql.DB, *sql.Conn) {
 	t.Helper()
-	d := sqlite.DefaultDriver()
-	prev := d.ConnectHook
-	d.ConnectHook = func(c *sqlite.Conn) error {
-		if prev != nil {
-			if err := prev(c); err != nil {
-				return err
-			}
-		}
-		return pivot.Register(c)
-	}
-	t.Cleanup(func() { d.ConnectHook = prev })
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-	sc, err := db.Conn(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = sc.Close() })
-	return db, sc
+	testhelp.WithConnectHook(t, pivot.Register)
+	return testhelp.OpenPinned(t, "sqlite", ":memory:")
 }
 
 func seed(t *testing.T, sc *sql.Conn) {
@@ -132,5 +110,3 @@ func TestPivot_CellBindCountMismatch(t *testing.T) {
 		t.Error("bind-count mismatch: want error, got nil")
 	}
 }
-
-var _ = errors.New

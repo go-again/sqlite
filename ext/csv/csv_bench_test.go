@@ -24,7 +24,7 @@ func benchSetup(b *testing.B, rows int) (*sql.DB, *sql.Conn) {
 	}
 	fsys := fstest.MapFS{"data.csv": {Data: []byte(sb.String())}}
 
-	db, err := sql.Open("sqlite", ":memory:")
+	db, err := sql.Open(sqlite.DriverName, ":memory:")
 	if err != nil {
 		b.Fatal(err)
 	}

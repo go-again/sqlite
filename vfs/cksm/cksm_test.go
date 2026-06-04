@@ -29,7 +29,7 @@ func openDB(t *testing.T, dir string) (db *sql.DB, sc *sql.Conn, name string) {
 	t.Cleanup(func() { _ = fs.Close() })
 
 	path := filepath.Join(dir, "cksm.db")
-	db, err = sql.Open("sqlite", path+"?vfs="+name)
+	db, err = sql.Open(sqlite.DriverName, path+"?vfs="+name)
 	if err != nil {
 		t.Fatalf("sql.Open: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestCksm_CorruptionDetected(t *testing.T) {
 	f.Close()
 
 	// Reopen through the same cksm VFS — fresh page cache.
-	db2, err := sql.Open("sqlite", path+"?vfs="+name)
+	db2, err := sql.Open(sqlite.DriverName, path+"?vfs="+name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestCksm_ReopenAutoEnables(t *testing.T) {
 
 	// Reopen — no EnableChecksums call.
 	path := filepath.Join(dir, "cksm.db")
-	db2, err := sql.Open("sqlite", path+"?vfs="+name)
+	db2, err := sql.Open(sqlite.DriverName, path+"?vfs="+name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestCksm_XOpen_InvalidPathRejected(t *testing.T) {
 	// Repeat to verify the failure path doesn't accumulate state: a
 	// dangling fileMap entry would eventually starve subsequent opens.
 	for range 50 {
-		db, err := sql.Open("sqlite", bad+"?vfs="+name)
+		db, err := sql.Open(sqlite.DriverName, bad+"?vfs="+name)
 		if err != nil {
 			db.Close()
 			continue
@@ -256,7 +256,7 @@ func TestCksm_XOpen_InvalidPathRejected(t *testing.T) {
 
 	// After many failed opens, a successful open must still work.
 	good := filepath.Join(t.TempDir(), "good.db")
-	db, err := sql.Open("sqlite", good+"?vfs="+name)
+	db, err := sql.Open(sqlite.DriverName, good+"?vfs="+name)
 	if err != nil {
 		t.Fatal(err)
 	}

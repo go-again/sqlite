@@ -43,15 +43,25 @@ import (
 	sqlite "github.com/go-again/sqlite"
 )
 
+// Exported names of the SQL functions Register installs.
+const (
+	FuncIPContains = "ipcontains"
+	FuncIPOverlaps = "ipoverlaps"
+	FuncIPFamily   = "ipfamily"
+	FuncIPHost     = "iphost"
+	FuncIPMaskLen  = "ipmasklen"
+	FuncIPNetwork  = "ipnetwork"
+)
+
 // Register installs all six functions on c.
 func Register(c *sqlite.Conn) error {
 	return errors.Join(
-		c.RegisterFunc("ipcontains", contains, true),
-		c.RegisterFunc("ipoverlaps", overlaps, true),
-		c.RegisterFunc("ipfamily", family, true),
-		c.RegisterFunc("iphost", host, true),
-		c.RegisterFunc("ipmasklen", masklen, true),
-		c.RegisterFunc("ipnetwork", network, true),
+		c.RegisterFunc(FuncIPContains, contains, true),
+		c.RegisterFunc(FuncIPOverlaps, overlaps, true),
+		c.RegisterFunc(FuncIPFamily, family, true),
+		c.RegisterFunc(FuncIPHost, host, true),
+		c.RegisterFunc(FuncIPMaskLen, masklen, true),
+		c.RegisterFunc(FuncIPNetwork, network, true),
 	)
 }
 

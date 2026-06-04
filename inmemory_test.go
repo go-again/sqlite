@@ -16,7 +16,7 @@ func TestInMemoryConstantIsValidDSN(t *testing.T) {
 		t.Errorf("sqlite.InMemory=%q, want \":memory:\"", sqlite.InMemory)
 	}
 
-	db, err := sql.Open("sqlite", sqlite.InMemory)
+	db, err := sql.Open(sqlite.DriverName, sqlite.InMemory)
 	if err != nil {
 		t.Fatalf("sql.Open(sqlite.InMemory): %v", err)
 	}

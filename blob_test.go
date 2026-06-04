@@ -14,7 +14,7 @@ import (
 //   - encoding/decoding any byte that happens to look like a metacharacter
 //     in one of the time/text paths
 func TestBLOB_RoundTrip(t *testing.T) {
-	db, err := sql.Open(DriverNameMattn, ":memory:")
+	db, err := sql.Open(DriverNameSQLite3, ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestBLOB_RoundTrip(t *testing.T) {
 // which our fork doesn't surface yet but the zeroblob value still has to
 // scan correctly through database/sql.
 func TestBLOB_Zeroblob(t *testing.T) {
-	db, err := sql.Open(DriverNameMattn, ":memory:")
+	db, err := sql.Open(DriverNameSQLite3, ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestBLOB_Zeroblob(t *testing.T) {
 // BLOBs as non-nil slices is recognized as a behavior change rather than a
 // bug.
 func TestBLOB_EmptyBLOB(t *testing.T) {
-	db, err := sql.Open(DriverNameMattn, ":memory:")
+	db, err := sql.Open(DriverNameSQLite3, ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}

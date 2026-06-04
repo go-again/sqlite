@@ -43,7 +43,7 @@ func TestChain_CksmWrappedByCrypto(t *testing.T) {
 	}
 	defer cryptoFS.Close()
 
-	db, err := sql.Open("sqlite", path+"?vfs="+cryptoName)
+	db, err := sql.Open(sqlite.DriverName, path+"?vfs="+cryptoName)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestChain_PlainCksmWithoutCrypto(t *testing.T) {
 	}
 	defer fs.Close()
 
-	db, err := sql.Open("sqlite", path+"?vfs="+name)
+	db, err := sql.Open(sqlite.DriverName, path+"?vfs="+name)
 	if err != nil {
 		t.Fatal(err)
 	}

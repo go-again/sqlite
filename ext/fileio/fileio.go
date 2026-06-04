@@ -76,11 +76,20 @@ func RegisterFS(c *sqlite.Conn, fsys fs.FS) error {
 	return register(c, fsys)
 }
 
+// Exported names of the SQL functions / vtab Register installs.
+const (
+	FuncReadFile  = "readfile"
+	FuncLSMode    = "lsmode"
+	FuncWriteFile = "writefile"
+	// FSDirModuleName is the vtab name `fsdir`.
+	FSDirModuleName = "fsdir"
+)
+
 func register(c *sqlite.Conn, fsys fs.FS) error {
 	errs := []error{
-		c.RegisterFunc("readfile", makeReadfile(fsys), false),
-		c.RegisterFunc("lsmode", lsmode, true),
-		c.CreateEponymousModule("fsdir", func(_ *sqlite.Conn, _, _, _ string, _ []string) (sqlite.VTab, error) {
+		c.RegisterFunc(FuncReadFile, makeReadfile(fsys), false),
+		c.RegisterFunc(FuncLSMode, lsmode, true),
+		c.CreateEponymousModule(FSDirModuleName, func(_ *sqlite.Conn, _, _, _ string, _ []string) (sqlite.VTab, error) {
 			if err := c.DeclareVTab(`CREATE TABLE x(name TEXT, mode INTEGER, mtime INTEGER, data BLOB, level INTEGER, path HIDDEN, depth HIDDEN)`); err != nil {
 				return nil, err
 			}
@@ -88,7 +97,7 @@ func register(c *sqlite.Conn, fsys fs.FS) error {
 		}),
 	}
 	if fsys == nil {
-		errs = append(errs, c.RegisterFunc("writefile", writefile, false))
+		errs = append(errs, c.RegisterFunc(FuncWriteFile, writefile, false))
 	}
 	return errors.Join(errs...)
 }

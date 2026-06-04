@@ -51,12 +51,14 @@ var (
 
 // Driver names registered with the database/sql package.
 const (
-	// DriverName is the modernc.org/sqlite-compatible driver name.
+	// DriverName is the primary registration name: "sqlite".
 	DriverName = "sqlite"
-	// DriverNameMattn is the github.com/mattn/go-sqlite3-compatible driver name.
-	// Registered so existing mattn code that opens with sql.Open("sqlite3", ...)
-	// keeps working unchanged.
-	DriverNameMattn = "sqlite3"
+	// DriverNameSQLite3 is the compatibility registration: "sqlite3".
+	// Registered so existing code that opens with sql.Open("sqlite3", ...)
+	// keeps working unchanged — historically that name was claimed by the
+	// cgo-based sqlite3 driver, and downstream code that targets it can
+	// switch by swapping its import for this package without touching DSNs.
+	DriverNameSQLite3 = "sqlite3"
 )
 
 const (
@@ -68,7 +70,7 @@ const (
 func init() {
 	drv := newDriver()
 	sql.Register(DriverName, drv)
-	sql.Register(DriverNameMattn, drv)
+	sql.Register(DriverNameSQLite3, drv)
 	sqlite3.PatchIssue199() // https://gitlab.com/cznic/sqlite/-/issues/199
 }
 

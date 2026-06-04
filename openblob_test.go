@@ -15,7 +15,7 @@ func openBlobConn(t *testing.T, size int) (db *sql.DB, conn *sql.Conn, c *Conn, 
 	if raceEnabled {
 		t.Skip("skipping under -race: modernc Xsqlite3_blob_open trips Go's checkptr analyzer (upstream issue)")
 	}
-	d, err := sql.Open(DriverNameMattn, ":memory:")
+	d, err := sql.Open(DriverNameSQLite3, ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}

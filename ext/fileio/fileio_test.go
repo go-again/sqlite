@@ -17,7 +17,7 @@ import (
 
 func openOS(t *testing.T) (*sql.DB, *sql.Conn) {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
+	db, err := sql.Open(sqlite.DriverName, ":memory:")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -42,7 +42,7 @@ func openOS(t *testing.T) (*sql.DB, *sql.Conn) {
 
 func openFS(t *testing.T, fsys fstest.MapFS) (*sql.DB, *sql.Conn) {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
+	db, err := sql.Open(sqlite.DriverName, ":memory:")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

@@ -52,16 +52,28 @@ import (
 	sqlite "github.com/go-again/sqlite"
 )
 
+// Exported names of the SQL functions Register installs. Exposed as
+// constants so callers can build queries that reference them without
+// re-hardcoding the string. `FuncRegexp` is also the REGEXP operator.
+const (
+	FuncRegexp        = "regexp"
+	FuncRegexpLike    = "regexp_like"
+	FuncRegexpCount   = "regexp_count"
+	FuncRegexpInstr   = "regexp_instr"
+	FuncRegexpSubstr  = "regexp_substr"
+	FuncRegexpReplace = "regexp_replace"
+)
+
 // Register installs the REGEXP operator plus the regexp_* SQL function
 // lineup on c.
 func Register(c *sqlite.Conn) error {
 	return errors.Join(
-		c.RegisterFunc("regexp", regexpMatch, true),
-		c.RegisterFunc("regexp_like", regexpLike, true),
-		c.RegisterFunc("regexp_count", regexpCount, true),
-		c.RegisterFunc("regexp_instr", regexpInstr, true),
-		c.RegisterFunc("regexp_substr", regexpSubstr, true),
-		c.RegisterFunc("regexp_replace", regexpReplace, true),
+		c.RegisterFunc(FuncRegexp, regexpMatch, true),
+		c.RegisterFunc(FuncRegexpLike, regexpLike, true),
+		c.RegisterFunc(FuncRegexpCount, regexpCount, true),
+		c.RegisterFunc(FuncRegexpInstr, regexpInstr, true),
+		c.RegisterFunc(FuncRegexpSubstr, regexpSubstr, true),
+		c.RegisterFunc(FuncRegexpReplace, regexpReplace, true),
 	)
 }
 

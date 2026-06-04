@@ -83,7 +83,7 @@ func encryptedFS(pFile uintptr) *FS {
 func xCloseTrampoline(tls *libc.TLS, pFile uintptr) int32 {
 	methods := defaultMethodsFor(pFile)
 	unregisterFile(pFile)
-	return callXClose(tls, methods.FxClose, pFile)
+	return cabi.CallXClose(tls, methods.FxClose, pFile)
 }
 
 // xReadTrampoline reads `amt` bytes at `off` into `buf`. For
@@ -93,7 +93,7 @@ func xCloseTrampoline(tls *libc.TLS, pFile uintptr) int32 {
 func xReadTrampoline(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Tsqlite3_int64) int32 {
 	fs := encryptedFS(pFile)
 	if fs == nil {
-		return callXRead(tls, defaultMethodsFor(pFile).FxRead, pFile, buf, amt, off)
+		return cabi.CallXRead(tls, defaultMethodsFor(pFile).FxRead, pFile, buf, amt, off)
 	}
 	var start time.Time
 	if fs.recorder != nil {
@@ -112,7 +112,7 @@ func xReadTrampoline(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.T
 func xWriteTrampoline(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Tsqlite3_int64) int32 {
 	fs := encryptedFS(pFile)
 	if fs == nil {
-		return callXWrite(tls, defaultMethodsFor(pFile).FxWrite, pFile, buf, amt, off)
+		return cabi.CallXWrite(tls, defaultMethodsFor(pFile).FxWrite, pFile, buf, amt, off)
 	}
 	var start time.Time
 	if fs.recorder != nil {
@@ -130,46 +130,46 @@ func xTruncateTrampoline(tls *libc.TLS, pFile uintptr, size sqlite3.Tsqlite3_int
 	// truncating to a page boundary leaves valid encrypted pages
 	// behind. Truncating mid-page is a SQLite-engine concern, not
 	// ours.
-	return callXTruncate(tls, defaultMethodsFor(pFile).FxTruncate, pFile, size)
+	return cabi.CallXTruncate(tls, defaultMethodsFor(pFile).FxTruncate, pFile, size)
 }
 
 func xSyncTrampoline(tls *libc.TLS, pFile uintptr, flags int32) int32 {
 	fs := encryptedFS(pFile)
 	if fs == nil || fs.recorder == nil {
-		return callXSync(tls, defaultMethodsFor(pFile).FxSync, pFile, flags)
+		return cabi.CallXSync(tls, defaultMethodsFor(pFile).FxSync, pFile, flags)
 	}
 	start := time.Now()
-	rc := callXSync(tls, defaultMethodsFor(pFile).FxSync, pFile, flags)
+	rc := cabi.CallXSync(tls, defaultMethodsFor(pFile).FxSync, pFile, flags)
 	fs.recorder.OnSync(fs.perFileStateOf(pFile).fileKind, time.Since(start), rc)
 	return rc
 }
 
 func xFileSizeTrampoline(tls *libc.TLS, pFile, pSize uintptr) int32 {
-	return callXFileSize(tls, defaultMethodsFor(pFile).FxFileSize, pFile, pSize)
+	return cabi.CallXFileSize(tls, defaultMethodsFor(pFile).FxFileSize, pFile, pSize)
 }
 
 func xLockTrampoline(tls *libc.TLS, pFile uintptr, level int32) int32 {
-	return callXLock(tls, defaultMethodsFor(pFile).FxLock, pFile, level)
+	return cabi.CallXLock(tls, defaultMethodsFor(pFile).FxLock, pFile, level)
 }
 
 func xUnlockTrampoline(tls *libc.TLS, pFile uintptr, level int32) int32 {
-	return callXLock(tls, defaultMethodsFor(pFile).FxUnlock, pFile, level)
+	return cabi.CallXLock(tls, defaultMethodsFor(pFile).FxUnlock, pFile, level)
 }
 
 func xCheckReservedLockTrampoline(tls *libc.TLS, pFile, pResOut uintptr) int32 {
-	return callXCheckReservedLock(tls, defaultMethodsFor(pFile).FxCheckReservedLock, pFile, pResOut)
+	return cabi.CallXCheckReservedLock(tls, defaultMethodsFor(pFile).FxCheckReservedLock, pFile, pResOut)
 }
 
 func xFileControlTrampoline(tls *libc.TLS, pFile uintptr, op int32, pArg uintptr) int32 {
-	return callXFileControl(tls, defaultMethodsFor(pFile).FxFileControl, pFile, op, pArg)
+	return cabi.CallXFileControl(tls, defaultMethodsFor(pFile).FxFileControl, pFile, op, pArg)
 }
 
 func xSectorSizeTrampoline(tls *libc.TLS, pFile uintptr) int32 {
-	return callXSectorSize(tls, defaultMethodsFor(pFile).FxSectorSize, pFile)
+	return cabi.CallXSectorSize(tls, defaultMethodsFor(pFile).FxSectorSize, pFile)
 }
 
 func xDeviceCharacteristicsTrampoline(tls *libc.TLS, pFile uintptr) int32 {
-	return callXSectorSize(tls, defaultMethodsFor(pFile).FxDeviceCharacteristics, pFile)
+	return cabi.CallXSectorSize(tls, defaultMethodsFor(pFile).FxDeviceCharacteristics, pFile)
 }
 
 // xShm* trampolines forward 1:1 to the default unix VFS. The WAL
@@ -223,7 +223,7 @@ func readEncrypted(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Tsq
 	defer putScratch(bp)
 	scratch := *bp
 	scratchPtr := uintptr(unsafe.Pointer(&scratch[0]))
-	rc := callXRead(tls, defaultMethodsFor(pFile).FxRead, pFile, scratchPtr, int32(span), sqlite3.Tsqlite3_int64(pageStart))
+	rc := cabi.CallXRead(tls, defaultMethodsFor(pFile).FxRead, pFile, scratchPtr, int32(span), sqlite3.Tsqlite3_int64(pageStart))
 
 	if rc == sqlite3.SQLITE_OK {
 		decryptSpan(fs, scratch, pageStart, ps, pst.fileKind)
@@ -278,7 +278,7 @@ func writeEncrypted(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Ts
 		// bytes. A short read leaves the unwritten tail zeroed, which
 		// is correct for first-write-to-uninitialized-page.
 		readPtr := uintptr(unsafe.Pointer(&scratch[0]))
-		rc := callXRead(tls, defaultMethodsFor(pFile).FxRead, pFile, readPtr, int32(span), sqlite3.Tsqlite3_int64(pageStart))
+		rc := cabi.CallXRead(tls, defaultMethodsFor(pFile).FxRead, pFile, readPtr, int32(span), sqlite3.Tsqlite3_int64(pageStart))
 		if rc != sqlite3.SQLITE_OK && rc != sqlite3.SQLITE_IOERR_SHORT_READ {
 			return rc
 		}
@@ -294,7 +294,7 @@ func writeEncrypted(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Ts
 
 	encryptSpan(fs, scratch, pageStart, ps, pst.fileKind)
 	scratchPtr := uintptr(unsafe.Pointer(&scratch[0]))
-	return callXWrite(tls, defaultMethodsFor(pFile).FxWrite, pFile, scratchPtr, int32(span), sqlite3.Tsqlite3_int64(pageStart))
+	return cabi.CallXWrite(tls, defaultMethodsFor(pFile).FxWrite, pFile, scratchPtr, int32(span), sqlite3.Tsqlite3_int64(pageStart))
 }
 
 func encryptSpan(fs *FS, span []byte, baseOffset int64, pageSize int64, kind byte) {
@@ -311,54 +311,6 @@ func decryptSpan(fs *FS, span []byte, baseOffset int64, pageSize int64, kind byt
 	}
 }
 
-// --- Consumer-side function-pointer casts ---
-//
-// The cabi.AsFunc[F] helper turns the uintptr stored in an io-methods
-// slot (e.g. FxRead) back into a callable Go function value of the
-// right shape. Each callX* below specialises it on a single signature.
-
-func callXClose(tls *libc.TLS, fp, pFile uintptr) int32 {
-	return cabi.AsFunc[func(*libc.TLS, uintptr) int32](fp)(tls, pFile)
-}
-
-func callXRead(tls *libc.TLS, fp, pFile, buf uintptr, amt int32, off sqlite3.Tsqlite3_int64) int32 {
-	return cabi.AsFunc[func(*libc.TLS, uintptr, uintptr, int32, sqlite3.Tsqlite3_int64) int32](fp)(tls, pFile, buf, amt, off)
-}
-
-func callXWrite(tls *libc.TLS, fp, pFile, buf uintptr, amt int32, off sqlite3.Tsqlite3_int64) int32 {
-	return cabi.AsFunc[func(*libc.TLS, uintptr, uintptr, int32, sqlite3.Tsqlite3_int64) int32](fp)(tls, pFile, buf, amt, off)
-}
-
-func callXTruncate(tls *libc.TLS, fp, pFile uintptr, size sqlite3.Tsqlite3_int64) int32 {
-	return cabi.AsFunc[func(*libc.TLS, uintptr, sqlite3.Tsqlite3_int64) int32](fp)(tls, pFile, size)
-}
-
-func callXSync(tls *libc.TLS, fp, pFile uintptr, flags int32) int32 {
-	return cabi.AsFunc[func(*libc.TLS, uintptr, int32) int32](fp)(tls, pFile, flags)
-}
-
-func callXFileSize(tls *libc.TLS, fp, pFile, pSize uintptr) int32 {
-	return cabi.AsFunc[func(*libc.TLS, uintptr, uintptr) int32](fp)(tls, pFile, pSize)
-}
-
-// callXCheckReservedLock has the identical (tls, pFile, *int → int32)
-// C signature as callXFileSize, but the named alias keeps the grep
-// trail honest at trampoline call sites.
-func callXCheckReservedLock(tls *libc.TLS, fp, pFile, pResOut uintptr) int32 {
-	return cabi.AsFunc[func(*libc.TLS, uintptr, uintptr) int32](fp)(tls, pFile, pResOut)
-}
-
-// callXLock is shared by both xLock and xUnlock trampolines: the two
-// C signatures are identical (tls, pFile, level → int32) so one
-// helper covers both.
-func callXLock(tls *libc.TLS, fp, pFile uintptr, level int32) int32 {
-	return cabi.AsFunc[func(*libc.TLS, uintptr, int32) int32](fp)(tls, pFile, level)
-}
-
-func callXFileControl(tls *libc.TLS, fp, pFile uintptr, op int32, pArg uintptr) int32 {
-	return cabi.AsFunc[func(*libc.TLS, uintptr, int32, uintptr) int32](fp)(tls, pFile, op, pArg)
-}
-
-func callXSectorSize(tls *libc.TLS, fp, pFile uintptr) int32 {
-	return cabi.AsFunc[func(*libc.TLS, uintptr) int32](fp)(tls, pFile)
-}
+// All consumer-side function-pointer casts go through cabi.CallX*; see
+// internal/cabi/callx.go. The trampolines above forward through them
+// rather than per-package specializations.

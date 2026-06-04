@@ -9,11 +9,26 @@ import (
 	"github.com/go-again/sqlite/vec"
 )
 
-// tagName is the struct tag key we look for. Lives in its own const so
-// tests can override it. We deliberately do NOT put our directives inside
-// the gorm:"" tag — owning a separate namespace keeps us out of gorm's
-// parser and avoids any future keyword collision.
-const tagName = "vec"
+// TagName is the struct tag key we look for. We deliberately do NOT
+// put our directives inside the gorm:"" tag — owning a separate
+// namespace keeps us out of gorm's parser and avoids any future
+// keyword collision.
+const TagName = "vec"
+
+// Exported tag-key constants. The parser reads keys via these so
+// callers consuming the tag DSL (and tests pinning the surface) can
+// reference the canonical names without re-hardcoding the strings.
+const (
+	TagKeyDim      = "dim"
+	TagKeyMetric   = "metric"
+	TagKeyEncoding = "encoding"
+	TagKeyTable    = "table"
+	TagKeyColumn   = "column"
+)
+
+// tagName is the internal alias retained so the existing parser body
+// keeps reading without churn; same value as TagName.
+const tagName = TagName
 
 // meta is the parsed form of a vec:"..." struct tag attached to a model
 // field. Each meta describes one sidecar virtual table.
@@ -86,38 +101,30 @@ func parseTag(tagValue, fieldName string, fieldIndex []int) (meta, error) {
 		val = strings.ReplaceAll(val, "+", " ")
 
 		switch key {
-		case "dim":
+		case TagKeyDim:
 			n, err := strconv.Atoi(val)
 			if err != nil || n <= 0 {
 				return m, fmt.Errorf("vecgorm: %s: dim=%q must be a positive integer", fieldName, val)
 			}
 			m.Dim = n
-		case "metric":
-			switch strings.ToLower(val) {
-			case "l2":
-				m.Metric = vec.L2
-			case "cosine":
-				m.Metric = vec.Cosine
-			case "dot", "l1":
-				m.Metric = vec.Dot
-			default:
-				return m, fmt.Errorf("vecgorm: %s: metric=%q (want l2 | cosine | dot)", fieldName, val)
+		case TagKeyMetric:
+			metric, err := vec.ParseMetric(val)
+			if err != nil {
+				return m, fmt.Errorf("vecgorm: %s: %w", fieldName, err)
 			}
-		case "encoding":
-			switch strings.ToLower(val) {
-			case "json":
-				m.Encoding = vec.JSON
-			case "binary":
-				m.Encoding = vec.Binary
-			default:
-				return m, fmt.Errorf("vecgorm: %s: encoding=%q (want json | binary)", fieldName, val)
+			m.Metric = metric
+		case TagKeyEncoding:
+			enc, err := vec.ParseEncoding(val)
+			if err != nil {
+				return m, fmt.Errorf("vecgorm: %s: %w", fieldName, err)
 			}
-		case "table":
+			m.Encoding = enc
+		case TagKeyTable:
 			if !isIdent(val) {
 				return m, fmt.Errorf("vecgorm: %s: table=%q is not a valid identifier", fieldName, val)
 			}
 			m.Table = val
-		case "column":
+		case TagKeyColumn:
 			if !isIdent(val) {
 				return m, fmt.Errorf("vecgorm: %s: column=%q is not a valid identifier", fieldName, val)
 			}

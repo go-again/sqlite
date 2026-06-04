@@ -2,36 +2,22 @@ package fts
 
 import (
 	"fmt"
-	"strings"
+
+	"github.com/go-again/sqlite/internal/sqlid"
 )
 
 // QuoteIdent returns name in backticks, escaping any embedded backticks.
 // Used for SQL identifier interpolation outside FTS5's option parser.
-func QuoteIdent(name string) string {
-	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
-}
+// Thin re-export of [internal/sqlid.QuoteIdentBacktick] so the
+// internals share one implementation.
+func QuoteIdent(name string) string { return sqlid.QuoteIdentBacktick(name) }
 
 // ValidIdent reports whether name is a safe SQL identifier — the
 // conservative ASCII subset: leading letter or underscore, then
 // letters/digits/underscores. Used to guard against injection at the
 // API boundary when callers pass arbitrary strings as table or column
-// names.
-func ValidIdent(s string) bool {
-	if s == "" {
-		return false
-	}
-	for i, r := range s {
-		switch {
-		case r == '_':
-		case r >= 'a' && r <= 'z':
-		case r >= 'A' && r <= 'Z':
-		case i > 0 && r >= '0' && r <= '9':
-		default:
-			return false
-		}
-	}
-	return true
-}
+// names. Thin re-export of [internal/sqlid.ValidIdent].
+func ValidIdent(s string) bool { return sqlid.ValidIdent(s) }
 
 // quote / validIdent are legacy private aliases — kept so the rest of
 // the fts package compiles unchanged. Sub-packages like fts/gorm use

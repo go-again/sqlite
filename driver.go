@@ -211,3 +211,40 @@ func (d *Driver) RegisterConnectionHook(fn ConnectionHookFn) {
 	d.connectionHooks = append(d.connectionHooks, fn)
 	d.mu.Unlock()
 }
+
+// RegisterAutoHook chains a Register-style hook onto the default
+// driver's [Driver.ConnectHook], preserving any previously-installed
+// hook. The hook fires on every newly-opened connection, after the
+// modernc-style ConnectionHooks and Mattn-style Extensions have run.
+//
+// This is the recipe the blank-import `ext/<name>/auto` sub-packages
+// use to opt every connection in to a SQL extension without
+// trampling whichever ConnectHook was already there. Composing many
+// /auto imports just chains them in import-graph order — each call
+// captures the previous chain and prepends a run-prior-then-reg
+// trampoline.
+//
+//	func init() {
+//	    sqlite.RegisterAutoHook(myext.Register)
+//	}
+//
+// Concurrency: safe to call from init() (single goroutine) or after.
+// The write through [Driver.ConnectHook] races with Open's read of
+// the same field; function-pointer writes are atomic on every
+// Go-supported architecture, so a torn read is impossible — the
+// window is just whether a given Open sees the old or the new hook
+// chain. Pool-wide consistency requires installing all hooks before
+// the first sql.Open, which the blank-import pattern guarantees.
+func RegisterAutoHook(reg func(*Conn) error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	prev := d.ConnectHook
+	d.ConnectHook = func(c *Conn) error {
+		if prev != nil {
+			if err := prev(c); err != nil {
+				return err
+			}
+		}
+		return reg(c)
+	}
+}

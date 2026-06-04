@@ -14,7 +14,7 @@ import (
 
 func benchSetup(b *testing.B, n int) (*sql.DB, *sql.Conn) {
 	b.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
+	db, err := sql.Open(sqlite.DriverName, ":memory:")
 	if err != nil {
 		b.Fatal(err)
 	}

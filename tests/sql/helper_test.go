@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"testing"
 
-	_ "github.com/go-again/sqlite"
+	sqlite "github.com/go-again/sqlite"
 )
 
 // openDB returns an in-memory database pinned to a single connection. Tests
@@ -13,7 +13,7 @@ import (
 // share schema state.
 func openDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
+	db, err := sql.Open(sqlite.DriverName, ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}

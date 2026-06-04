@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	_ "github.com/go-again/sqlite"
+	sqlite "github.com/go-again/sqlite"
 	"github.com/go-again/sqlite/vfs"
 )
 
@@ -24,7 +24,7 @@ import (
 func TestGormVFS_ReadFromMapFS(t *testing.T) {
 	// Build a real SQLite database on disk to get a valid file image.
 	tmp := filepath.Join(t.TempDir(), "seed.db")
-	src, err := sql.Open("sqlite3", tmp)
+	src, err := sql.Open(sqlite.DriverNameSQLite3, tmp)
 	if err != nil {
 		t.Fatal(err)
 	}

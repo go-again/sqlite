@@ -1,0 +1,20 @@
+name: Setup
+description: |
+  Standard Go setup for this module's CI jobs. Calls actions/setup-go@v5
+  with the requested go-version (defaulting to the primary pinned line).
+  Centralizes the Go-version pin so a single edit here propagates to every
+  job; jobs that exercise the matrix (e.g. the `test` job) override the
+  default by passing their own go-version.
+
+inputs:
+  go-version:
+    description: Go toolchain version (e.g. "1.25.x"). Defaults to the primary line.
+    required: false
+    default: '1.25.x'
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v5
+      with:
+        go-version: ${{ inputs.go-version }}

@@ -660,7 +660,7 @@ func TestConfig_MaxIdleConnsBehavior(t *testing.T) {
 func TestApplyPragmas_Standalone(t *testing.T) {
 	dir := t.TempDir()
 	dsn := "file:" + filepath.Join(dir, "apply.db")
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open(sqlite.DriverName, dsn)
 	if err != nil {
 		t.Fatalf("sql.Open: %v", err)
 	}

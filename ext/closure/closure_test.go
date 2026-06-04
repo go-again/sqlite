@@ -3,39 +3,17 @@ package closure_test
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"slices"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
 	"github.com/go-again/sqlite/ext/closure"
+	"github.com/go-again/sqlite/internal/testhelp"
 )
 
 func openDB(t *testing.T) (*sql.DB, *sql.Conn) {
 	t.Helper()
-	d := sqlite.DefaultDriver()
-	prev := d.ConnectHook
-	d.ConnectHook = func(c *sqlite.Conn) error {
-		if prev != nil {
-			if err := prev(c); err != nil {
-				return err
-			}
-		}
-		return closure.Register(c)
-	}
-	t.Cleanup(func() { d.ConnectHook = prev })
-
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-	sc, err := db.Conn(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = sc.Close() })
+	testhelp.WithConnectHook(t, closure.Register)
+	db, sc := testhelp.OpenPinned(t, "sqlite", ":memory:")
 
 	ctx := context.Background()
 	if _, err := sc.ExecContext(ctx,
@@ -193,29 +171,8 @@ func TestClosure_QueryTimeOverride(t *testing.T) {
 // loop forever without the visited-set; cursor must terminate and
 // return both nodes exactly once.
 func TestClosure_HandlesCycles(t *testing.T) {
-	d := sqlite.DefaultDriver()
-	prev := d.ConnectHook
-	d.ConnectHook = func(c *sqlite.Conn) error {
-		if prev != nil {
-			if err := prev(c); err != nil {
-				return err
-			}
-		}
-		return closure.Register(c)
-	}
-	t.Cleanup(func() { d.ConnectHook = prev })
-
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-	sc, err := db.Conn(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = sc.Close() })
+	testhelp.WithConnectHook(t, closure.Register)
+	_, sc := testhelp.OpenPinned(t, "sqlite", ":memory:")
 
 	ctx := context.Background()
 	if _, err := sc.ExecContext(ctx,
@@ -260,5 +217,3 @@ func TestClosure_HandlesCycles(t *testing.T) {
 		t.Errorf("node 4 should not appear; got %d visits", seen[4])
 	}
 }
-
-var _ = errors.New

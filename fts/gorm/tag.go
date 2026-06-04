@@ -9,10 +9,27 @@ import (
 	"github.com/go-again/sqlite/fts"
 )
 
-// tagName is the struct tag key we look for. Tagged fields' values are
-// stored in a shared FTS5 external-content table; the field type must
-// be a string (or convertible to one) on the source model.
-const tagName = "fts5"
+// TagName is the struct tag key we look for. Tagged fields' values
+// are stored in a shared FTS5 sidecar table; the field type must be
+// a string (or convertible to one) on the source model.
+const TagName = "fts5"
+
+// Exported tag-key constants. The parser reads keys via these so
+// callers consuming the tag DSL can reference the canonical names
+// without re-hardcoding the strings.
+const (
+	TagKeyColumn      = "column"
+	TagKeyTable       = "table"
+	TagKeyTokenize    = "tokenize"
+	TagKeyPrefix      = "prefix"
+	TagKeyDetail      = "detail"
+	TagKeyExternal    = "external"
+	TagKeyContentless = "contentless"
+)
+
+// tagName is the internal alias retained so the existing parser body
+// keeps reading without churn; same value as TagName.
+const tagName = TagName
 
 // fieldMeta holds parsed data for a single string field on the model.
 type fieldMeta struct {
@@ -47,8 +64,8 @@ const (
 type tableMeta struct {
 	Table    string
 	Tokenize string
-	Prefix   string // verbatim N1,N2,N3 or empty
-	Detail   string // "full" | "column" | "none"
+	Prefix   string     // verbatim N1,N2,N3 or empty
+	Detail   fts.Detail // DetailFull | DetailColumn | DetailNone
 	Mode     Mode
 	modeSet  bool // tracks whether external/contentless were explicitly set
 	Fields   []fieldMeta
@@ -131,12 +148,12 @@ func mergeTag(tm *tableMeta, tag string, fm *fieldMeta, structName, fieldName st
 		// Spaces escaped as '+' (gorm tag parser is space-inconsistent).
 		val = strings.ReplaceAll(val, "+", " ")
 		switch key {
-		case "column":
+		case TagKeyColumn:
 			if !isIdent(val) {
 				return fmt.Errorf("ftsgorm: %s.%s: column=%q is not a valid identifier", structName, fieldName, val)
 			}
 			fm.Column = val
-		case "table":
+		case TagKeyTable:
 			if !isIdent(val) {
 				return fmt.Errorf("ftsgorm: %s.%s: table=%q is not a valid identifier", structName, fieldName, val)
 			}
@@ -147,14 +164,14 @@ func mergeTag(tm *tableMeta, tag string, fm *fieldMeta, structName, fieldName st
 					structName, tm.Table, val)
 			}
 			tm.Table = val
-		case "tokenize":
+		case TagKeyTokenize:
 			if tm.Tokenize != "" && tm.Tokenize != val {
 				return fmt.Errorf(
 					"ftsgorm: %s declares conflicting fts5 tokenize options %q and %q",
 					structName, tm.Tokenize, val)
 			}
 			tm.Tokenize = val
-		case "prefix":
+		case TagKeyPrefix:
 			// Permitted forms: "2,3,4" — comma-separated positive ints.
 			parts := strings.Split(val, ",")
 			for _, p := range parts {
@@ -170,20 +187,26 @@ func mergeTag(tm *tableMeta, tag string, fm *fieldMeta, structName, fieldName st
 					structName, tm.Prefix, canonical)
 			}
 			tm.Prefix = canonical
-		case "detail":
+		case TagKeyDetail:
+			var d fts.Detail
 			switch val {
-			case "full", "column", "none":
-				if tm.Detail != "" && tm.Detail != val {
-					return fmt.Errorf(
-						"ftsgorm: %s declares conflicting fts5 detail options %q and %q",
-						structName, tm.Detail, val)
-				}
-				tm.Detail = val
+			case "full":
+				d = fts.DetailFull
+			case "column":
+				d = fts.DetailColumn
+			case "none":
+				d = fts.DetailNone
 			default:
 				return fmt.Errorf("ftsgorm: %s.%s: detail=%q (want full | column | none)",
 					structName, fieldName, val)
 			}
-		case "external":
+			if tm.Detail != "" && tm.Detail != d {
+				return fmt.Errorf(
+					"ftsgorm: %s declares conflicting fts5 detail options %q and %q",
+					structName, tm.Detail, d)
+			}
+			tm.Detail = d
+		case TagKeyExternal:
 			b, err := parseBool(val)
 			if err != nil {
 				return fmt.Errorf("ftsgorm: %s.%s: external=%q must be true|false", structName, fieldName, val)
@@ -195,7 +218,7 @@ func mergeTag(tm *tableMeta, tag string, fm *fieldMeta, structName, fieldName st
 			if err := setMode(tm, mode); err != nil {
 				return fmt.Errorf("ftsgorm: %s.%s: %w", structName, fieldName, err)
 			}
-		case "contentless":
+		case TagKeyContentless:
 			b, err := parseBool(val)
 			if err != nil {
 				return fmt.Errorf("ftsgorm: %s.%s: contentless=%q must be true|false", structName, fieldName, val)

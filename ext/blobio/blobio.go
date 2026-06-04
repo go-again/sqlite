@@ -50,11 +50,18 @@ type OpenCallback func(*sqlite.Blob, ...any) error
 //	import _ "github.com/go-again/sqlite/ext/blobio/auto"
 func Register(c *sqlite.Conn) error {
 	return errors.Join(
-		c.RegisterFunc("readblob", makeReadblob(c), false),
-		c.RegisterFunc("writeblob", makeWriteblob(c), false),
-		c.RegisterFunc("openblob", makeOpenblob(c), false),
+		c.RegisterFunc(FuncReadBlob, makeReadblob(c), false),
+		c.RegisterFunc(FuncWriteBlob, makeWriteblob(c), false),
+		c.RegisterFunc(FuncOpenBlob, makeOpenblob(c), false),
 	)
 }
+
+// Exported names of the SQL functions Register installs.
+const (
+	FuncReadBlob  = "readblob"
+	FuncWriteBlob = "writeblob"
+	FuncOpenBlob  = "openblob"
+)
 
 func makeReadblob(c *sqlite.Conn) func(string, string, string, int64, int64, int64) ([]byte, error) {
 	return func(schema, table, column string, rowid, offset, n int64) ([]byte, error) {

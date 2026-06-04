@@ -11,21 +11,21 @@ import (
 
 	sqlite "github.com/go-again/sqlite"
 	"github.com/go-again/sqlite/ext/bloom"
+	"github.com/go-again/sqlite/internal/testhelp"
 )
 
 // openFileSessionNoCleanup opens a file-backed DB at path, pins one
-// conn, registers bloom on it via the per-conn (*sqlite.Conn).Raw path,
-// and returns close
-// funcs so the persistence test can fully tear down a session before
-// opening the next one (necessary because t.Cleanup runs at test end,
-// LIFO, which would leave Session 1's *sql.DB still holding the file
-// lock while Session 2 tries to open the same path).
+// conn, and registers bloom via sc.Raw — but deliberately does NOT
+// install t.Cleanup callbacks. The persistence test needs to fully
+// tear down session 1 before opening session 2 (t.Cleanup runs LIFO
+// at test end, which would leave session 1's *sql.DB still holding
+// the file lock while session 2 tries to open the same path).
 func openFileSessionNoCleanup(t *testing.T, path string) (*sql.DB, *sql.Conn) {
 	t.Helper()
 	if raceEnabled {
 		t.Skip("skipping under -race: see openDB")
 	}
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open(sqlite.DriverName, path)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -105,26 +105,8 @@ func openDB(t *testing.T) (*sql.DB, *sql.Conn) {
 	if raceEnabled {
 		t.Skip("skipping under -race: bloom persists via (*Conn).OpenBlob; modernc Xsqlite3_blob_open trips checkptr")
 	}
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-	sc, err := db.Conn(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = sc.Close() })
-	if err := sc.Raw(func(driverConn any) error {
-		c, ok := driverConn.(*sqlite.Conn)
-		if !ok {
-			return errors.New("not *sqlite.Conn")
-		}
-		return bloom.Register(c)
-	}); err != nil {
-		t.Fatal(err)
-	}
+	db, sc := testhelp.OpenPinned(t, "sqlite", ":memory:")
+	testhelp.RegisterOn(t, sc, bloom.Register)
 	return db, sc
 }
 

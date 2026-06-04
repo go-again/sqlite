@@ -21,14 +21,8 @@ import (
 )
 
 func init() {
-	d := sqlite.DefaultDriver()
-	prev := d.ConnectHook
-	d.ConnectHook = func(c *sqlite.Conn) error {
-		if prev != nil {
-			if err := prev(c); err != nil {
-				return err
-			}
-		}
+	sqlite.RegisterAutoHook(func(c *sqlite.Conn) error {
+		// unicode.Register is variadic; the auto path takes no opts.
 		return unicode.Register(c)
-	}
+	})
 }

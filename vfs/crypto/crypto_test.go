@@ -12,7 +12,7 @@ import (
 	"sync"
 	"testing"
 
-	_ "github.com/go-again/sqlite"
+	sqlite "github.com/go-again/sqlite"
 	"github.com/go-again/sqlite/vfs/crypto"
 )
 
@@ -42,7 +42,7 @@ func TestRoundTrip(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "rt.db")
 	dsn := fmt.Sprintf("file:%s?vfs=%s", dbPath, name)
 
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open(sqlite.DriverName, dsn)
 	if err != nil {
 		t.Fatalf("sql.Open: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestReopenSameKey(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "persist.db")
 	dsn := fmt.Sprintf("file:%s?vfs=%s", dbPath, name)
 
-	db1, _ := sql.Open("sqlite", dsn)
+	db1, _ := sql.Open(sqlite.DriverName, dsn)
 	if _, err := db1.Exec(`CREATE TABLE t (v TEXT)`); err != nil {
 		t.Fatalf("CREATE: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestReopenSameKey(t *testing.T) {
 		t.Fatalf("db1.Close: %v", err)
 	}
 
-	db2, _ := sql.Open("sqlite", dsn)
+	db2, _ := sql.Open(sqlite.DriverName, dsn)
 	t.Cleanup(func() { _ = db2.Close() })
 	var v string
 	if err := db2.QueryRow(`SELECT v FROM t`).Scan(&v); err != nil {
@@ -111,7 +111,7 @@ func TestReopenWrongKeyFailsLoudly(t *testing.T) {
 		t.Fatalf("crypto.New A: %v", err)
 	}
 	dsnA := fmt.Sprintf("file:%s?vfs=%s", dbPath, nameA)
-	dbA, _ := sql.Open("sqlite", dsnA)
+	dbA, _ := sql.Open(sqlite.DriverName, dsnA)
 	if _, err := dbA.Exec(`CREATE TABLE t (v TEXT)`); err != nil {
 		t.Fatalf("CREATE under key A: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestReopenWrongKeyFailsLoudly(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = fsB.Close() })
 	dsnB := fmt.Sprintf("file:%s?vfs=%s", dbPath, nameB)
-	dbB, _ := sql.Open("sqlite", dsnB)
+	dbB, _ := sql.Open(sqlite.DriverName, dsnB)
 	t.Cleanup(func() { _ = dbB.Close() })
 
 	var v string
@@ -161,7 +161,7 @@ func TestOnDiskIsNotPlaintext(t *testing.T) {
 
 	dbPath := filepath.Join(t.TempDir(), "ciphertext.db")
 	dsn := fmt.Sprintf("file:%s?vfs=%s", dbPath, name)
-	db, _ := sql.Open("sqlite", dsn)
+	db, _ := sql.Open(sqlite.DriverName, dsn)
 	if _, err := db.Exec(`CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('plaintext-marker-string')`); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestWALMode_RoundTrip(t *testing.T) {
 
 	dbPath := filepath.Join(t.TempDir(), "wal.db")
 	dsn := fmt.Sprintf("file:%s?vfs=%s", dbPath, name)
-	db, _ := sql.Open("sqlite", dsn)
+	db, _ := sql.Open(sqlite.DriverName, dsn)
 
 	// PRAGMA journal_mode = WAL returns the new mode as a row; SQLite
 	// silently falls back to DELETE if the VFS doesn't support the
@@ -296,7 +296,7 @@ func TestRollbackJournal_Encrypted(t *testing.T) {
 
 	dbPath := filepath.Join(t.TempDir(), "rj.db")
 	dsn := fmt.Sprintf("file:%s?vfs=%s", dbPath, name)
-	db, _ := sql.Open("sqlite", dsn)
+	db, _ := sql.Open(sqlite.DriverName, dsn)
 	t.Cleanup(func() { _ = db.Close() })
 
 	if _, err := db.Exec(`CREATE TABLE t (v TEXT)`); err != nil {
@@ -341,7 +341,7 @@ func TestRollbackJournal_ReplaysCorrectly(t *testing.T) {
 
 	dbPath := filepath.Join(t.TempDir(), "rb.db")
 	dsn := fmt.Sprintf("file:%s?vfs=%s", dbPath, name)
-	db, _ := sql.Open("sqlite", dsn)
+	db, _ := sql.Open(sqlite.DriverName, dsn)
 	t.Cleanup(func() { _ = db.Close() })
 
 	if _, err := db.Exec(`CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)`); err != nil {
@@ -392,7 +392,7 @@ func TestLargeBlob_SpansMultiplePages(t *testing.T) {
 
 	dbPath := filepath.Join(t.TempDir(), "big.db")
 	dsn := fmt.Sprintf("file:%s?vfs=%s", dbPath, name)
-	db, _ := sql.Open("sqlite", dsn)
+	db, _ := sql.Open(sqlite.DriverName, dsn)
 	t.Cleanup(func() { _ = db.Close() })
 
 	if _, err := db.Exec(`CREATE TABLE t (id INTEGER PRIMARY KEY, b BLOB)`); err != nil {
@@ -445,7 +445,7 @@ func TestWAL_VacuumAndCheckpoint(t *testing.T) {
 
 	dbPath := filepath.Join(t.TempDir(), "wv.db")
 	dsn := fmt.Sprintf("file:%s?vfs=%s", dbPath, name)
-	db, _ := sql.Open("sqlite", dsn)
+	db, _ := sql.Open(sqlite.DriverName, dsn)
 	t.Cleanup(func() { _ = db.Close() })
 
 	if _, err := db.Exec(`PRAGMA journal_mode = WAL`); err != nil {
@@ -502,7 +502,7 @@ func TestConcurrentReadsWrites_NoCorruption(t *testing.T) {
 	// about cipher-level correctness under concurrency, not lock
 	// fairness — let SQLite handle the queueing.
 	dsn := fmt.Sprintf("file:%s?vfs=%s&_pragma=busy_timeout(5000)", dbPath, name)
-	db, _ := sql.Open("sqlite", dsn)
+	db, _ := sql.Open(sqlite.DriverName, dsn)
 	t.Cleanup(func() { _ = db.Close() })
 	db.SetMaxOpenConns(8)
 
@@ -573,7 +573,7 @@ func TestAESXTS_RoundTrip(t *testing.T) {
 
 	dbPath := filepath.Join(t.TempDir(), "xts.db")
 	dsn := fmt.Sprintf("file:%s?vfs=%s", dbPath, name)
-	db, _ := sql.Open("sqlite", dsn)
+	db, _ := sql.Open(sqlite.DriverName, dsn)
 	t.Cleanup(func() { _ = db.Close() })
 
 	if _, err := db.Exec(`CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)`); err != nil {
@@ -615,7 +615,7 @@ func TestCipherCrossover(t *testing.T) {
 		t.Fatalf("crypto.New Adiantum: %v", err)
 	}
 	dsnAd := fmt.Sprintf("file:%s?vfs=%s", dbPath, nameAd)
-	dbAd, _ := sql.Open("sqlite", dsnAd)
+	dbAd, _ := sql.Open(sqlite.DriverName, dsnAd)
 	if _, err := dbAd.Exec(`CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('mode-A')`); err != nil {
 		t.Fatalf("write under Adiantum: %v", err)
 	}
@@ -628,7 +628,7 @@ func TestCipherCrossover(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = fsXts.Close() })
 	dsnXts := fmt.Sprintf("file:%s?vfs=%s", dbPath, nameXts)
-	dbXts, _ := sql.Open("sqlite", dsnXts)
+	dbXts, _ := sql.Open(sqlite.DriverName, dsnXts)
 	t.Cleanup(func() { _ = dbXts.Close() })
 	var v string
 	err = dbXts.QueryRow(`SELECT v FROM t`).Scan(&v)
@@ -652,7 +652,7 @@ func TestPageSizeMismatch_FailsLoudly(t *testing.T) {
 		t.Fatalf("crypto.New 4k: %v", err)
 	}
 	dsn4k := fmt.Sprintf("file:%s?vfs=%s", dbPath, name4k)
-	db4k, _ := sql.Open("sqlite", dsn4k)
+	db4k, _ := sql.Open(sqlite.DriverName, dsn4k)
 	if _, err := db4k.Exec(`CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('hi')`); err != nil {
 		t.Fatalf("write under 4k: %v", err)
 	}
@@ -665,7 +665,7 @@ func TestPageSizeMismatch_FailsLoudly(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = fs8k.Close() })
 	dsn8k := fmt.Sprintf("file:%s?vfs=%s", dbPath, name8k)
-	db8k, _ := sql.Open("sqlite", dsn8k)
+	db8k, _ := sql.Open(sqlite.DriverName, dsn8k)
 	t.Cleanup(func() { _ = db8k.Close() })
 
 	var v string
@@ -691,7 +691,7 @@ func TestSHM_StaysPlaintext(t *testing.T) {
 
 	dbPath := filepath.Join(t.TempDir(), "shm.db")
 	dsn := fmt.Sprintf("file:%s?vfs=%s", dbPath, name)
-	db, _ := sql.Open("sqlite", dsn)
+	db, _ := sql.Open(sqlite.DriverName, dsn)
 	if _, err := db.Exec(`PRAGMA journal_mode = WAL`); err != nil {
 		t.Fatalf("PRAGMA WAL: %v", err)
 	}
@@ -741,7 +741,7 @@ func TestIntegrityCheck(t *testing.T) {
 
 	dbPath := filepath.Join(t.TempDir(), "integ.db")
 	dsn := fmt.Sprintf("file:%s?vfs=%s", dbPath, name)
-	db, _ := sql.Open("sqlite", dsn)
+	db, _ := sql.Open(sqlite.DriverName, dsn)
 	t.Cleanup(func() { _ = db.Close() })
 
 	if _, err := db.Exec(`CREATE TABLE t (id INTEGER PRIMARY KEY, blob BLOB)`); err != nil {
@@ -799,7 +799,7 @@ func TestNew_DefensiveCopiesKey(t *testing.T) {
 
 	dbPath := filepath.Join(t.TempDir(), "defcopy.db")
 	dsn := fmt.Sprintf("file:%s?vfs=%s", dbPath, name)
-	db, _ := sql.Open("sqlite", dsn)
+	db, _ := sql.Open(sqlite.DriverName, dsn)
 	t.Cleanup(func() { _ = db.Close() })
 
 	if _, err := db.Exec(`CREATE TABLE t (v TEXT)`); err != nil {
@@ -833,7 +833,7 @@ func TestRandomKey(t *testing.T) {
 
 	dbPath := filepath.Join(t.TempDir(), "rand.db")
 	dsn := fmt.Sprintf("file:%s?vfs=%s", dbPath, name)
-	db, _ := sql.Open("sqlite", dsn)
+	db, _ := sql.Open(sqlite.DriverName, dsn)
 	t.Cleanup(func() { _ = db.Close() })
 
 	if _, err := db.Exec(`CREATE TABLE t (id INTEGER PRIMARY KEY)`); err != nil {

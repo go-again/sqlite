@@ -1,39 +1,39 @@
 package sqlite
 
-// Type aliases for drop-in compatibility with github.com/mattn/go-sqlite3.
+// Type aliases for drop-in compatibility with the cgo-based sqlite3 driver.
 //
 // Existing code that uses *sqlite3.SQLiteDriver, *sqlite3.SQLiteConn,
 // sqlite3.SQLiteError etc. continues to work when the import path is changed
-// from "github.com/mattn/go-sqlite3" to "github.com/go-again/sqlite".
+// to "github.com/go-again/sqlite".
 type (
-	// SQLiteDriver is an alias for Driver. Mattn compatibility.
+	// SQLiteDriver is an alias for Driver.
 	SQLiteDriver = Driver
 
-	// SQLiteConn is an alias for Conn. Mattn compatibility.
+	// SQLiteConn is an alias for Conn.
 	SQLiteConn = Conn
 
-	// SQLiteStmt is an alias for Stmt. Mattn compatibility.
+	// SQLiteStmt is an alias for Stmt.
 	SQLiteStmt = stmt
 
-	// SQLiteRows is an alias for Rows. Mattn compatibility.
+	// SQLiteRows is an alias for Rows.
 	SQLiteRows = rows
 
-	// SQLiteResult is an alias for Result. Mattn compatibility.
+	// SQLiteResult is an alias for Result.
 	SQLiteResult = result
 
-	// SQLiteTx is an alias for Tx. Mattn compatibility.
+	// SQLiteTx is an alias for Tx.
 	SQLiteTx = tx
 
-	// SQLiteBackup is an alias for Backup. Mattn compatibility.
+	// SQLiteBackup is an alias for Backup.
 	SQLiteBackup = Backup
 
-	// SQLiteError is an alias for Error. Mattn compatibility.
+	// SQLiteError is an alias for Error.
 	SQLiteError = Error
 )
 
 // Conn is the SQLite database connection type. It is exposed for use inside
-// mattn-style ConnectHook callbacks and for low-level operations such as
-// custom function registration, hooks, backup, and serialize/deserialize.
+// ConnectHook callbacks and for low-level operations such as custom function
+// registration, hooks, backup, and serialize/deserialize.
 //
 // Conn is identical to the underlying connection struct used by the driver;
 // the alias gives the type an exported name without renaming the internal

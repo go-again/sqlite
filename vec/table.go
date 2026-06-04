@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"iter"
 	"strings"
+
+	"github.com/go-again/sqlite/internal/sqlid"
 )
 
 // Table is a typed handle to a sqlite-vec virtual table backed by an
@@ -28,39 +30,23 @@ type Table struct {
 // QuoteIdent returns name in backticks, escaping any embedded backticks.
 // Used for SQL identifier interpolation outside the vec0 constructor —
 // SQLite treats table/column names as identifiers, not bind parameters.
+// Thin re-export of [internal/sqlid.QuoteIdentBacktick] so the
+// internals share one implementation.
 //
 // Note: vec0's CREATE VIRTUAL TABLE column-argument parser does NOT
 // accept quoted identifiers — only bare names — so identifiers fed
 // into that constructor must pass ValidIdent and be interpolated raw.
-func QuoteIdent(name string) string {
-	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
-}
+func QuoteIdent(name string) string { return sqlid.QuoteIdentBacktick(name) }
 
 // ValidIdent reports whether name is a safe SQL identifier — the
 // conservative ASCII subset: leading letter or underscore, then
 // letters, digits, or underscores. Used to guard against SQL injection
 // at the API boundary when callers pass arbitrary strings as table or
-// column names.
-func ValidIdent(s string) bool {
-	if s == "" {
-		return false
-	}
-	for i, r := range s {
-		switch {
-		case r == '_':
-		case r >= 'a' && r <= 'z':
-		case r >= 'A' && r <= 'Z':
-		case i > 0 && r >= '0' && r <= '9':
-		default:
-			return false
-		}
-	}
-	return true
-}
+// column names. Thin re-export of [internal/sqlid.ValidIdent].
+func ValidIdent(s string) bool { return sqlid.ValidIdent(s) }
 
 // quote / validIdent are the legacy private aliases — kept so the rest
-// of the vec package compiles unchanged. New code (and sub-packages
-// like vec/gorm) should use the exported names.
+// of the vec package compiles unchanged.
 func quote(name string) string { return QuoteIdent(name) }
 func validIdent(s string) bool { return ValidIdent(s) }
 
@@ -129,7 +115,7 @@ func Create(ctx context.Context, db *sql.DB, name string, dim int, opts Options,
 	}
 	stmt := fmt.Sprintf(
 		"CREATE VIRTUAL TABLE %s%s USING vec0(%s float[%d] distance=%s)",
-		ifNotExists, quote(name), col, dim, metricKeyword(opts.Metric),
+		ifNotExists, quote(name), col, dim, opts.Metric.Keyword(),
 	)
 	if _, err := db.ExecContext(ctx, stmt); err != nil {
 		if isAlreadyExistsErr(err) {
@@ -278,21 +264,6 @@ func (t *Table) Delete(ctx context.Context, rowid int64) error {
 func (t *Table) Drop(ctx context.Context) error {
 	_, err := t.db.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", quote(t.name)))
 	return err
-}
-
-// metricKeyword maps a Metric to the keyword sqlite-vec accepts in vec0's
-// distance= option. sqlite-vec supports exactly three: l1, l2, cosine.
-// Our Dot constant is kept as a name alias for L1 for plan/historical
-// reasons — see types.go.
-func metricKeyword(m Metric) string {
-	switch m {
-	case Cosine:
-		return "cosine"
-	case Dot:
-		return "l1"
-	}
-	// L2 / unknown
-	return "l2"
 }
 
 // Neighbor is one row returned by KNN: the matched rowid and the

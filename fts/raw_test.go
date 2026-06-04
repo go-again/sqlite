@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	_ "github.com/go-again/sqlite"
+	sqlite "github.com/go-again/sqlite"
 )
 
 // openRaw returns an in-memory DB pinned to a single connection. FTS5
@@ -13,7 +13,7 @@ import (
 // to use the same connection that ran CREATE.
 func openRaw(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite3", ":memory:")
+	db, err := sql.Open(sqlite.DriverNameSQLite3, ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}

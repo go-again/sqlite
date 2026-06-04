@@ -55,17 +55,29 @@ import (
 	sqlite "github.com/go-again/sqlite"
 )
 
+// Exported names of the SQL functions Register installs. Exposed as
+// constants so callers can build queries that reference them without
+// re-hardcoding the string.
+const (
+	FuncUUID                 = "uuid"
+	FuncGenRandomUUID        = "gen_random_uuid"
+	FuncUUIDStr              = "uuid_str"
+	FuncUUIDBlob             = "uuid_blob"
+	FuncUUIDExtractVersion   = "uuid_extract_version"
+	FuncUUIDExtractTimestamp = "uuid_extract_timestamp"
+)
+
 // Register installs the uuid family of SQL functions on c.
 func Register(c *sqlite.Conn) error {
 	return errors.Join(
 		// uuid([ver [, ns [, data]]]) — variadic any so we can accept
 		// the polymorphic namespace argument (TEXT, BLOB, or shortcut).
-		c.RegisterFunc("uuid", generate, false),
-		c.RegisterFunc("gen_random_uuid", randomV4, false),
-		c.RegisterFunc("uuid_str", toString, true),
-		c.RegisterFunc("uuid_blob", toBlob, true),
-		c.RegisterFunc("uuid_extract_version", extractVersion, true),
-		c.RegisterFunc("uuid_extract_timestamp", extractTimestamp, true),
+		c.RegisterFunc(FuncUUID, generate, false),
+		c.RegisterFunc(FuncGenRandomUUID, randomV4, false),
+		c.RegisterFunc(FuncUUIDStr, toString, true),
+		c.RegisterFunc(FuncUUIDBlob, toBlob, true),
+		c.RegisterFunc(FuncUUIDExtractVersion, extractVersion, true),
+		c.RegisterFunc(FuncUUIDExtractTimestamp, extractTimestamp, true),
 	)
 }
 

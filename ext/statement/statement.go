@@ -40,7 +40,11 @@ import (
 	"sync"
 
 	sqlite "github.com/go-again/sqlite"
+	"github.com/go-again/sqlite/internal/sqlid"
 )
+
+// ModuleName is the name the vtab registers under: `statement`.
+const ModuleName = "statement"
 
 // Register installs the `statement` virtual table on c.
 //
@@ -49,7 +53,7 @@ import (
 //
 //	import _ "github.com/go-again/sqlite/ext/statement/auto"
 func Register(c *sqlite.Conn) error {
-	return c.CreateModule("statement", ctor)
+	return c.CreateModule(ModuleName, ctor)
 }
 
 func ctor(c *sqlite.Conn, _, _, _ string, args []string) (sqlite.VTab, error) {
@@ -347,6 +351,4 @@ func (c *cursor) Close() error {
 	return err
 }
 
-func quote(name string) string {
-	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
-}
+func quote(name string) string { return sqlid.QuoteIdent(name) }

@@ -162,7 +162,7 @@ func TestTranslateMattnDSN_StrictMode(t *testing.T) {
 }
 
 func TestDSN_ForeignKeysApplied(t *testing.T) {
-	db, err := sql.Open(DriverNameMattn, ":memory:?_foreign_keys=on")
+	db, err := sql.Open(DriverNameSQLite3, ":memory:?_foreign_keys=on")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestDSN_ForeignKeysApplied(t *testing.T) {
 }
 
 func TestDSN_BusyTimeoutApplied(t *testing.T) {
-	db, err := sql.Open(DriverNameMattn, ":memory:?_busy_timeout=3000")
+	db, err := sql.Open(DriverNameSQLite3, ":memory:?_busy_timeout=3000")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestDSN_JournalModeWAL(t *testing.T) {
 }
 
 func TestDSN_MultiplePragmas(t *testing.T) {
-	db, err := sql.Open(DriverNameMattn, ":memory:?_foreign_keys=on&_busy_timeout=1000&_synchronous=NORMAL")
+	db, err := sql.Open(DriverNameSQLite3, ":memory:?_foreign_keys=on&_busy_timeout=1000&_synchronous=NORMAL")
 	if err != nil {
 		t.Fatal(err)
 	}

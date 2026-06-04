@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"errors"
 	"testing"
 
 	sqlite "github.com/go-again/sqlite"
 	"github.com/go-again/sqlite/ext/blobio"
+	"github.com/go-again/sqlite/internal/testhelp"
 )
 
 // openDB pins a single conn, registers blobio on it, and creates a tiny
@@ -18,26 +18,8 @@ func openDB(t *testing.T) (*sql.DB, *sql.Conn) {
 	if raceEnabled {
 		t.Skip("skipping under -race: modernc Xsqlite3_blob_open trips Go's checkptr analyzer (upstream issue)")
 	}
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-	sc, err := db.Conn(context.Background())
-	if err != nil {
-		t.Fatalf("Conn: %v", err)
-	}
-	t.Cleanup(func() { _ = sc.Close() })
-	if err := sc.Raw(func(driverConn any) error {
-		c, ok := driverConn.(*sqlite.Conn)
-		if !ok {
-			return errors.New("not *sqlite.Conn")
-		}
-		return blobio.Register(c)
-	}); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
+	db, sc := testhelp.OpenPinned(t, "sqlite", ":memory:")
+	testhelp.RegisterOn(t, sc, blobio.Register)
 	if _, err := sc.ExecContext(context.Background(),
 		`CREATE TABLE blobs (id INTEGER PRIMARY KEY, b BLOB)`); err != nil {
 		t.Fatal(err)

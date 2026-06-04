@@ -508,8 +508,6 @@ Always:
      stability note (consumer guide).
    - `docs/coverage-<area>.md` for any change to vec / fts / gorm /
      raw-SQL feature surface (status flips, new tests cited).
-   - `plan-doc-sweep.md` inventory if a new public sub-package or
-     top-level doc file is added.
    - **Do not** link to `ARTICLE-EN.md` / `ARTICLE-RU.md` from any
      onboarding/consumer doc — they're promotional content only.
    - **Do not** touch `ARTICLE-RU.md` at all (maintainer-owned).
@@ -663,10 +661,7 @@ surface. The `⚠ inherited` cells are honest gaps; flipping one to
 When in doubt, look at how an existing parallel feature is implemented and
 mirror it. The two `Observable` wrappers (`vec/observability.go` and
 `fts/observability.go`) are intentionally parallel; new sub-packages should
-match. The mattn-compat shim layer (`compat_*.go`) is the model for
-preserving an existing public API while changing the implementation.
+match. The `compat_*.go` shim layer is the model for preserving an
+existing public API while changing the implementation.
 
-The plan files used during development (`plan-initial.md`,
-`plan-audit-followup.md`, `plan-gorm-integration.md`) are **not** in the
-repository — don't reference them. This document is the canonical
-agent-facing summary.
+This document is the canonical agent-facing summary.

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/go-again/sqlite"
+	sqlite "github.com/go-again/sqlite"
 	"github.com/go-again/sqlite/vfs/crypto"
 )
 
@@ -62,7 +62,7 @@ func TestRecorder_FiresOnReadsAndWrites(t *testing.T) {
 
 	dbPath := filepath.Join(t.TempDir(), "rec.db")
 	dsn := fmt.Sprintf("file:%s?vfs=%s", dbPath, name)
-	db, _ := sql.Open("sqlite", dsn)
+	db, _ := sql.Open(sqlite.DriverName, dsn)
 	t.Cleanup(func() { _ = db.Close() })
 
 	if _, err := db.Exec(`CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)`); err != nil {
@@ -170,7 +170,7 @@ func TestRecorder_FiresAcrossFailure(t *testing.T) {
 		t.Fatalf("crypto.New A: %v", err)
 	}
 	dsnA := fmt.Sprintf("file:%s?vfs=%s", dbPath, nameA)
-	dbA, _ := sql.Open("sqlite", dsnA)
+	dbA, _ := sql.Open(sqlite.DriverName, dsnA)
 	if _, err := dbA.Exec(`CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('hi')`); err != nil {
 		t.Fatalf("CREATE A: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestRecorder_FiresAcrossFailure(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = fsB.Close() })
 	dsnB := fmt.Sprintf("file:%s?vfs=%s", dbPath, nameB)
-	dbB, _ := sql.Open("sqlite", dsnB)
+	dbB, _ := sql.Open(sqlite.DriverName, dsnB)
 	t.Cleanup(func() { _ = dbB.Close() })
 
 	var v string

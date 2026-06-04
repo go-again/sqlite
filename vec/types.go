@@ -1,6 +1,9 @@
 package vec
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Metric identifies the distance function sqlite-vec uses when comparing
 // vectors. The three sqlite-vec-supported metrics are L1, L2, and Cosine;
@@ -50,6 +53,21 @@ func (m Metric) Keyword() string {
 	return "l2"
 }
 
+// ParseMetric maps a case-insensitive keyword to a Metric. Recognised
+// values: "l2" (default), "cosine", "dot", "l1". Useful when reading
+// metric names from tags, configs, or user input.
+func ParseMetric(s string) (Metric, error) {
+	switch strings.ToLower(s) {
+	case "", "l2":
+		return L2, nil
+	case "cosine":
+		return Cosine, nil
+	case "dot", "l1":
+		return Dot, nil
+	}
+	return 0, fmt.Errorf("vec: unknown metric %q (want l2 | cosine | dot)", s)
+}
+
 // Encoding chooses how this package serializes []float32 vectors when sending
 // them to SQLite. Both encodings are accepted by sqlite-vec; binary is more
 // compact and avoids the JSON parse on every insert, while JSON is human-
@@ -65,6 +83,18 @@ const (
 	// performance when bulk-inserting.
 	Binary
 )
+
+// ParseEncoding maps a case-insensitive keyword to an Encoding.
+// Recognised values: "json" (default), "binary".
+func ParseEncoding(s string) (Encoding, error) {
+	switch strings.ToLower(s) {
+	case "", "json":
+		return JSON, nil
+	case "binary":
+		return Binary, nil
+	}
+	return 0, fmt.Errorf("vec: unknown encoding %q (want json | binary)", s)
+}
 
 // Options configures Create.
 type Options struct {

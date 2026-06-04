@@ -57,41 +57,19 @@ type FS struct {
 
 const defaultPageSize = 4096
 
-var newVfsID atomic.Uint64
-
 // stateMu serializes [New] and [FS.Close] so libc TLS setup and the
 // global VFS registration table aren't raced.
 var stateMu sync.Mutex
 
 // fsRegistry maps the opaque token stored in pVfs->FpAppData (and
 // later copied into per-file state) back to the *FS that owns it.
-// Through a registry rather than raw unsafe.Pointer so the FS stays
-// GC-reachable while C-side state holds a reference.
-var (
-	fsRegistryMu sync.RWMutex
-	fsRegistry   = map[uintptr]*FS{}
-	nextFSToken  atomic.Uint64
-)
+// Promoted into [cabi.Registry] so the four VFS sub-packages share
+// one copy of the lookup machinery.
+var fsRegistry = cabi.NewRegistry[FS]()
 
-func registerFS(fs *FS) uintptr {
-	tok := uintptr(nextFSToken.Add(1))
-	fsRegistryMu.Lock()
-	fsRegistry[tok] = fs
-	fsRegistryMu.Unlock()
-	return tok
-}
-
-func lookupFS(tok uintptr) *FS {
-	fsRegistryMu.RLock()
-	defer fsRegistryMu.RUnlock()
-	return fsRegistry[tok]
-}
-
-func unregisterFS(tok uintptr) {
-	fsRegistryMu.Lock()
-	delete(fsRegistry, tok)
-	fsRegistryMu.Unlock()
-}
+func registerFS(fs *FS) uintptr { return fsRegistry.Register(fs) }
+func lookupFS(tok uintptr) *FS  { return fsRegistry.Lookup(tok) }
+func unregisterFS(tok uintptr)  { fsRegistry.Unregister(tok) }
 
 // New registers a checksum VFS and returns its name (slot into a DSN
 // as `?vfs=<name>`), a handle for cleanup, and any error.
@@ -133,7 +111,7 @@ func New(opts Options) (name string, fs *FS, err error) {
 	}
 	defVfs := (*sqlite3.Tsqlite3_vfs)(unsafe.Pointer(defPtr))
 
-	name = fmt.Sprintf("cksm%x", newVfsID.Add(1))
+	name = cabi.UniqueName("cksm")
 	cname, allocErr := libc.CString(name)
 	if allocErr != nil {
 		tls.Close()

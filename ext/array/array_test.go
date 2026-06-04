@@ -16,7 +16,7 @@ import (
 // the test uses for SQL execution.
 func openDB(t *testing.T) (*sql.DB, *sql.Conn, *sqlite.Conn) {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
+	db, err := sql.Open(sqlite.DriverName, ":memory:")
 	if err != nil {
 		t.Fatalf("sql.Open: %v", err)
 	}

@@ -12,7 +12,70 @@
 // helpers belongs in the calling extension.
 package sqlid
 
-import "strings"
+import (
+	"database/sql/driver"
+	"strings"
+)
+
+// QuoteIdent renders an arbitrary string as a SQL identifier using
+// SQLite's canonical double-quote escape: wrap in `"…"` and double
+// any embedded double-quotes. This is what the doc-comments in the
+// ext/* sub-packages mean by "quote identifier" — every loadable
+// extension that builds SQL strings against shadow tables had its own
+// byte-identical copy until this helper consolidated them.
+func QuoteIdent(s string) string {
+	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+}
+
+// QuoteIdentBacktick renders s as a backtick-quoted identifier
+// (`…`), doubling any embedded backticks. SQLite accepts this form
+// alongside the canonical double-quoted shape; sqlite-vec's vec0
+// CREATE VIRTUAL TABLE constructor and FTS5's fts5 constructor both
+// expect bare identifiers, so vec / fts pass arguments through this
+// helper outside the constructor and rely on ValidIdent inside it.
+func QuoteIdentBacktick(s string) string {
+	return "`" + strings.ReplaceAll(s, "`", "``") + "`"
+}
+
+// ValidIdent reports whether s is a safe SQL identifier — the
+// conservative ASCII subset: leading letter or underscore, then
+// letters, digits, or underscores. Used to guard against SQL
+// injection at the API boundary when callers pass arbitrary strings
+// as table or column names that have to be interpolated unquoted
+// (e.g. inside the vec0 / FTS5 CREATE VIRTUAL TABLE constructors,
+// which don't accept quoted identifiers).
+func ValidIdent(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		switch {
+		case r == '_':
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case i > 0 && r >= '0' && r <= '9':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// ToNamedValues converts a positional []driver.Value to the
+// []driver.NamedValue shape that the non-deprecated `Stmt.QueryContext`
+// / `Conn.ExecContext` paths expect. Ordinals are 1-based. Used by
+// the vtab-side ext/* packages that hand bind arguments through the
+// driver from inside `Filter` / `Update` callbacks.
+func ToNamedValues(args []driver.Value) []driver.NamedValue {
+	if len(args) == 0 {
+		return nil
+	}
+	out := make([]driver.NamedValue, len(args))
+	for i, v := range args {
+		out[i] = driver.NamedValue{Ordinal: i + 1, Value: v}
+	}
+	return out
+}
 
 // NamedArg splits a `key=value` argument into its two halves and trims
 // surrounding whitespace from each. If arg contains no '=', the whole

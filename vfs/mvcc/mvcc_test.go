@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	_ "github.com/go-again/sqlite"
+	sqlite "github.com/go-again/sqlite"
 	"github.com/go-again/sqlite/vfs/mvcc"
 )
 
@@ -17,7 +17,7 @@ func TestMVCC_RoundTrip(t *testing.T) {
 	}
 	defer fs.Close()
 
-	db, err := sql.Open("sqlite", "file:/x?vfs="+name)
+	db, err := sql.Open(sqlite.DriverName, "file:/x?vfs="+name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestMVCC_SharedDBSeenByMultipleHandles(t *testing.T) {
 	}
 	defer fs.Close()
 
-	writer, err := sql.Open("sqlite", "file:/shared?vfs="+name)
+	writer, err := sql.Open(sqlite.DriverName, "file:/shared?vfs="+name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestMVCC_SharedDBSeenByMultipleHandles(t *testing.T) {
 	}
 
 	// A second sql.DB pointing at the same DB name should see the row.
-	reader, err := sql.Open("sqlite", "file:/shared?vfs="+name)
+	reader, err := sql.Open(sqlite.DriverName, "file:/shared?vfs="+name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,9 +87,9 @@ func TestMVCC_PrivateDBIsolated(t *testing.T) {
 	defer fs.Close()
 
 	// Names without a leading slash get private storage per open.
-	w1, _ := sql.Open("sqlite", "file:scratch?vfs="+name)
+	w1, _ := sql.Open(sqlite.DriverName, "file:scratch?vfs="+name)
 	defer w1.Close()
-	w2, _ := sql.Open("sqlite", "file:scratch?vfs="+name)
+	w2, _ := sql.Open(sqlite.DriverName, "file:scratch?vfs="+name)
 	defer w2.Close()
 	w1.SetMaxOpenConns(1)
 	w2.SetMaxOpenConns(1)
@@ -116,7 +116,7 @@ func TestMVCC_ConcurrentReadDuringWriteSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer fs.Close()
-	db, _ := sql.Open("sqlite", "file:/snap?vfs="+name)
+	db, _ := sql.Open(sqlite.DriverName, "file:/snap?vfs="+name)
 	defer db.Close()
 	db.SetMaxOpenConns(2)
 	ctx := context.Background()
@@ -173,7 +173,7 @@ func TestMVCC_ConcurrentWritersSerialize(t *testing.T) {
 
 	const dsn = "file:/contended?vfs=" + ""
 	openOne := func() *sql.DB {
-		d, err := sql.Open("sqlite", "file:/contended?_pragma=busy_timeout(2000)&vfs="+name)
+		d, err := sql.Open(sqlite.DriverName, "file:/contended?_pragma=busy_timeout(2000)&vfs="+name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -235,7 +235,7 @@ func TestMVCC_XOpen_RejectsJournalOpens(t *testing.T) {
 	// satisfy. The DSN must be a main DB (it'll open) but the PRAGMA
 	// to enter WAL mode requires opening the -wal file — and that's
 	// the journal-class open xOpen rejects.
-	db, err := sql.Open("sqlite", "file:/wal?vfs="+name)
+	db, err := sql.Open(sqlite.DriverName, "file:/wal?vfs="+name)
 	if err != nil {
 		t.Fatal(err)
 	}

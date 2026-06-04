@@ -6,14 +6,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	_ "github.com/go-again/sqlite"
+	sqlite "github.com/go-again/sqlite"
 	"github.com/go-again/sqlite/vfs/crypto"
 )
 
 // benchInsertN runs a deterministic insert-heavy workload against a
 // freshly-opened DB and is used by all three cipher benchmarks.
 func benchInsertN(b *testing.B, dsn string) {
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open(sqlite.DriverName, dsn)
 	if err != nil {
 		b.Fatal(err)
 	}

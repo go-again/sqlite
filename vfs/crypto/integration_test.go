@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	_ "github.com/go-again/sqlite"
+	sqlite "github.com/go-again/sqlite"
 	"github.com/go-again/sqlite/fts"
 	"github.com/go-again/sqlite/vec"
 	"github.com/go-again/sqlite/vfs/crypto"
@@ -31,7 +31,7 @@ func openEncryptedDB(t *testing.T, dir string, k byte) *sql.DB {
 
 	dbPath := filepath.Join(dir, fmt.Sprintf("encrypted-%d.db", k))
 	dsn := fmt.Sprintf("file:%s?vfs=%s", dbPath, name)
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open(sqlite.DriverName, dsn)
 	if err != nil {
 		t.Fatalf("sql.Open: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestVecAndFTS_DiskIsCiphertext(t *testing.T) {
 		t.Fatalf("crypto.New: %v", err)
 	}
 	dsn := fmt.Sprintf("file:%s?vfs=%s", dbPath, name)
-	db, _ := sql.Open("sqlite", dsn)
+	db, _ := sql.Open(sqlite.DriverName, dsn)
 	db.SetMaxOpenConns(1)
 	ctx := context.Background()
 
@@ -230,7 +230,7 @@ func TestCrypto_XOpen_InvalidPathRejected(t *testing.T) {
 
 	bad := filepath.Join(t.TempDir(), "nonexistent-subdir", "x.db")
 	for range 50 {
-		db, err := sql.Open("sqlite", bad+"?vfs="+name)
+		db, err := sql.Open(sqlite.DriverName, bad+"?vfs="+name)
 		if err != nil {
 			db.Close()
 			continue
@@ -242,7 +242,7 @@ func TestCrypto_XOpen_InvalidPathRejected(t *testing.T) {
 	}
 
 	good := filepath.Join(t.TempDir(), "good.db")
-	db, err := sql.Open("sqlite", good+"?vfs="+name)
+	db, err := sql.Open(sqlite.DriverName, good+"?vfs="+name)
 	if err != nil {
 		t.Fatal(err)
 	}

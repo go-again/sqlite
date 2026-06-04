@@ -15,7 +15,7 @@ import (
 
 func withLines(t *testing.T, fsys fs.FS) (*sql.DB, *sql.Conn) {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
+	db, err := sql.Open(sqlite.DriverName, ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}

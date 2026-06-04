@@ -145,6 +145,19 @@ const (
 	TempStoreMemory  TempStore = "MEMORY"
 )
 
+// Exported pragma-key constants. Used internally by the DSN renderer
+// and the [ApplyPragmas] / [BuildDSN] code paths; exposed so callers
+// building custom pragma strings or migration scripts can reference
+// the canonical SQLite spelling without re-hardcoding it.
+const (
+	PragmaJournalMode = "journal_mode"
+	PragmaBusyTimeout = "busy_timeout"
+	PragmaSynchronous = "synchronous"
+	PragmaForeignKeys = "foreign_keys"
+	PragmaCacheSize   = "cache_size"
+	PragmaTempStore   = "temp_store"
+)
+
 // Pragmas maps the most common SQLite knobs to Go fields. Unset
 // values are "leave SQLite alone"; only the values you populate fire
 // as PRAGMA statements at open time.
