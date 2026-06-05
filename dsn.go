@@ -102,30 +102,34 @@ func translateMattnDSN(query string) (string, error) {
 		// boolish indicates the value should be coerced from on/off/yes/no/true/false to 1/0.
 		boolish bool
 	}
+	// Keys reference the exported Flag* constants so the canonical DSN
+	// spellings have a single source of truth — rename a constant and
+	// the alias table follows. Values are SQLite PRAGMA names (not DSN
+	// flags), so they stay as literals.
 	pragmas := map[string]pragmaSpec{
-		"_foreign_keys":             {"foreign_keys", true},
-		"_fk":                       {"foreign_keys", true},
-		"_busy_timeout":             {"busy_timeout", false},
-		"_timeout":                  {"busy_timeout", false},
-		"_journal_mode":             {"journal_mode", false},
-		"_journal":                  {"journal_mode", false},
-		"_synchronous":              {"synchronous", false},
-		"_sync":                     {"synchronous", false},
-		"_locking_mode":             {"locking_mode", false},
-		"_locking":                  {"locking_mode", false},
-		"_secure_delete":            {"secure_delete", false},
-		"_recursive_triggers":       {"recursive_triggers", true},
-		"_rt":                       {"recursive_triggers", true},
-		"_cache_size":               {"cache_size", false},
-		"_auto_vacuum":              {"auto_vacuum", false},
-		"_vacuum":                   {"auto_vacuum", false},
-		"_defer_foreign_keys":       {"defer_foreign_keys", true},
-		"_defer_fk":                 {"defer_foreign_keys", true},
-		"_ignore_check_constraints": {"ignore_check_constraints", true},
-		"_case_sensitive_like":      {"case_sensitive_like", true},
-		"_cslike":                   {"case_sensitive_like", true},
-		"_query_only":               {"query_only", true},
-		"_writable_schema":          {"writable_schema", true},
+		FlagForeignKeys:            {"foreign_keys", true},
+		FlagFK:                     {"foreign_keys", true},
+		FlagBusyTimeout:            {"busy_timeout", false},
+		FlagTimeout:                {"busy_timeout", false},
+		FlagJournalMode:            {"journal_mode", false},
+		FlagJournal:                {"journal_mode", false},
+		FlagSynchronous:            {"synchronous", false},
+		FlagSync:                   {"synchronous", false},
+		FlagLockingMode:            {"locking_mode", false},
+		FlagLocking:                {"locking_mode", false},
+		FlagSecureDelete:           {"secure_delete", false},
+		FlagRecursiveTriggers:      {"recursive_triggers", true},
+		FlagRT:                     {"recursive_triggers", true},
+		FlagCacheSize:              {"cache_size", false},
+		FlagAutoVacuum:             {"auto_vacuum", false},
+		FlagVacuum:                 {"auto_vacuum", false},
+		FlagDeferForeignKeys:       {"defer_foreign_keys", true},
+		FlagDeferFK:                {"defer_foreign_keys", true},
+		FlagIgnoreCheckConstraints: {"ignore_check_constraints", true},
+		FlagCaseSensitiveLike:      {"case_sensitive_like", true},
+		FlagCSLike:                 {"case_sensitive_like", true},
+		FlagQueryOnly:              {"query_only", true},
+		FlagWritableSchema:         {"writable_schema", true},
 	}
 
 	for alias, spec := range pragmas {
@@ -231,18 +235,22 @@ func parseBoolish(s string) (bool, error) {
 // _stmt_cache_size configures the per-connection prepared-statement LRU
 // (see stmt_cache.go); applyQueryParams reads it.
 var knownDSNFlags = map[string]bool{
-	"_pragma":              true,
-	"_time_format":         true,
-	"_time_integer_format": true,
-	"_inttotime":           true,
-	"_stmt_cache_size":     true,
-	"_texttotime":          true,
-	"_timezone":            true,
-	"_txlock":              true,
-	"vfs":                  true,
-	"cache":                true,
-	"mode":                 true,
-	"immutable":            true,
-	"psow":                 true,
-	"nolock":               true,
+	// mattn/modernc `_*` flags — keyed off the exported constants.
+	FlagPragma:            true,
+	FlagTimeFormat:        true,
+	FlagTimeIntegerFormat: true,
+	FlagIntToTime:         true,
+	FlagStmtCacheSize:     true,
+	FlagTextToTime:        true,
+	FlagTimezone:          true,
+	FlagTxLock:            true,
+	// URI-level / modernc-native passthrough flags. These are not
+	// mattn `_*` flags, so they have no Flag* constant; they're
+	// understood directly by the URI parser / modernc VFS layer.
+	"vfs":       true,
+	"cache":     true,
+	"mode":      true,
+	"immutable": true,
+	"psow":      true,
+	"nolock":    true,
 }

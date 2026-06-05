@@ -5,6 +5,8 @@ import (
 
 	"modernc.org/libc"
 	sqlite3 "modernc.org/sqlite/lib"
+
+	"github.com/go-again/sqlite/vfs/internal/memio"
 )
 
 func xCloseTrampoline(_ *libc.TLS, pFile uintptr) int32 {
@@ -35,23 +37,9 @@ func xReadTrampoline(_ *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Tsq
 	for i := range dst {
 		dst[i] = 0
 	}
-	n := int32(0)
-	end := off + sqlite3.Tsqlite3_int64(amt)
-	for k, v := range h.db.pages {
-		pageStart := k
-		pageEnd := k + int64(len(v))
-		s := max(pageStart, int64(off))
-		e := min(pageEnd, int64(end))
-		if s >= e {
-			continue
-		}
-		copy(dst[s-int64(off):e-int64(off)], v[s-pageStart:e-pageStart])
-		filled := int32(e - s)
-		if filled > n {
-			n = filled
-		}
-	}
-	if int64(end) > h.db.size {
+	end := int64(off) + int64(amt)
+	n := memio.ReadFromPages(h.db.pages, int64(off), end, dst)
+	if end > h.db.size {
 		return sqlite3.SQLITE_IOERR_SHORT_READ
 	}
 	if n < amt {

@@ -5,6 +5,8 @@ import (
 	"iter"
 	"log/slog"
 	"time"
+
+	"github.com/go-again/sqlite/internal/obs"
 )
 
 // Observable wraps an Index with optional logging and metrics hooks. Callers
@@ -149,13 +151,5 @@ func (o *Observable[K, V]) SearchSlice(ctx context.Context, q Query, opts ...Sea
 
 // log dispatches to the configured slog.Logger at the right level.
 func (o *Observable[K, V]) log(ctx context.Context, msg string, err error, attrs ...slog.Attr) {
-	if o.cfg.logger == nil {
-		return
-	}
-	if err != nil {
-		attrs = append(attrs, slog.String("err", err.Error()))
-		o.cfg.logger.LogAttrs(ctx, slog.LevelError, msg, attrs...)
-		return
-	}
-	o.cfg.logger.LogAttrs(ctx, slog.LevelInfo, msg, attrs...)
+	obs.Log(ctx, o.cfg.logger, msg, err, attrs...)
 }

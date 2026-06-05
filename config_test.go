@@ -192,7 +192,7 @@ func TestOpen_ExtraPragmasFire(t *testing.T) {
 // being silently dropped.
 func TestOpen_ExtraInvalidPragmaSurfaces(t *testing.T) {
 	dir := t.TempDir()
-	_, err := sqlite.Open(sqlite.Config{
+	db, err := sqlite.Open(sqlite.Config{
 		Path: filepath.Join(dir, "bad.db"),
 		Pragmas: sqlite.Pragmas{
 			Extra: map[string]string{
@@ -200,6 +200,13 @@ func TestOpen_ExtraInvalidPragmaSurfaces(t *testing.T) {
 			},
 		},
 	})
+	// SQLite silently ignores unknown pragmas, so Open usually succeeds
+	// here. Close the returned DB so its file handle is released before
+	// t.TempDir's cleanup — Windows can't unlink a file with an open
+	// handle, unlike Linux/macOS.
+	if db != nil {
+		_ = db.Close()
+	}
 	// modernc's driver may or may not error on unknown PRAGMA names
 	// (SQLite silently ignores them by default). The contract we
 	// care about is: if it DOES error, Open surfaces it. If SQLite
@@ -756,7 +763,7 @@ func TestOpen_FailedOpenReleasesVFS(t *testing.T) {
 	dir := t.TempDir()
 	// Bad PRAGMA — drives the PingContext path to fail after VFS
 	// has been registered.
-	_, err := sqlite.Open(sqlite.Config{
+	db0, err := sqlite.Open(sqlite.Config{
 		Path: filepath.Join(dir, "fail.db"),
 		Encryption: &sqlite.Encryption{
 			Key:    make([]byte, 32),
@@ -771,6 +778,13 @@ func TestOpen_FailedOpenReleasesVFS(t *testing.T) {
 		},
 	})
 	if err == nil {
+		// Some platforms (e.g. Windows) accept the malformed pragma, so
+		// Open succeeds. Close the DB so its file handle is released
+		// before t.TempDir cleanup — otherwise Windows can't unlink
+		// fail.db while the handle is open.
+		if db0 != nil {
+			_ = db0.Close()
+		}
 		t.Skip("driver accepted bad pragma; no easy way to force a post-VFS-registration failure")
 	}
 	// A subsequent successful Open should work — proves the failed

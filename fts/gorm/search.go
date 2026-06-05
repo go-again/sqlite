@@ -3,13 +3,12 @@ package ftsgorm
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"strconv"
 	"strings"
 
 	"github.com/go-again/sqlite/fts"
+	"github.com/go-again/sqlite/internal/gormbridge"
 	"gorm.io/gorm"
-	"gorm.io/gorm/schema"
 )
 
 // Hit pairs a typed model T with the FTS5 rank score and the optional
@@ -178,7 +177,7 @@ func Search[T any](ctx context.Context, db *gorm.DB, q fts.Query, opts ...Option
 				"with gorm.DB.Raw(sql, args...).Scan(&out) to consume custom projections")
 	}
 
-	pool, err := activePool(db)
+	pool, err := gormbridge.ActivePool(db)
 	if err != nil {
 		return nil, err
 	}
@@ -280,25 +279,15 @@ func Search[T any](ctx context.Context, db *gorm.DB, q fts.Query, opts ...Option
 	}
 
 	// Fetch source rows via gorm so scopes/preloads chained on db apply.
+	// Reassembled in match (rank) order below since gorm's `IN` clause
+	// won't preserve order on SQLite.
 	rowids := make([]any, len(matches))
 	for i, m := range matches {
 		rowids[i] = m.rowid
 	}
-	models := reflect.New(reflect.SliceOf(reflect.TypeOf(zero))).Interface()
-	if err := db.WithContext(ctx).
-		Where(fmt.Sprintf("%s IN ?", quoteIdent(mm.PKField.DBName)), rowids).
-		Find(models).Error; err != nil {
+	indexed, err := gormbridge.MaterializeByRowid[T](ctx, db, mm.PKField, rowids)
+	if err != nil {
 		return nil, fmt.Errorf("ftsgorm: fetch models: %w", err)
-	}
-	indexed := map[int64]T{}
-	sliceVal := reflect.ValueOf(models).Elem()
-	for i := 0; i < sliceVal.Len(); i++ {
-		row := sliceVal.Index(i)
-		pk, ok := pkAsInt64(mm.PKField, row)
-		if !ok {
-			continue
-		}
-		indexed[pk] = row.Interface().(T)
 	}
 
 	results := make([]Hit[T], 0, len(matches))
@@ -436,23 +425,4 @@ func columnIndex(mm *modelMeta, name string) int {
 		}
 	}
 	return -1
-}
-
-// pkAsInt64 reads the PK as int64 off a row. Mirrors the vec/gorm
-// helper of the same name.
-func pkAsInt64(f *schema.Field, row reflect.Value) (int64, bool) {
-	v := row.FieldByIndex(f.StructField.Index)
-	for v.Kind() == reflect.Pointer {
-		if v.IsNil() {
-			return 0, false
-		}
-		v = v.Elem()
-	}
-	switch v.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return v.Int(), true
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return int64(v.Uint()), true
-	}
-	return 0, false
 }

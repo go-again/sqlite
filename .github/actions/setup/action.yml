@@ -1,6 +1,6 @@
 name: Setup
 description: |
-  Standard Go setup for this module's CI jobs. Calls actions/setup-go@v5
+  Standard Go setup for this module's CI jobs. Calls actions/setup-go@v6
   with the requested go-version (defaulting to the primary pinned line).
   Centralizes the Go-version pin so a single edit here propagates to every
   job; jobs that exercise the matrix (e.g. the `test` job) override the
@@ -15,6 +15,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/setup-go@v5
+    - uses: actions/setup-go@v6
       with:
         go-version: ${{ inputs.go-version }}

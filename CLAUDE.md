@@ -56,203 +56,60 @@ Don't rewrite them for style.
 
 ## Repository layout
 
+The high-signal map is the root-package fork surface; sub-packages live
+behind a per-package `doc.go`.
+
+**Root (modernc-derived + our additions):**
+
 ```
-github.com/go-again/sqlite/
-├── go.mod                  # module path; Go-version pin; modernc.org/sqlite pin
-├── CLAUDE.md               # this file
-├── AGENTS.md               # vendor-neutral alias pointing at CLAUDE.md
-├── README.md               # human-facing docs
-├── justfile                # recipes for common ops; see "Common tasks"
-├── LICENSE                 # Apache 2.0
-├── LICENSE.modernc         # preserved upstream BSD-style (modernc.org/sqlite)
-├── LICENSE.mattn           # preserved upstream MIT (mattn/go-sqlite3)
-├── LICENSE.glebarez        # preserved upstream MIT (glebarez/sqlite)
-├── LICENSE.ncruces         # preserved upstream MIT (ncruces/go-sqlite3 — ext/* ports)
-├── NOTICE                  # third-party attribution required by Apache 2.0 §4(d)
-├── .golangci.yml           # lint config (read this before adding lints)
-├── .github/workflows/ci.yml
-│
-├── # Core driver (root package — modernc-derived + our additions):
-├── sqlite.go               # init(), driver registration ("sqlite" + "sqlite3")
-├── driver.go               # *Driver struct with Extensions / ConnectHook
-├── conn.go                 # *conn (alias *Conn), most of the work happens here
-├── stmt.go                 # *stmt prepared statement
-├── rows.go                 # *rows result iterator
-├── result.go               # *result for Exec
-├── tx.go                   # *tx transaction
-├── error.go                # *Error with Code() / ExtendedCode()
-├── convert.go              # value coercion between SQLite and Go types
-├── backup.go               # *Backup struct (modernc-derived)
-├── blob.go                 # *Blob type + (*Conn).OpenBlob — incremental BLOB I/O
-├── backup_factory.go       # our additions: (*Conn).Backup factory, top-level Serialize/Deserialize
-├── extension.go            # LoadExtension / EnableLoadExtension
-├── limits.go               # GetLimit / SetLimit
-├── hooks.go                # RegisterUpdateHook / RegisterAuthorizer / SetTrace (our additions)
-├── pre_update_hook.go      # RegisterPreUpdateHook / Commit / Rollback (modernc-derived)
-├── fcntl.go                # file-control helpers
-├── vtab.go                 # virtual-table trampolines
-├── mutex.go                # unlock_notify mutex wrapper
-├── dmesg.go / nodmesg.go   # debug logging gated by `sqlite.dmesg` build tag
-├── dsn.go                  # mattn `_*` DSN-flag translator
-├── constants.go            # SQLITE_* re-exports + ErrNo / ErrNoExtended types
-├── compat_sqlite3.go       # type aliases (SQLiteDriver = Driver, etc.) + public Stmt/Rows/Result/Tx
-├── doc.go                  # package doc (pkg.go.dev landing)
-├── module.go               # (*Conn).CreateModule / CreateModuleSplit (vtab module registration)
-├── pointer.go              # sqlite.Pointer for binding Go values into SQL params
-├── windows.go              # Windows-specific helpers (build-tagged)
-├── compat_register.go      # reflective RegisterFunc / RegisterAggregator
-├── compat_convert.go       # reflection-driven Go ↔ driver.Value conversion
-├── stmt_cache.go           # per-conn prepared-stmt LRU
-├── internal_alloc.go       # libc.CString helpers for backup/serialize
-├── config.go               # sqlite.Config / Pragmas / Encryption / Cipher (modern Go-typed open)
-├── open_config.go          # sqlite.Open(Config) → *DB; BuildDSN; ApplyPragmas
-│
-├── gorm/                   # gorm sub-package (originally ported from glebarez; now diverged with RETURNING gating, OpenConfig, error translator)
-│   ├── doc.go              # package doc (pkg.go.dev landing)
-│   ├── sqlite.go           # Dialector
-│   ├── migrator.go         # full Migrator (HasTable, AlterColumn, …)
-│   ├── ddlmod.go           # DDL regex parser used by recreateTable
-│   ├── errors.go
-│   ├── open_config.go      # OpenConfig(sqlite.Config) → gorm.Dialector
-│   └── integration_*_test.go  # also covers vfs/vec/fts side-by-side composition
-│
-├── vec/                    # sqlite-vec vector search
-│   ├── vec.go              # _ "modernc.org/sqlite/vec" auto-registration
-│   ├── doc.go              # package doc
-│   ├── types.go            # Metric (+ Keyword), Encoding (+ Encode/Placeholder), Options
-│   ├── encoding.go         # JSON / binary float32 (de)serialization
-│   ├── table.go            # Create / Open / Insert / Update / Delete / KNN /
-│   │                       #   KNNSlice + QuoteIdent / ValidIdent exports
-│   ├── query.go            # WithFilter QueryOption (filtered KNN)
-│   ├── distance.go         # L2 / Cosine / Dot distance helpers
-│   ├── observability.go    # Wrap / WithLogger / WithRecorder
-│   └── gorm/               # tag-driven gorm bridge (package vecgorm)
-│       ├── embedding.go    # Embedding []float32 wrapper with GormDataType
-│       ├── plugin.go       # gorm.Plugin + DropTableHook implementer
-│       ├── tag.go          # vec:"dim=N;metric=...;encoding=...;table=...;column=..."
-│       ├── migrate.go      # Migrate / DropSidecar helpers + dim-mismatch warn
-│       ├── callbacks.go    # AfterCreate / AfterUpdate / AfterDelete sync
-│       ├── sidecar.go      # soft-delete batch INSERT (vec0 metadata column)
-│       └── knn.go          # KNN[T] / KNNSQL[T] / Hit[T] / WithFilter / WithField / IncludeDeleted
-│
-├── fts/                    # FTS5 typed API (generics-based)
-│   ├── doc.go
-│   ├── fts.go              # Index[K, V SQLType], Search, SearchSlice, Hit, Attr
-│   ├── options.go          # Options, External, Detail, SQLType constraint
-│   ├── tokenizer.go        # Unicode61, Ascii, Porter, Trigram
-│   ├── query.go            # Term/Phrase/Prefix/And/Or/Not/Near/Column/Raw + Build()
-│   ├── internal.go         # QuoteIdent / ValidIdent exports + SQLType conversion
-│   ├── observability.go    # Wrap / WithLogger / WithRecorder (parallel to vec/)
-│   ├── triggers.go         # installSyncTriggers — AFTER INSERT/UPDATE/DELETE on external-content source
-│   └── gorm/               # tag-driven gorm bridge (package ftsgorm)
-│       ├── plugin.go       # gorm.Plugin + DropTableHook implementer
-│       ├── tag.go          # fts5:"tokenize=...;prefix=...;external=...;contentless=..."
-│       ├── migrate.go      # Migrate / DropSidecar helpers (per-mode)
-│       ├── triggers.go     # AFTER INSERT/UPDATE/DELETE source triggers (external mode)
-│       ├── callbacks.go    # Row-level sync for in-table / contentless modes
-│       └── search.go       # Search[T] / SearchSQL[T] / Hit[T] / WithRanking/Snippet/Highlight
-│
-├── fusion/                 # rank-fusion helpers for hybrid search
-│   ├── doc.go
-│   └── rrf.go              # RRF / RRF2 — Reciprocal Rank Fusion (Cormack 2009)
-│
-├── vfs/
-│   ├── doc.go
-│   ├── vfs.go              # thin re-export of modernc.org/sqlite/vfs (fs.FS → VFS) + NewReader(io.ReaderAt, size)
-│   └── crypto/             # pure-Go encryption-at-rest VFS
-│       ├── doc.go          # crypto contract + threat model + drift discipline + observability
-│       ├── crypto.go       # New(), Options, Cipher constants, *FS handle
-│       ├── vfs.go          # registration, xOpen, perFileState, struct layout
-│       ├── iomethods.go    # 16 io-method trampolines (12 base + 4 xShm*) + sync.Pool scratch
-│       ├── cipher.go       # pageCipher interface + Adiantum/AESXTS bindings + file-kind tweak
-│       ├── observability.go # Recorder interface, NewSlogRecorder, FileKindName
-│       └── derive_key.go    # DeriveKey: Argon2id passphrase + salt → cipher-sized key
-│   └── cksm/               # pure-Go page-checksum VFS (Fletcher-style 8-byte trailer)
-│       ├── doc.go          # contract, on-disk format, EnableChecksums recipe
-│       ├── cksm.go         # New(), Options, compute()
-│       ├── vfs.go          # registration, xOpen, perFileState (with atomic.Int32 enabled)
-│       └── iomethods.go    # 16 io-method trampolines (12 base + 4 xShm*) — verify on read, stamp on write
-│   └── mvcc/               # in-memory snapshot-isolation VFS (Go-native MVCC)
-│       ├── doc.go          # snapshot/commit/abort contract, shared vs private DBs
-│       ├── mvcc.go         # New(), Options, FS, memDB, snapshot, acquire/release
-│       ├── vfs.go          # registration, xOpen, perFileState, fileHandles registry
-│       └── iomethods.go    # 12 io-method trampolines (read snapshot, buffer until xSync)
-│   └── memdb/              # plain in-memory VFS (direct page store, no MVCC)
-│       ├── doc.go          # contract, shared vs private DBs, when not to use
-│       ├── memdb.go        # New(), Options, FS, memDB, acquire/release
-│       ├── vfs.go          # registration, xOpen, perFileState, fileHandles registry
-│       └── iomethods.go    # 12 io-method trampolines (direct read/write under RWMutex)
-│
-├── internal/
-│   ├── cabi/               # shared Go↔C ABI helpers (only this module can import)
-│   │   ├── funcptr.go      # FuncPointer[T] / AsFunc[F]: modernc-trampoline producer + consumer
-│   │   ├── registry.go     # Registry[T]: token→*T map with internally-minted tokens (Set/Lookup/Unregister)
-│   │   ├── ptrmap.go       # PtrMap[T]: uintptr→*T map keyed by caller-supplied pointers (fileMap usage)
-│   │   ├── uniquename.go   # UniqueName(prefix): process-global counter for VFS/module name suffixes
-│   │   └── callx.go        # CallX* family: typed wrappers for every sqlite3_io_methods slot
-│   ├── sqlid/              # SQLite arg-parsing helpers
-│   │   └── sqlid.go        # NamedArg, Unquote, QuoteIdent, QuoteIdentBacktick, ValidIdent, ToNamedValues, IsAlreadyExistsErr
-│   ├── raceskip/           # raceskip.Enabled bool const (build-tag gated)
-│   │   ├── raceskip.go     # package doc
-│   │   ├── raceenabled_off.go # //go:build !race
-│   │   └── raceenabled_on.go  # //go:build race
-│   └── testhelp/           # test fixture helpers — OpenPinned, RegisterOn, WithConnectHook, RawConn
-│       └── testhelp.go
-│
-├── ext/                    # loadable Go extensions (opt-in per sub-package)
-│   ├── README.md           # index + registration shapes
-│   └── <name>/             # one sub-package per ext; <name>/auto/ is the blank-import variant
-│
-├── tests/
-│   └── sql/                # SQL conformance suite (per SQLite Language Reference)
-│
-└── examples/
-    ├── mattn-compat/       # one-line import swap from mattn/go-sqlite3
-    ├── modernc-compat/     # one-line import swap from modernc.org/sqlite
-    ├── gorm/               # basic gorm CRUD + ErrDuplicatedKey
-    ├── gorm-vfs/           # gorm reading from a fstest.MapFS
-    ├── gorm-vec/           # gorm + vec sidecar (side-by-side pattern)
-    ├── gorm-fts/           # gorm + fts external-content (side-by-side pattern)
-    ├── gorm-vec-tagged/    # gorm + vec via vec/gorm tag-driven plugin
-    ├── gorm-fts-tagged/    # gorm + fts via fts/gorm tag-driven plugin
-    ├── gorm-ext-scalars/   # gorm + scalar/aggregate/collation exts (regexp, uuid, hash, ipaddr, zorder, stats, unicode)
-    ├── gorm-ext-vtabs/     # gorm + vtab exts (array via sqlite.Pointer, lines, csv via connect-hook, statement, closure, bloom, spellfix1)
-    ├── vec-search/         # typed vec.Table
-    ├── fts-search/         # typed fts.Index
-    ├── window-function/    # Conn.RegisterWindowFunction demo
-    ├── fusion-hybrid-search/ # vec.KNN + fts.Search fused via fusion.RRF2
-    ├── sqlite-config/      # modern Go-typed sqlite.Config for plain *sql.DB
-    ├── gorm-config/        # sqlite.Config routed via sqlitegorm.OpenConfig
-    ├── vfs-crypto/         # pure-Go encryption-at-rest VFS (Adiantum / AES-XTS-256)
-    ├── gorm-crypto/        # comprehensive gorm + crypto + vec + fts + fusion stack
-    ├── ext-array/          # bind a Go slice as a SQL table via ext/array
-    ├── ext-regexp/         # REGEXP operator + regexp_* functions
-    ├── ext-uuid/           # RFC 4122 UUID generation + parsing
-    ├── ext-hash/           # cryptographic hash SQL functions
-    ├── ext-ipaddr/         # IP / CIDR helpers via net/netip
-    ├── ext-zorder/         # Z-order curve encoding
-    ├── ext-stats/          # variance / percentile / regr_* / median / mode aggregates + windows
-    ├── ext-unicode/        # Unicode-aware case mappings, normalize, unaccent, locale collations
-    ├── ext-csv/            # SELECT from CSV files via the ext/csv vtab
-    ├── ext-blobio/         # readblob/writeblob scalars + (*Conn).OpenBlob from Go
-    ├── ext-fileio/         # readfile / fsdir walk over a sandboxed fstest.MapFS
-    ├── ext-statement/      # parametrized views with anonymous + named binds
-    ├── ext-pivot/          # three-SELECT cross-tab (rows × cols × cell)
-    ├── ext-closure/        # transitive_closure org-chart walks + depth bounds
-    ├── vfs-cksm/           # corruption detection — corrupt a byte, observe SQLITE_IOERR_DATA
-    ├── vfs-mvcc/           # in-memory MVCC VFS: shared vs private DBs, reader/writer concurrency
-    ├── vfs-memdb/          # plain in-memory VFS: shared vs private DBs, no snapshot isolation
-    ├── hooks/              # install update / authorizer / commit / trace hooks via the pin-one-conn idiom
-    ├── backup/             # (*Conn).Backup factory + sqlite.Serialize / Deserialize round-trip
-    ├── ext-spellfix1/      # fuzzy lookup with Soundex prefilter + Damerau-Levenshtein scoring
-    # Bloom (`ext/bloom`, persistent) and Lines (`ext/lines`) ship without dedicated examples.
-    └── vfs-embed/          # bundling a DB inside a fs.FS
+sqlite.go               init(), driver registration ("sqlite" + "sqlite3")
+driver.go               *Driver with Extensions / ConnectHook
+conn.go                 *conn (alias *Conn); most of the work happens here
+stmt.go, rows.go, result.go, tx.go
+error.go                *Error with Code() / ExtendedCode()
+convert.go              SQLite ↔ Go value coercion
+backup.go               *Backup struct (modernc-derived)
+backup_factory.go       (*Conn).Backup factory + top-level Serialize/Deserialize (our additions)
+blob.go                 *Blob + (*Conn).OpenBlob — incremental BLOB I/O
+extension.go            LoadExtension / EnableLoadExtension
+limits.go               GetLimit / SetLimit
+hooks.go                RegisterUpdateHook / RegisterAuthorizer / SetTrace (our additions)
+pre_update_hook.go      RegisterPreUpdateHook / Commit / Rollback (modernc-derived)
+fcntl.go                file-control helpers (incl. (*Conn).EnableChecksums)
+vtab.go                 virtual-table trampolines
+module.go               (*Conn).CreateModule / CreateModuleSplit
+pointer.go              sqlite.Pointer for binding Go values into SQL params
+mutex.go                unlock_notify mutex wrapper
+dmesg.go / nodmesg.go   debug logging gated by `sqlite.dmesg` build tag
+dsn.go                  mattn `_*` DSN-flag translator
+constants.go            SQLITE_* re-exports + ErrNo / ErrNoExtended types
+compat_sqlite3.go       type aliases (SQLiteDriver = Driver, …) + public Stmt/Rows/Result/Tx
+compat_register.go      reflective RegisterFunc / RegisterAggregator
+compat_convert.go       reflection-driven Go ↔ driver.Value conversion
+stmt_cache.go           per-conn prepared-stmt LRU + StmtCacheStats
+internal_alloc.go       libc.CString helpers
+windows.go              Windows-specific helpers (build-tagged)
+config.go               sqlite.Config / Pragmas / Encryption / Cipher
+open_config.go          sqlite.Open(Config) → *DB; BuildDSN; ApplyPragmas
+doc.go                  package doc (pkg.go.dev landing)
 ```
 
+**Sub-packages** — each has a `doc.go` describing the contract:
+
+- `gorm/` — gorm dialector (originally ported from glebarez; now diverged with RETURNING gating, OpenConfig, error translator).
+- `vec/` — sqlite-vec typed `Table` API; `vec/gorm/` is the tag-driven sidecar plugin.
+- `fts/` — FTS5 typed `Index[K, V]`; `fts/gorm/` is the tag-driven sidecar plugin.
+- `fusion/` — RRF / RRF2 rank-fusion helpers (pure Go, no SQLite dep).
+- `vfs/` — `vfs.New(fs.FS)` + `vfs.NewReader(io.ReaderAt, size)`; `vfs/crypto/` (encryption-at-rest), `vfs/cksm/` (page-checksum trailer), `vfs/mvcc/` (in-memory snapshot isolation), `vfs/memdb/` (plain in-memory).
+- `internal/` — shared helpers, this module only: `cabi/` (FuncPointer / AsFunc / Registry / PtrMap / UniqueName / CallX*), `sqlid/` (NamedArg / Unquote / QuoteIdent / ValidIdent / ToNamedValues / IsAlreadyExistsErr / AsString / AsInt64 / AsFloat), `gormbridge/` (shared reflect/gorm plumbing for vec/gorm + fts/gorm), `obs/` (slog level-dispatch for the Observable wrappers), `raceskip/` (build-tag-gated `Enabled` bool), `testhelp/` (`OpenPinned`, `RawConn`, `RegisterOn`, `WithConnectHook`).
+- `vfs/internal/memio/` — page-overlap copy shared by `vfs/memdb` and `vfs/mvcc`.
+- `ext/` — loadable Go extensions, one sub-package per ext, each with an `auto/` blank-import variant. Inventory + status in `docs/coverage-ext.md`. `ext/internal/filevtab/` holds the file-backed-vtab scaffolding shared by `ext/csv` + `ext/lines`.
+- `tests/sql/` — SQL conformance suite organised by SQLite Language Reference category.
+- `examples/` — one runnable example per feature; smoke-tested by `just examples`. Bloom and Lines ship without dedicated examples (covered in package docs).
+
 Anything under a dot-prefixed directory at the repo root is local-only
-working state (CI log dumps, scratch dirs, maintainer-side checkouts of
-reference repos). `.gitignore` excludes them; nothing in this module
-should reference them by name.
+working state (CI dumps, scratch dirs, maintainer-side reference checkouts).
+`.gitignore` excludes them; nothing in this module should reference them by name.
 
 ---
 
@@ -260,140 +117,102 @@ should reference them by name.
 
 ### 1. libc version pin
 
-`modernc.org/sqlite/lib` is transpiled C closely tied to a specific
-`modernc.org/libc` version. **Bumping one without the other breaks the
-generated ABI.** When the user asks to bump `modernc.org/sqlite`, also bump
-`modernc.org/libc` to whatever version that sqlite release pins. Use:
-
-```sh
-just bump-modernc vX.Y.Z      # bumps sqlite, libc follows via go mod tidy
-just libc-pin                  # prints the current pin for downstream consumers
-```
-
-This pin is the single most likely source of "sqlite behaves erratically
-after a bump" bug reports. Documented in README's "libc version pinning"
-section.
+`modernc.org/sqlite/lib` is transpiled C tied to a specific `modernc.org/libc`
+version. **Bumping one without the other breaks the generated ABI.** Use
+`just bump-modernc vX.Y.Z` (bumps sqlite; libc follows via `go mod tidy`) and
+`just libc-pin` to inspect. This pin is the single most likely source of
+"sqlite behaves erratically after a bump" reports.
 
 ### 2. Two driver names register the same singleton
 
 ```go
-sql.Register("sqlite",  drv)  // modernc-compatible name
-sql.Register("sqlite3", drv)  // mattn-compatible name
+sql.Register("sqlite",  drv) // modernc-compatible
+sql.Register("sqlite3", drv) // mattn-compatible
 ```
 
-Same `*Driver`. Calling `RegisterFunction`/`Driver.RegisterConnectionHook`
-once affects both. **Don't** introduce code that registers two separate
-driver instances under the two names.
+Same `*Driver`. `RegisterFunction` / `Driver.RegisterConnectionHook` once
+affects both. **Don't** introduce code that registers two separate driver
+instances under the two names.
 
 ### 3. modernc-derived code uses uintptr↔unsafe.Pointer
 
-The forked wrapper does this everywhere. `go vet` flags it as `unsafeptr`;
-we silence the warning via `-unsafeptr=false` (justfile/CI/`.golangci.yml`).
-**Do not** try to "fix" these casts. The pattern is the contract for
-talking to `modernc.org/sqlite/lib`.
+The forked wrapper does this everywhere; `go vet` flags it as `unsafeptr`
+and we silence the warning via `-unsafeptr=false` (justfile / CI /
+`.golangci.yml`). **Do not** try to "fix" these casts — the pattern is the
+contract for talking to `modernc.org/sqlite/lib`.
 
 Both sides of the Go↔C function-pointer dance live in `internal/cabi`:
-`cabi.FuncPointer[T]` (producer) and `cabi.AsFunc[F]` (consumer). The
-trampoline-call wrappers (`cabi.CallX*` in `callx.go`) layer typed
-io-methods slot dispatch on top of `AsFunc`. Every wrap-forward VFS
-sub-package (`vfs/crypto`, `vfs/cksm`) and the root package consume
-these helpers — touching one means touching the other.
+`FuncPointer[T]` (producer) and `AsFunc[F]` (consumer), with the typed
+`CallX*` family in `callx.go` for io-methods slot dispatch. `Registry[T]` /
+`PtrMap[T]` / `UniqueName` handle FS-instance maps and name suffixes. The
+unstated assumption is the Go runtime's function-value memory layout
+(https://golang.org/s/go11func); `internal/cabi` is the single point of
+repair if it ever moves.
 
-Related helpers in the same package:
-`cabi.Registry[T]` mints fresh tokens for `Tsqlite3_vfs.FpAppData`-style
-slots; `cabi.PtrMap[T]` stores caller-allocated pointers (the per-VFS
-`fileMap` use); `cabi.UniqueName(prefix)` hands out collision-free
-suffixes for VFS / module names. The Go runtime's function-value
-memory layout (https://golang.org/s/go11func) is the unstated
-assumption — if a Go release ever changes it, `internal/cabi` is the
-single point of repair.
-
-**The same coupling extends to `vfs/crypto/` and `vfs/cksm/`.** Both
-sub-packages reach into the same lib-level exported struct types
-(`Tsqlite3_vfs`, `Tsqlite3_io_methods`) via field-by-field copies —
-never memcpy — so a modernc bump that reorders fields fails to compile
-rather than silently scrambling layout. The new `blob.go` at the root
-follows the same convention for `sqlite3_blob_open`/`_read`/`_write`/
-`_reopen`/`_close`/`_bytes`. When `just bump-modernc` runs,
-`blob.go`, `vfs/crypto/crypto.go`, and `vfs/cksm/cksm.go` join `conn.go`,
-`vtab.go`, `hooks.go`, `pre_update_hook.go`, and the other root-level
-modernc-derived files on the list of places that may need fixing. Same
-drift discipline; same `-unsafeptr=false` exemption.
+The same coupling extends to `vfs/crypto/` and `vfs/cksm/`, which reach
+into `lib/`'s exported `Tsqlite3_vfs` / `Tsqlite3_io_methods` structs via
+field-by-field copies — never memcpy — so a modernc bump that reorders
+fields fails to compile rather than scrambling layout. `blob.go` follows
+the same convention for the `sqlite3_blob_*` family. When `just bump-modernc`
+runs, all four file groups (`conn.go`, `vtab.go`, `hooks.go`,
+`pre_update_hook.go`, `blob.go`, `vfs/crypto/crypto.go`, `vfs/cksm/cksm.go`)
+are the places that may need fixing.
 
 ### 4. database/sql connection pool semantics
 
 Hooks (Update / Authorizer / Trace / Commit / Rollback / PreUpdate) are
 **per-connection**. `db.Exec`/`db.Query` may pick any conn from the pool.
-For tests that install a hook on a specific conn, you must:
-
-```go
-db.SetMaxOpenConns(1)
-sc, _ := db.Conn(ctx)
-sc.Raw(func(dc any) error {
-    c := dc.(*sqlite.Conn)
-    c.RegisterUpdateHook(...)
-    return nil
-})
-// Then use sc.ExecContext, NOT db.Exec.
-```
-
-`internal/testhelp.OpenPinned(t, dsn)` is the canonical helper —
-returns a pool pinned to one conn so the hook installs and the
-follow-up queries land on the same `*sqlite.Conn`. Use `RawConn(sc,
-fn)` to get the concrete `*sqlite.Conn` for `RegisterUpdateHook` and
-friends. `compat_test.go::withSQLite3Conn` is a thin wrapper kept for
-the root-package tests that pre-dated `testhelp`.
+Tests that install a hook on a specific conn must pin the pool and use the
+same `*sql.Conn` for follow-up queries. `internal/testhelp.OpenPinned(t, dsn)`
+plus `testhelp.RawConn(sc, fn)` is the canonical fixture. The root-package
+`compat_test.go::withSQLite3Conn` is a thin wrapper kept for tests that
+pre-dated `testhelp`.
 
 ### 5. sqlite-vec quirks
 
-The `vec` sub-package wraps sqlite-vec's `vec0` virtual table. Sharp
-edges:
-
-- **`INSERT OR REPLACE` is not honored** by vec0 INSERT. Use `UPDATE`
-  for in-place replacement (`(*Table).Update`).
+- **`INSERT OR REPLACE` is not honored** by vec0 INSERT — use `UPDATE`
+  (`(*Table).Update`) for in-place replacement.
 - **vec0's column-arg parser rejects quoted identifiers** in
-  `CREATE VIRTUAL TABLE name USING vec0(col float[N] distance=…)`. The
-  column name must be a bare identifier — we validate via `validIdent`.
-- **`LIMIT` must be visible to the planner**. We inline `k` as a literal
-  in the generated SQL rather than binding it, because sqlite-vec's
-  planner needs the literal alongside the MATCH conjunct.
-- **Metric keywords are `l1` / `l2` / `cosine`**, not `ip` or anything
-  else. Our `Dot` constant is a documentation alias for L1.
-- **Platform coverage**: `modernc.org/sqlite/vec` isn't transpiled for
-  every GOOS/GOARCH; CI's `build_all_targets` job tolerates `vec/`
-  failing on unsupported targets via `|| echo skipping`.
+  `CREATE VIRTUAL TABLE name USING vec0(col float[N] distance=…)`; the column
+  name must be a bare identifier. We validate via `validIdent`.
+- **`LIMIT` must be visible to the planner** — we inline `k` as a literal in
+  the generated SQL because sqlite-vec's planner needs it alongside MATCH.
+- **Metric keywords are `l1` / `l2` / `cosine`**, not `ip` or anything else.
+  `Dot` is a documentation alias for L1.
+- **Platform coverage**: `modernc.org/sqlite/vec` isn't transpiled for every
+  GOOS/GOARCH; CI's `build_all_targets` tolerates `vec/` failures via
+  `|| echo skipping`.
 
 ### 6. SQLite version
 
-Whatever `modernc.org/sqlite` ships. We don't pin or fork SQLite itself
-— the pin is on the modernc dep.
+Whatever `modernc.org/sqlite` ships. We don't pin or fork SQLite itself —
+the pin is on the modernc dep.
 
 ### 7. Userauth is dropped
 
-Mattn supported it behind `sqlite_userauth` tag; modernc removed it
+Mattn supported it behind the `sqlite_userauth` tag; modernc removed it
 upstream. We reject `_auth*` DSN flags with a clear error. Don't try to
-re-introduce the feature.
+re-introduce it.
 
 ### 8. gorm bridge plugin contract
 
 `vec/gorm` and `fts/gorm` each expose `Plugin()` for `db.Use(...)` and
-implement the `DropTableHook` interface defined in `gorm/migrator.go`.
-Our `Migrator.DropTable` iterates `db.Config.Plugins` looking for hook
+implement the `DropTableHook` interface defined in `gorm/migrator.go`. Our
+`Migrator.DropTable` iterates `db.Config.Plugins` looking for hook
 implementers. **Do not** rename `DropTableHook` or change its signature
-without updating both bridge plugins — silently breaking the cascade
-means orphaned sidecars.
+without updating both bridge plugins — silently breaking the cascade leaves
+orphaned sidecars.
 
-`vec/gorm` injects `_texttotime=1` into the DSN inside `gorm.Open`/`New`
-so gorm's map-mode reads return `time.Time` for DATETIME columns
-instead of RFC3339 strings (matches mattn behavior, fixes the upstream
-`TestFind/FirstMapWithTable/Birthday` assertion). Don't remove the
-injection without retesting the upstream gorm suite.
+`vec/gorm` injects `_texttotime=1` into the DSN inside `gorm.Open`/`New` so
+gorm's map-mode reads return `time.Time` for DATETIME columns instead of
+RFC3339 strings (matches mattn behaviour; fixes the upstream
+`TestFind/FirstMapWithTable/Birthday` assertion). Don't remove the injection
+without retesting the upstream gorm suite.
 
-vec-tagged fields require either the `vecgorm.Embedding` wrapper type
-OR a `gorm:"-"` tag alongside the `vec:"…"` tag. gorm's `schema.Parse`
-errors on raw `[]float32` before any plugin hook can intercept; the
-preflight check in `vec/gorm/tag.go` emits a clear error if both
-escape hatches are missing.
+vec-tagged fields require either the `vecgorm.Embedding` wrapper type OR a
+`gorm:"-"` tag alongside the `vec:"…"` tag. gorm's `schema.Parse` errors on
+raw `[]float32` before any plugin hook can intercept; the preflight check in
+`vec/gorm/tag.go` emits a clear error if both escape hatches are missing.
 
 ---
 
@@ -419,19 +238,22 @@ the excluded files without checking errors.
 
 ### `interface{}` is `any`
 
-Use `any`, never `interface{}`. The codebase has been
-swept; new contributions should match.
+Use `any`, never `interface{}`. The codebase has been swept; new
+contributions should match.
 
 ### Test fixtures
 
-The canonical pinned-conn helper is `internal/testhelp.OpenPinned(t, dsn)` plus `testhelp.RawConn(sc, fn)` — every new test that needs `MaxOpenConns=1` should reach for those. Per-sub-package fixtures handle the domain-specific seeding:
+The canonical pinned-conn helper is `internal/testhelp.OpenPinned(t, dsn)`
+plus `testhelp.RawConn(sc, fn)` — every new test that needs
+`MaxOpenConns=1` should reach for those. Per-sub-package fixtures handle
+the domain-specific seeding:
 
-- root: `compat_test.go::withSQLite3Conn(t, dsn)` returns `(*sql.DB, *sql.Conn, *sqlite.Conn)` with `MaxOpenConns=1` pinned — a thin wrapper over `testhelp.OpenPinned` kept for root-package tests that pre-dated the helper
-- `gorm/integration_test.go::openInMemory` returns a gorm DB
-- `vec/table_test.go::openDB` + `fixture` corpus + `fixtureQuery`
-- `fts/fts_test.go::openDB` + `fixtureCorpus`
-- `vfs/crypto/crypto_test.go::freshKey(i)` + `integration_test.go::openEncryptedDB(t, dir, k)`
-- `tests/sql/helper_test.go::openDB` for SQL-conformance lane
+- root: `compat_test.go::withSQLite3Conn` (thin wrapper over `OpenPinned`).
+- `gorm/integration_test.go::openInMemory` returns a gorm DB.
+- `vec/table_test.go::openDB` + `fixture` corpus + `fixtureQuery`.
+- `fts/fts_test.go::openDB` + `fixtureCorpus`.
+- `vfs/crypto/crypto_test.go::freshKey(i)` + `integration_test.go::openEncryptedDB`.
+- `tests/sql/helper_test.go::openDB` for the SQL-conformance lane.
 - `fusion/` has no fixture — pure Go, no DB involved.
 
 Reuse these rather than inventing new fixtures.
@@ -440,8 +262,7 @@ Reuse these rather than inventing new fixtures.
 
 `well-named-identifier()` already says what. Comments explain why a
 non-obvious choice was made, what invariant is being preserved, or what
-upstream contract is being honored. The audit-followup pass (and this
-doc) bakes this convention.
+upstream contract is being honored.
 
 ---
 
@@ -692,9 +513,6 @@ surface. The `⚠ inherited` cells are honest gaps; flipping one to
 ## Last words
 
 When in doubt, look at how an existing parallel feature is implemented and
-mirror it. The two `Observable` wrappers (`vec/observability.go` and
-`fts/observability.go`) are intentionally parallel; new sub-packages should
-match. The `compat_*.go` shim layer is the model for preserving an
-existing public API while changing the implementation.
-
-This document is the canonical agent-facing summary.
+mirror it. The two `Observable` wrappers (`vec/observability.go` /
+`fts/observability.go`) and the `compat_*.go` shim layer are the canonical
+templates.

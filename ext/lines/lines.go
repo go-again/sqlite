@@ -43,10 +43,10 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
-	"strings"
 
 	sqlite "github.com/go-again/sqlite"
+	"github.com/go-again/sqlite/ext/internal/filevtab"
+	"github.com/go-again/sqlite/internal/sqlid"
 )
 
 // ModuleName is the SQL module name: `lines`.
@@ -54,7 +54,7 @@ const ModuleName = "lines"
 
 // Register installs the lines module on c using os-backed file access.
 func Register(c *sqlite.Conn) error {
-	return RegisterFS(c, osFS{})
+	return RegisterFS(c, filevtab.OSFS{})
 }
 
 // RegisterFS installs the lines module on c, routing file opens through fsys.
@@ -72,10 +72,6 @@ func RegisterFS(c *sqlite.Conn, fsys fs.FS) error {
 		})
 }
 
-type osFS struct{}
-
-func (osFS) Open(name string) (fs.File, error) { return os.Open(name) }
-
 type table struct {
 	fsys   fs.FS
 	name   string
@@ -88,8 +84,7 @@ func (*table) Destroy() error    { return nil }
 
 func (t *table) BestIndex(info *sqlite.IndexInfo) error {
 	// Full-scan only; no usable index.
-	info.EstimatedCost = 1e6
-	info.EstimatedRows = 1000
+	filevtab.FullScanBestIndex(info)
 	return nil
 }
 
@@ -104,23 +99,24 @@ func buildTable(fsys fs.FS, args []string) (*table, error) {
 	}
 	seen := make(map[string]bool, len(args))
 	for _, a := range args {
-		key, val, ok := strings.Cut(a, "=")
-		if !ok {
+		// sqlid.NamedArg trims both halves; key=="" means a bare token
+		// (no '=') or an empty key ('=value'), neither of which is a
+		// usable parameter.
+		key, val := sqlid.NamedArg(a)
+		if key == "" {
 			return nil, fmt.Errorf("lines: argument %q is not a key=value pair", a)
 		}
-		key = strings.TrimSpace(key)
-		val = strings.TrimSpace(val)
 		if seen[key] {
 			return nil, fmt.Errorf("lines: duplicate %q parameter", key)
 		}
 		seen[key] = true
 		switch key {
 		case "filename":
-			t.name = unquote(val)
+			t.name = sqlid.Unquote(val)
 		case "data":
-			t.data = unquote(val)
+			t.data = sqlid.Unquote(val)
 		case "schema":
-			t.schema = unquote(val)
+			t.schema = sqlid.Unquote(val)
 		default:
 			return nil, fmt.Errorf("lines: unknown parameter %q", key)
 		}
@@ -132,24 +128,9 @@ func buildTable(fsys fs.FS, args []string) (*table, error) {
 }
 
 func (t *table) newReader() (*bufio.Scanner, io.Closer, error) {
-	var (
-		r  io.Reader
-		cl io.Closer
-	)
-	if t.name != "" {
-		f, err := t.fsys.Open(t.name)
-		if err != nil {
-			return nil, nil, fmt.Errorf("lines: open %q: %w", t.name, err)
-		}
-		buf := bufio.NewReader(f)
-		if bom, _ := buf.Peek(3); string(bom) == "\xEF\xBB\xBF" {
-			_, _ = buf.Discard(3)
-		}
-		r = buf
-		cl = f
-	} else {
-		r = strings.NewReader(t.data)
-		cl = io.NopCloser(r)
+	r, cl, err := filevtab.OpenSource(t.fsys, t.name, t.data, "lines")
+	if err != nil {
+		return nil, nil, err
 	}
 	scanner := bufio.NewScanner(r)
 	// Allow long lines — default 64KB buffer is too small for many logs.
@@ -217,15 +198,4 @@ func (c *cursor) Column(col int) (driver.Value, error) {
 		return c.line, nil
 	}
 	return nil, nil
-}
-
-func unquote(s string) string {
-	if len(s) >= 2 && (s[0] == '\'' || s[0] == '"') && s[len(s)-1] == s[0] {
-		inner := s[1 : len(s)-1]
-		if s[0] == '\'' {
-			inner = strings.ReplaceAll(inner, "''", "'")
-		}
-		return inner
-	}
-	return s
 }

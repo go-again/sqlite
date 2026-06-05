@@ -10,11 +10,11 @@ import (
 
 	sqlite "github.com/go-again/sqlite"
 	"github.com/go-again/sqlite/fts"
+	// The named vec import below already runs vec's package init, which
+	// auto-registers sqlite-vec on every connection — no separate blank
+	// import needed.
 	"github.com/go-again/sqlite/vec"
 	"github.com/go-again/sqlite/vfs/crypto"
-
-	// Auto-register sqlite-vec on every connection.
-	_ "github.com/go-again/sqlite/vec"
 )
 
 // openEncryptedDB is a small helper for the integration tests: spin

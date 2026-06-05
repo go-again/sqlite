@@ -11,15 +11,10 @@ import (
 	"github.com/go-again/sqlite/internal/cabi"
 )
 
-var (
-	fileHandlesMu sync.RWMutex
-	fileHandles   = map[uintptr]*fileHandle{}
-	// nextToken hands out unique pFile-state tokens. Independent of
-	// the cabi.Registry used for fsRegistry — fileHandles needs an
-	// FS-scoped iteration in Close() that the generic Registry
-	// doesn't expose, so the small map stays per-package.
-	nextToken atomic.Uintptr
-)
+// fileHandles maps the pFile-state token to its Go-side handle. The
+// FS-scoped drain in (*FS).Close goes through
+// cabi.Registry.DeleteWhere.
+var fileHandles = cabi.NewRegistry[fileHandle]()
 
 type perFileState struct {
 	token uintptr
@@ -63,25 +58,15 @@ func perFileStateOf(pFile uintptr) *perFileState {
 }
 
 func handleFor(pFile uintptr) *fileHandle {
-	tok := perFileStateOf(pFile).token
-	fileHandlesMu.RLock()
-	h := fileHandles[tok]
-	fileHandlesMu.RUnlock()
-	return h
+	return fileHandles.Lookup(perFileStateOf(pFile).token)
 }
 
 func storeHandle(h *fileHandle) uintptr {
-	tok := uintptr(nextToken.Add(1))
-	fileHandlesMu.Lock()
-	fileHandles[tok] = h
-	fileHandlesMu.Unlock()
-	return tok
+	return fileHandles.Register(h)
 }
 
 func dropHandle(tok uintptr) {
-	fileHandlesMu.Lock()
-	delete(fileHandles, tok)
-	fileHandlesMu.Unlock()
+	fileHandles.Unregister(tok)
 }
 
 func xOpenTrampoline(tls *libc.TLS, pVfs, zName, pFile uintptr, flags int32, pOutFlags uintptr) int32 {

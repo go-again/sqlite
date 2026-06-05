@@ -15,13 +15,18 @@
 //     be sized to hold the write (use INSERT … VALUES (zeroblob(N)) to
 //     pre-size). Writes past the value end error.
 //
-// Both functions open a fresh [github.com/go-again/sqlite.Blob] handle on
-// every invocation; for hot loops, prefer calling [github.com/go-again/sqlite.Conn.OpenBlob]
-// from Go and holding the handle across reads/writes.
+//   - openblob(schema, table, column, rowid, write, callback, args...) → INTEGER
+//     Opens a handle at (schema, table, column, rowid) and invokes callback
+//     with it plus any trailing args. The callback must be bound via
+//     [sqlite.Pointer] as an [OpenCallback]; the handle is valid only for the
+//     duration of the call.
 //
-// Ported from [ncruces/ext/blobio]. The openblob() callback form is
-// intentionally omitted — it relies on Go-side closures passed via
-// [sqlite.Pointer], which we may revisit if consumer demand appears.
+// readblob and writeblob open a fresh [github.com/go-again/sqlite.Blob] handle
+// on every invocation; for hot loops, prefer calling
+// [github.com/go-again/sqlite.Conn.OpenBlob] from Go and holding the handle
+// across reads/writes.
+//
+// Ported from [ncruces/ext/blobio].
 //
 // [ncruces/ext/blobio]: https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/blobio
 package blobio

@@ -1,18 +1,18 @@
 package csv
 
 import (
-	"bufio"
 	"database/sql/driver"
 	encodingcsv "encoding/csv"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
 	"strconv"
 	"strings"
 
 	sqlite "github.com/go-again/sqlite"
+	"github.com/go-again/sqlite/ext/internal/filevtab"
+	"github.com/go-again/sqlite/internal/sqlid"
 )
 
 // ModuleName is the name the vtab registers under: `csv`.
@@ -22,7 +22,7 @@ const ModuleName = "csv"
 // CSV files specified via the `filename` named-arg are opened with
 // [os.Open]. For sandboxed access, use [RegisterFS] instead.
 func Register(c *sqlite.Conn) error {
-	return RegisterFS(c, osFS{})
+	return RegisterFS(c, filevtab.OSFS{})
 }
 
 // RegisterFS installs the csv module on c, routing file opens through
@@ -42,12 +42,6 @@ func RegisterFS(c *sqlite.Conn, fsys fs.FS) error {
 		})
 }
 
-// osFS is a thin fs.FS over os.Open so the default Register behaves
-// like a CSV reader anchored at the OS root.
-type osFS struct{}
-
-func (osFS) Open(name string) (fs.File, error) { return os.Open(name) }
-
 type table struct {
 	fsys    fs.FS
 	name    string // filename (mutually exclusive with data)
@@ -64,8 +58,7 @@ func (*table) Destroy() error    { return nil }
 
 func (t *table) BestIndex(info *sqlite.IndexInfo) error {
 	// No usable index — full scan every time.
-	info.EstimatedCost = 1e6
-	info.EstimatedRows = 1000
+	filevtab.FullScanBestIndex(info)
 	return nil
 }
 
@@ -85,8 +78,11 @@ func buildTable(fsys fs.FS, args []string) (*table, error) {
 		err       error
 	)
 	for _, a := range args {
-		key, val, ok := splitNamedArg(a)
-		if !ok {
+		// sqlid.NamedArg returns key="" for a bare token (no '=') or an
+		// empty key ('=value'); both are "not a key=value pair" here,
+		// matching the previous splitNamedArg ok==false contract.
+		key, val := sqlid.NamedArg(a)
+		if key == "" {
 			return nil, fmt.Errorf("csv: argument %q is not a key=value pair", a)
 		}
 		if seen[key] {
@@ -95,11 +91,11 @@ func buildTable(fsys fs.FS, args []string) (*table, error) {
 		seen[key] = true
 		switch key {
 		case "filename":
-			t.name = unquote(val)
+			t.name = sqlid.Unquote(val)
 		case "data":
-			t.data = unquote(val)
+			t.data = sqlid.Unquote(val)
 		case "schema":
-			schemaSrc = unquote(val)
+			schemaSrc = sqlid.Unquote(val)
 		case "header":
 			t.header, err = boolArg(key, val)
 		case "columns":
@@ -154,26 +150,9 @@ func buildTable(fsys fs.FS, args []string) (*table, error) {
 }
 
 func (t *table) newReader() (*encodingcsv.Reader, io.Closer, error) {
-	var (
-		r  io.Reader
-		cl io.Closer
-	)
-	if t.name != "" {
-		f, err := t.fsys.Open(t.name)
-		if err != nil {
-			return nil, nil, fmt.Errorf("csv: open %q: %w", t.name, err)
-		}
-		buf := bufio.NewReader(f)
-		// Strip a UTF-8 BOM if present so the first column name doesn't
-		// silently include three garbage bytes.
-		if bom, _ := buf.Peek(3); string(bom) == "\xEF\xBB\xBF" {
-			_, _ = buf.Discard(3)
-		}
-		r = buf
-		cl = f
-	} else {
-		r = strings.NewReader(t.data)
-		cl = io.NopCloser(r)
+	r, cl, err := filevtab.OpenSource(t.fsys, t.name, t.data, "csv")
+	if err != nil {
+		return nil, nil, err
 	}
 	cr := encodingcsv.NewReader(r)
 	cr.ReuseRecord = true
@@ -275,42 +254,10 @@ func (c *cursor) Column(col int) (driver.Value, error) {
 	return txt, nil
 }
 
-// --- named-arg parsing helpers ---
-
-// splitNamedArg parses `key=value` (or `key = value`). Returns the bare
-// key and the raw (possibly quoted) value.
-func splitNamedArg(arg string) (key, val string, ok bool) {
-	k, v, found := strings.Cut(arg, "=")
-	if !found {
-		return "", "", false
-	}
-	key = strings.TrimSpace(k)
-	val = strings.TrimSpace(v)
-	return key, val, key != ""
-}
-
-// unquote strips a single layer of SQL-style single or double quotes.
-// Inside single-quoted strings, doubled single-quotes (”) collapse to one.
-func unquote(s string) string {
-	if len(s) < 2 {
-		return s
-	}
-	q := s[0]
-	if q != '\'' && q != '"' && q != '`' {
-		return s
-	}
-	if s[len(s)-1] != q {
-		return s
-	}
-	inner := s[1 : len(s)-1]
-	if q == '\'' {
-		inner = strings.ReplaceAll(inner, "''", "'")
-	}
-	return inner
-}
+// --- named-arg value parsing helpers ---
 
 func boolArg(key, val string) (bool, error) {
-	switch strings.ToLower(unquote(val)) {
+	switch strings.ToLower(sqlid.Unquote(val)) {
 	case "1", "true", "yes", "on", "":
 		return true, nil
 	case "0", "false", "no", "off":
@@ -323,7 +270,7 @@ func uintArg(key, val string) (int, error) {
 	// 31 bits = up to math.MaxInt32, which covers any realistic CSV
 	// column / row count. The previous 15-bit cap (max 32767) silently
 	// rejected larger values with a misleading "invalid uint" error.
-	n, err := strconv.ParseUint(unquote(val), 10, 31)
+	n, err := strconv.ParseUint(sqlid.Unquote(val), 10, 31)
 	if err != nil {
 		return 0, fmt.Errorf("csv: invalid uint %q for %q", val, key)
 	}
@@ -331,7 +278,7 @@ func uintArg(key, val string) (int, error) {
 }
 
 func runeArg(key, val string) (rune, error) {
-	s := unquote(val)
+	s := sqlid.Unquote(val)
 	if s == "" {
 		return 0, nil
 	}

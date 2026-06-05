@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"database/sql"
 	"fmt"
@@ -68,26 +69,9 @@ func main() {
 	// Demonstrate the file on disk is not plaintext: a regular grep
 	// for the row text returns nothing.
 	raw, _ := os.ReadFile(dbPath)
-	if containsPhrase(raw, "this row is encrypted on disk") {
+	if bytes.Contains(raw, []byte("this row is encrypted on disk")) {
 		fmt.Println("WARN: row text visible in raw file bytes (should not happen)")
 	} else {
 		fmt.Println("on-disk: row text not visible (encrypted)")
 	}
-}
-
-func containsPhrase(haystack []byte, needle string) bool {
-	n := []byte(needle)
-	for i := 0; i+len(n) <= len(haystack); i++ {
-		match := true
-		for j := range n {
-			if haystack[i+j] != n[j] {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
-		}
-	}
-	return false
 }

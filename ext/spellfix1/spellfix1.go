@@ -229,7 +229,7 @@ func (t *table) Insert(cols []driver.Value, _ *int64) error {
 	// cols layout matches the vtab schema: word, rank, distance,
 	// score, matchlen, phonetic, top, scope, srchcnt, soundslike.
 	// Only word + rank are meaningful for INSERT; the rest are NULL.
-	word := stringOf(cols[0])
+	word := sqlid.AsString(cols[0])
 	if word == "" {
 		return nil
 	}
@@ -277,7 +277,7 @@ func (c *cursor) Filter(idxNumInt int, idxStr string, args []driver.Value) error
 	if len(args) < 1 {
 		return errors.New("spellfix1: missing MATCH argument")
 	}
-	c.query = strings.ToLower(stringOf(args[0]))
+	c.query = strings.ToLower(sqlid.AsString(args[0]))
 	c.scope = 4
 	c.top = 20
 	ord := []byte(idxStr)
@@ -333,7 +333,7 @@ func (c *cursor) Filter(idxNumInt int, idxStr string, args []driver.Value) error
 			_ = rs.Close()
 			return err
 		}
-		w := stringOf(row[0])
+		w := sqlid.AsString(row[0])
 		r := int64Of(row[1])
 		d := damerauLevenshtein(c.query, strings.ToLower(w), c.scope)
 		if d > c.scope {
@@ -545,18 +545,12 @@ func score(r matchRow) int64 {
 
 func quote(s string) string { return sqlid.QuoteIdent(s) }
 
-func stringOf(v driver.Value) string {
-	switch x := v.(type) {
-	case string:
-		return x
-	case []byte:
-		return string(x)
-	case nil:
-		return ""
-	}
-	return fmt.Sprint(v)
-}
-
+// int64Of is kept local rather than routed through sqlid.AsInt64: its
+// string/[]byte branch uses fmt.Sscan, which tolerates leading
+// whitespace and a trailing remainder (and honors a 0x prefix), whereas
+// sqlid.AsInt64 requires the whole token to be a base-10 integer.
+// Preserving fmt.Sscan keeps the exact coercion behavior the
+// scope/top/rank reads relied on.
 func int64Of(v driver.Value) int64 {
 	switch x := v.(type) {
 	case int64:

@@ -1,13 +1,14 @@
 package vecgorm
 
 import (
-	"context"
 	"fmt"
 	"reflect"
 	"sync"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
+
+	"github.com/go-again/sqlite/internal/gormbridge"
 )
 
 // pluginName matches gorm's Plugin contract (unique per *gorm.DB).
@@ -99,7 +100,7 @@ func (p *plugin) Initialize(db *gorm.DB) error {
 // field, rather than letting gorm's "unsupported data type: &[]"
 // surface to the user.
 func (p *plugin) registerSchema(db *gorm.DB, model any) (modelMeta, error) {
-	rt := indirectType(reflect.TypeOf(model))
+	rt := gormbridge.IndirectType(reflect.TypeOf(model))
 	p.mu.RLock()
 	if mm, ok := p.meta[rt]; ok {
 		p.mu.RUnlock()
@@ -124,7 +125,7 @@ func (p *plugin) registerSchema(db *gorm.DB, model any) (modelMeta, error) {
 			rt.Name(), len(pkFields))
 	}
 	mm.PKField = pkFields[0]
-	if del := findDeletedAtField(stmt.Schema); del != nil {
+	if del := gormbridge.FindDeletedAtField(stmt.Schema); del != nil {
 		mm.SoftDeleteColumn = del.DBName
 	}
 
@@ -150,7 +151,7 @@ func (p *plugin) registerSchema(db *gorm.DB, model any) (modelMeta, error) {
 				"vecgorm: invalid sidecar table name %q (derived from source table %q); set vec:\"…;table=<name>\" explicitly",
 				m.Table, mm.SourceTable)
 		}
-		m.SoftDelete = findDeletedAtField(stmt.Schema) != nil
+		m.SoftDelete = gormbridge.FindDeletedAtField(stmt.Schema) != nil
 
 		// Mute gorm's own SQL machinery for this field. The plugin
 		// owns its persistence.
@@ -213,49 +214,4 @@ func pluginFrom(db *gorm.DB) (*plugin, error) {
 		return nil, fmt.Errorf("vecgorm: registered plugin %s is %T, not *vecgorm.plugin", pluginName, raw)
 	}
 	return p, nil
-}
-
-// deletedAtType is the concrete type gorm uses for soft-delete columns;
-// we match on it so models that rename the Go field (e.g.
-// `RemovedAt gorm.DeletedAt` or `ArchivedAt gorm.DeletedAt`) still
-// participate in sidecar soft-delete sync. The previous
-// `LookUpField("DeletedAt")` discipline only matched the default field
-// name and silently missed renamed fields.
-var deletedAtType = reflect.TypeFor[gorm.DeletedAt]()
-
-// findDeletedAtField returns the schema's gorm.DeletedAt field
-// regardless of its Go name, or nil if the model has no soft-delete
-// field at all.
-func findDeletedAtField(s *schema.Schema) *schema.Field {
-	if s == nil {
-		return nil
-	}
-	for _, f := range s.Fields {
-		if f.StructField.Type == deletedAtType {
-			return f
-		}
-	}
-	return nil
-}
-
-// indirectType strips pointers and slices so reflect.TypeOf(&[]Doc{}) and
-// reflect.TypeOf(Doc{}) both resolve to the underlying struct.
-func indirectType(t reflect.Type) reflect.Type {
-	for {
-		switch t.Kind() {
-		case reflect.Pointer, reflect.Slice, reflect.Array:
-			t = t.Elem()
-		default:
-			return t
-		}
-	}
-}
-
-// helperContext returns a context for callbacks that don't have one
-// explicitly. gorm threads ctx through Statement.Context.
-func helperContext(db *gorm.DB) context.Context {
-	if db.Statement != nil && db.Statement.Context != nil {
-		return db.Statement.Context
-	}
-	return context.Background()
 }

@@ -60,9 +60,9 @@ func ctor(c *sqlite.Conn, _, _, _ string, args []string) (sqlite.VTab, error) {
 	if len(args) != 3 {
 		return nil, errors.New("pivot: expected 3 arguments (rowKeySQL, colKeySQL, cellSQL)")
 	}
-	rowKeySQL := unquote(strings.TrimSpace(args[0]))
-	colKeySQL := unquote(strings.TrimSpace(args[1]))
-	cellSQL := unquote(strings.TrimSpace(args[2]))
+	rowKeySQL := sqlid.Unquote(strings.TrimSpace(args[0]))
+	colKeySQL := sqlid.Unquote(strings.TrimSpace(args[1]))
+	cellSQL := sqlid.Unquote(strings.TrimSpace(args[2]))
 
 	t := &table{
 		conn: c,
@@ -123,7 +123,7 @@ func ctor(c *sqlite.Conn, _, _, _ string, args []string) (sqlite.VTab, error) {
 			return nil, fmt.Errorf("pivot: iterate col-key query: %w", err)
 		}
 		bindVal := row[0]
-		display := stringify(row[1])
+		display := sqlid.AsString(row[1])
 		t.cols = append(t.cols, bindVal)
 		schema.WriteString(", ")
 		schema.WriteString(quote(display))
@@ -373,28 +373,3 @@ func opString(op sqlite.ConstraintOp) string {
 }
 
 func quote(s string) string { return sqlid.QuoteIdent(s) }
-
-func unquote(s string) string {
-	if len(s) >= 2 && s[0] == '\'' && s[len(s)-1] == '\'' {
-		return strings.ReplaceAll(s[1:len(s)-1], "''", "'")
-	}
-	return s
-}
-
-// stringify is used only for the col-key display name; we accept
-// strings, []byte (TEXT-as-bytes), and numeric coercions.
-func stringify(v driver.Value) string {
-	switch x := v.(type) {
-	case nil:
-		return ""
-	case string:
-		return x
-	case []byte:
-		return string(x)
-	case int64:
-		return fmt.Sprintf("%d", x)
-	case float64:
-		return fmt.Sprintf("%g", x)
-	}
-	return fmt.Sprint(v)
-}

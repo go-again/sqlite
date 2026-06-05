@@ -60,12 +60,11 @@ func ctor(c *sqlite.Conn, _, _, _ string, args []string) (sqlite.VTab, error) {
 	if len(args) != 1 {
 		return nil, errors.New("statement: expected exactly one argument (the SQL string)")
 	}
-	sql := strings.TrimSpace(args[0])
-	// Unquote single-quoted argument (the common case from SQLite's
-	// argv tokenizer when the caller writes USING statement('SELECT…')).
-	if len(sql) >= 2 && sql[0] == '\'' && sql[len(sql)-1] == '\'' {
-		sql = strings.ReplaceAll(sql[1:len(sql)-1], "''", "'")
-	}
+	// Unquote the argument (the common case is single quotes from
+	// SQLite's argv tokenizer when the caller writes
+	// USING statement('SELECT…'); sqlid.Unquote also accepts the
+	// "/[]/backtick identifier forms).
+	sql := sqlid.Unquote(strings.TrimSpace(args[0]))
 
 	prep, err := c.Prepare(sql)
 	if err != nil {

@@ -3,9 +3,9 @@ package vecgorm
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"strings"
 
+	"github.com/go-again/sqlite/internal/gormbridge"
 	"github.com/go-again/sqlite/vec"
 	"gorm.io/gorm"
 )
@@ -226,31 +226,17 @@ func KNN[T any](
 		return nil, nil
 	}
 
-	// Materialize the gorm models. Use the caller's db so any scopes,
-	// preloads, and session config carry through.
+	// Materialize the gorm models via the caller's db so any scopes,
+	// preloads, and session config carry through. KNN returns matches in
+	// rank order, but gorm's `IN` clause won't preserve it on SQLite, so
+	// we fetch into a PK-keyed map then reassemble below.
 	rowids := make([]any, len(matches))
 	for i, mt := range matches {
 		rowids[i] = mt.Rowid
 	}
-
-	// We must SELECT in the order KNN returned, but gorm's `IN` clause
-	// won't preserve order on SQLite. Fetch as a map then reassemble.
-	models := reflect.New(reflect.SliceOf(reflect.TypeOf(zero))).Interface()
-	if err := db.WithContext(ctx).
-		Where(fmt.Sprintf("%s IN ?", quoteIdent(mm.PKField.DBName)), rowids).
-		Find(models).Error; err != nil {
+	indexed, err := gormbridge.MaterializeByRowid[T](ctx, db, mm.PKField, rowids)
+	if err != nil {
 		return nil, fmt.Errorf("vecgorm: fetch models: %w", err)
-	}
-
-	indexed := make(map[int64]T)
-	sliceVal := reflect.ValueOf(models).Elem()
-	for i := 0; i < sliceVal.Len(); i++ {
-		row := sliceVal.Index(i)
-		pk, ok := pkAsInt64(mm.PKField, row)
-		if !ok {
-			continue
-		}
-		indexed[pk] = row.Interface().(T)
 	}
 
 	results := make([]Hit[T], 0, len(matches))

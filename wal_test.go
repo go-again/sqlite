@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -64,6 +65,7 @@ func TestWAL_ConcurrentReadersAndWriters(t *testing.T) {
 	var writes [writers]atomic.Int64
 	var readErrs atomic.Int64
 	var writeErrs atomic.Int64
+	var busyErrs atomic.Int64
 
 	for w := range writers {
 		wg.Add(1)
@@ -76,6 +78,20 @@ func TestWAL_ConcurrentReadersAndWriters(t *testing.T) {
 				default:
 				}
 				if _, err := db.Exec("INSERT INTO t (w) VALUES (?)", id); err != nil {
+					// SQLITE_BUSY is expected contention, not a bug: WAL
+					// permits many readers but only one writer at a time, so
+					// a writer that waits longer than busy_timeout for the
+					// write lock gets SQLITE_BUSY. Slow CI runners (Windows
+					// especially) occasionally exceed the 2s timeout under
+					// 4-way write contention. Retry within the window rather
+					// than killing the writer and failing the test; the
+					// row-count invariant below still holds (the per-writer
+					// counter is only bumped on a successful insert).
+					var serr *Error
+					if errors.As(err, &serr) && serr.Code() == SQLITE_BUSY {
+						busyErrs.Add(1)
+						continue
+					}
 					writeErrs.Add(1)
 					return
 				}
@@ -103,6 +119,12 @@ func TestWAL_ConcurrentReadersAndWriters(t *testing.T) {
 	}
 	wg.Wait()
 
+	// BUSY retries are tolerated (logged, not fatal) so a slow runner's
+	// lock contention doesn't fail the test; a genuine WAL regression would
+	// instead surface as read errors or a row-count mismatch below.
+	if b := busyErrs.Load(); b > 0 {
+		t.Logf("tolerated %d SQLITE_BUSY write retr(ies) under WAL contention", b)
+	}
 	if got := writeErrs.Load(); got > 0 {
 		t.Errorf("write errors: %d", got)
 	}

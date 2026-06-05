@@ -165,10 +165,10 @@ func (t *table) loadParams() error {
 	if err := rs.Next(dest); err != nil {
 		return err
 	}
-	t.bytes = toInt64(dest[0])
-	t.prob = toFloat(dest[1])
-	t.nElem = toInt64(dest[2])
-	t.hashes = int(toInt64(dest[3]))
+	t.bytes = sqlid.AsInt64(dest[0])
+	t.prob = sqlid.AsFloat(dest[1])
+	t.nElem = sqlid.AsInt64(dest[2])
+	t.hashes = int(sqlid.AsInt64(dest[3]))
 	return nil
 }
 
@@ -231,7 +231,7 @@ func (t *table) Insert(cols []driver.Value, _ *int64) error {
 	if len(cols) < 2 {
 		return fmt.Errorf("bloom: insert expects (present, word) columns")
 	}
-	word := stringify(cols[1])
+	word := sqlid.AsString(cols[1])
 	if word == "" {
 		return nil
 	}
@@ -280,7 +280,7 @@ func (c *cursor) Filter(_ int, _ string, args []driver.Value) error {
 	}
 	c.word = args[0]
 	c.emitted = false
-	word := stringify(args[0])
+	word := sqlid.AsString(args[0])
 	if word == "" {
 		c.present = false
 		return nil
@@ -422,51 +422,4 @@ func kthHash(k int, word string) uint64 {
 	_, _ = h.Write([]byte(word))
 	h2 := h.Sum64()
 	return h1 + uint64(k)*h2
-}
-
-func stringify(v driver.Value) string {
-	switch x := v.(type) {
-	case nil:
-		return ""
-	case string:
-		return x
-	case []byte:
-		return string(x)
-	case int64:
-		return strconv.FormatInt(x, 10)
-	case float64:
-		return strconv.FormatFloat(x, 'g', -1, 64)
-	case bool:
-		if x {
-			return "true"
-		}
-		return "false"
-	}
-	return fmt.Sprint(v)
-}
-
-func toInt64(v driver.Value) int64 {
-	switch x := v.(type) {
-	case int64:
-		return x
-	case float64:
-		return int64(x)
-	case []byte:
-		n, _ := strconv.ParseInt(string(x), 10, 64)
-		return n
-	case string:
-		n, _ := strconv.ParseInt(x, 10, 64)
-		return n
-	}
-	return 0
-}
-
-func toFloat(v driver.Value) float64 {
-	switch x := v.(type) {
-	case float64:
-		return x
-	case int64:
-		return float64(x)
-	}
-	return 0
 }

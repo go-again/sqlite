@@ -13,6 +13,7 @@ import (
 
 	sqlite "github.com/go-again/sqlite"
 	"github.com/go-again/sqlite/ext/csv"
+	"github.com/go-again/sqlite/ext/internal/filevtab"
 )
 
 func writeFile(path, content string) error {
@@ -287,7 +288,7 @@ func TestCSV_BOMStripped(t *testing.T) {
 	// A UTF-8 BOM at the start of a CSV file must NOT bleed into the
 	// first column name.
 	fsys := fstest.MapFS{
-		"bom.csv": {Data: []byte("\xEF\xBB\xBFkey,value\nfoo,bar\n")},
+		"bom.csv": {Data: []byte(filevtab.UTF8BOM + "key,value\nfoo,bar\n")},
 	}
 	_, sc := withCSV(t, fsys)
 	if _, err := sc.ExecContext(context.Background(),

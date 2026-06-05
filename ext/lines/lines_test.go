@@ -10,6 +10,7 @@ import (
 	"testing/fstest"
 
 	sqlite "github.com/go-again/sqlite"
+	"github.com/go-again/sqlite/ext/internal/filevtab"
 	"github.com/go-again/sqlite/ext/lines"
 )
 
@@ -134,7 +135,7 @@ func TestLines_LongLines(t *testing.T) {
 
 func TestLines_BOMStripped(t *testing.T) {
 	fsys := fstest.MapFS{
-		"bom.log": {Data: []byte("\xEF\xBB\xBFfirst line\nsecond line\n")},
+		"bom.log": {Data: []byte(filevtab.UTF8BOM + "first line\nsecond line\n")},
 	}
 	_, sc := withLines(t, fsys)
 	if _, err := sc.ExecContext(context.Background(),

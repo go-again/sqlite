@@ -3,12 +3,12 @@ package array_test
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"strings"
 	"testing"
 
 	sqlite "github.com/go-again/sqlite"
 	"github.com/go-again/sqlite/ext/array"
+	"github.com/go-again/sqlite/internal/testhelp"
 )
 
 // openDB opens an in-memory database, pins to MaxOpenConns=1, returns
@@ -16,30 +16,8 @@ import (
 // the test uses for SQL execution.
 func openDB(t *testing.T) (*sql.DB, *sql.Conn, *sqlite.Conn) {
 	t.Helper()
-	db, err := sql.Open(sqlite.DriverName, ":memory:")
-	if err != nil {
-		t.Fatalf("sql.Open: %v", err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-
-	sc, err := db.Conn(context.Background())
-	if err != nil {
-		t.Fatalf("db.Conn: %v", err)
-	}
-	t.Cleanup(func() { _ = sc.Close() })
-
-	var conn *sqlite.Conn
-	if err := sc.Raw(func(driverConn any) error {
-		c, ok := driverConn.(*sqlite.Conn)
-		if !ok {
-			return errors.New("driverConn is not *sqlite.Conn")
-		}
-		conn = c
-		return nil
-	}); err != nil {
-		t.Fatalf("Raw: %v", err)
-	}
+	db, sc := testhelp.OpenPinned(t, "sqlite", ":memory:")
+	conn := testhelp.RawConn(t, sc)
 	if err := array.Register(conn); err != nil {
 		t.Fatalf("array.Register: %v", err)
 	}

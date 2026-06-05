@@ -5,6 +5,8 @@ import (
 	"iter"
 	"log/slog"
 	"time"
+
+	"github.com/go-again/sqlite/internal/obs"
 )
 
 // Recorder is the metrics/tracing hook surface for vec.Observable. Each
@@ -183,13 +185,5 @@ func (o *Observable) KNNSlice(ctx context.Context, query []float32, k int, opts 
 }
 
 func (o *Observable) log(ctx context.Context, msg string, err error, attrs ...slog.Attr) {
-	if o.cfg.logger == nil {
-		return
-	}
-	if err != nil {
-		attrs = append(attrs, slog.String("err", err.Error()))
-		o.cfg.logger.LogAttrs(ctx, slog.LevelError, msg, attrs...)
-		return
-	}
-	o.cfg.logger.LogAttrs(ctx, slog.LevelInfo, msg, attrs...)
+	obs.Log(ctx, o.cfg.logger, msg, err, attrs...)
 }

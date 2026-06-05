@@ -53,6 +53,70 @@ func TestRegistry_ZeroValueUsable(t *testing.T) {
 	}
 }
 
+func TestRegistry_Range(t *testing.T) {
+	r := cabi.NewRegistry[entry]()
+	want := map[uintptr]int{}
+	for i := range 5 {
+		e := &entry{id: i}
+		want[r.Register(e)] = i
+	}
+	got := map[uintptr]int{}
+	r.Range(func(tok uintptr, v *entry) bool {
+		got[tok] = v.id
+		return true
+	})
+	if len(got) != len(want) {
+		t.Fatalf("Range visited %d entries, want %d", len(got), len(want))
+	}
+	for tok, id := range want {
+		if got[tok] != id {
+			t.Errorf("Range tok %d: got id %d, want %d", tok, got[tok], id)
+		}
+	}
+}
+
+func TestRegistry_RangeEarlyStop(t *testing.T) {
+	r := cabi.NewRegistry[entry]()
+	for i := range 10 {
+		r.Register(&entry{id: i})
+	}
+	visited := 0
+	r.Range(func(uintptr, *entry) bool {
+		visited++
+		return visited < 3 // stop after the third entry
+	})
+	if visited != 3 {
+		t.Errorf("Range visited %d entries before stopping, want 3", visited)
+	}
+}
+
+func TestRegistry_DeleteWhere(t *testing.T) {
+	r := cabi.NewRegistry[entry]()
+	var evenToks, oddToks []uintptr
+	for i := range 10 {
+		tok := r.Register(&entry{id: i})
+		if i%2 == 0 {
+			evenToks = append(evenToks, tok)
+		} else {
+			oddToks = append(oddToks, tok)
+		}
+	}
+	// Drop the odd-id entries.
+	r.DeleteWhere(func(_ uintptr, v *entry) bool {
+		return v.id%2 != 0
+	})
+	for _, tok := range oddToks {
+		if r.Lookup(tok) != nil {
+			t.Errorf("odd tok %d survived DeleteWhere", tok)
+		}
+	}
+	for _, tok := range evenToks {
+		if r.Lookup(tok) == nil {
+			t.Errorf("even tok %d wrongly deleted", tok)
+		}
+	}
+}
+
 func TestRegistry_ConcurrentRegister(t *testing.T) {
 	r := cabi.NewRegistry[entry]()
 	const goroutines = 32

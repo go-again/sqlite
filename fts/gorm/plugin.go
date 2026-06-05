@@ -1,8 +1,6 @@
 package ftsgorm
 
 import (
-	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"reflect"
@@ -12,6 +10,7 @@ import (
 	"gorm.io/gorm/schema"
 
 	"github.com/go-again/sqlite/fts"
+	"github.com/go-again/sqlite/internal/gormbridge"
 )
 
 const pluginName = "ftsgorm"
@@ -94,7 +93,7 @@ func (p *plugin) Initialize(db *gorm.DB) error {
 // registerSchema parses tags + caches the result. Re-parse is
 // idempotent; concurrent access is safe under the rwmutex.
 func (p *plugin) registerSchema(db *gorm.DB, model any) (*modelMeta, error) {
-	rt := indirectType(reflect.TypeOf(model))
+	rt := gormbridge.IndirectType(reflect.TypeOf(model))
 	p.mu.RLock()
 	if mm, ok := p.meta[rt]; ok {
 		p.mu.RUnlock()
@@ -124,7 +123,7 @@ func (p *plugin) registerSchema(db *gorm.DB, model any) (*modelMeta, error) {
 		mm = &modelMeta{
 			SourceTable: stmt.Schema.Table,
 			PKField:     pkFields[0],
-			SoftDelete:  findDeletedAtField(stmt.Schema) != nil,
+			SoftDelete:  gormbridge.FindDeletedAtField(stmt.Schema) != nil,
 			Table:       tm.Table,
 			Tokenize:    tm.Tokenize,
 			Prefix:      tm.Prefix,
@@ -191,72 +190,4 @@ func pluginFrom(db *gorm.DB) (*plugin, error) {
 		return nil, fmt.Errorf("ftsgorm: registered plugin %s is %T, not *ftsgorm.plugin", pluginName, raw)
 	}
 	return p, nil
-}
-
-func indirectType(t reflect.Type) reflect.Type {
-	for {
-		switch t.Kind() {
-		case reflect.Pointer, reflect.Slice, reflect.Array:
-			t = t.Elem()
-		default:
-			return t
-		}
-	}
-}
-
-func helperContext(db *gorm.DB) context.Context {
-	if db.Statement != nil && db.Statement.Context != nil {
-		return db.Statement.Context
-	}
-	return context.Background()
-}
-
-// execPool is the subset of gorm.ConnPool we need to issue FTS5
-// statements. Both *sql.DB and *sql.Tx satisfy it; using this interface
-// in callbacks and Search lets writes and reads participate in an
-// active gorm.Transaction rather than auto-committing through the
-// parent *sql.DB.
-type execPool interface {
-	PrepareContext(ctx context.Context, query string) (*sql.Stmt, error)
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-}
-
-// activePool returns the connection pool the gorm.DB is currently using.
-// Inside a gorm transaction (db.Transaction / db.Begin) this is the
-// active *sql.Tx, so FTS5 writes commit or roll back with the parent.
-// Outside a transaction it is the underlying *sql.DB.
-func activePool(db *gorm.DB) (execPool, error) {
-	if db.Statement != nil && db.Statement.ConnPool != nil {
-		if p, ok := db.Statement.ConnPool.(execPool); ok {
-			return p, nil
-		}
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		return nil, fmt.Errorf("ftsgorm: unable to obtain ConnPool: %w", err)
-	}
-	return sqlDB, nil
-}
-
-// deletedAtType is the concrete type gorm uses for soft-delete columns;
-// we match on it so models that rename the Go field (e.g.
-// `RemovedAt gorm.DeletedAt`) still participate in soft-delete sync.
-// The previous `LookUpField("DeletedAt")` discipline only matched the
-// default field name and silently missed renamed fields.
-var deletedAtType = reflect.TypeFor[gorm.DeletedAt]()
-
-// findDeletedAtField returns the schema's gorm.DeletedAt field
-// regardless of its Go name, or nil if the model has no soft-delete
-// field at all.
-func findDeletedAtField(s *schema.Schema) *schema.Field {
-	if s == nil {
-		return nil
-	}
-	for _, f := range s.Fields {
-		if f.StructField.Type == deletedAtType {
-			return f
-		}
-	}
-	return nil
 }

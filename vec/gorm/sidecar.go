@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/go-again/sqlite/internal/gormbridge"
 	"github.com/go-again/sqlite/vec"
 	"gorm.io/gorm"
 )
@@ -26,33 +27,6 @@ func openSidecar(db *gorm.DB, m meta) (*vec.Table, error) {
 		Metric:   m.Metric,
 		Encoding: m.Encoding,
 	})
-}
-
-// execPool is the subset of gorm.ConnPool we need to issue sidecar
-// statements. Both *sql.DB and *sql.Tx satisfy it. Using this interface
-// in callbacks ensures writes participate in any active gorm.Transaction
-// rather than auto-committing through the parent *sql.DB.
-type execPool interface {
-	PrepareContext(ctx context.Context, query string) (*sql.Stmt, error)
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-}
-
-// activePool returns the connection pool the gorm.DB is currently using.
-// Inside a gorm transaction (db.Transaction / db.Begin) this is the
-// active *sql.Tx, so sidecar writes commit or roll back with the parent.
-// Outside a transaction it is the underlying *sql.DB.
-func activePool(db *gorm.DB) (execPool, error) {
-	if db.Statement != nil && db.Statement.ConnPool != nil {
-		if p, ok := db.Statement.ConnPool.(execPool); ok {
-			return p, nil
-		}
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		return nil, fmt.Errorf("vecgorm: unable to obtain ConnPool: %w", err)
-	}
-	return sqlDB, nil
 }
 
 // poolDB returns a *sql.DB for read paths (KNN) that pre-date the
@@ -80,7 +54,7 @@ func batchInsertEmbeddings(ctx context.Context, db *gorm.DB, m meta, items []vec
 	if len(items) == 0 {
 		return nil
 	}
-	pool, err := activePool(db)
+	pool, err := gormbridge.ActivePool(db)
 	if err != nil {
 		return err
 	}
@@ -141,7 +115,7 @@ func updateEmbedding(ctx context.Context, db *gorm.DB, m meta, rowid int64, emb 
 	if len(emb) != m.Dim {
 		return fmt.Errorf("vecgorm: %s: embedding length %d != dim %d", m.Table, len(emb), m.Dim)
 	}
-	pool, err := activePool(db)
+	pool, err := gormbridge.ActivePool(db)
 	if err != nil {
 		return err
 	}
@@ -157,7 +131,7 @@ func updateEmbedding(ctx context.Context, db *gorm.DB, m meta, rowid int64, emb 
 
 // deleteEmbedding removes a single sidecar row by rowid.
 func deleteEmbedding(ctx context.Context, db *gorm.DB, m meta, rowid int64) error {
-	pool, err := activePool(db)
+	pool, err := gormbridge.ActivePool(db)
 	if err != nil {
 		return err
 	}
@@ -207,7 +181,7 @@ func isSoftDelete(db *gorm.DB) bool {
 	if db.Statement == nil || db.Statement.Schema == nil {
 		return false
 	}
-	if findDeletedAtField(db.Statement.Schema) == nil {
+	if gormbridge.FindDeletedAtField(db.Statement.Schema) == nil {
 		return false
 	}
 	for _, set := range db.Statement.Clauses {

@@ -9,30 +9,15 @@ import (
 
 	sqlite "github.com/go-again/sqlite"
 	"github.com/go-again/sqlite/ext/unicode"
+	"github.com/go-again/sqlite/internal/testhelp"
 )
 
 func openDB(t *testing.T) (*sql.DB, *sql.Conn) {
 	t.Helper()
-	db, err := sql.Open(sqlite.DriverName, ":memory:")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-	sc, err := db.Conn(context.Background())
-	if err != nil {
-		t.Fatalf("Conn: %v", err)
-	}
-	t.Cleanup(func() { _ = sc.Close() })
-	if err := sc.Raw(func(driverConn any) error {
-		c, ok := driverConn.(*sqlite.Conn)
-		if !ok {
-			return errors.New("not *sqlite.Conn")
-		}
-		return unicode.Register(c)
-	}); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
+	db, sc := testhelp.OpenPinned(t, "sqlite", ":memory:")
+	// unicode.Register is variadic, so it does not satisfy the
+	// func(*sqlite.Conn) error shape RegisterOn expects directly.
+	testhelp.RegisterOn(t, sc, func(c *sqlite.Conn) error { return unicode.Register(c) })
 	return db, sc
 }
 

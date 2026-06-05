@@ -12,19 +12,12 @@ import (
 )
 
 // fileHandles maps the (untracked-via-modernc) pFile address to its
-// per-file Go-side state. The map exists because perFileState contains
-// non-Go-safe pointer fields (snapshot maps, writeBuf maps) that
-// cannot live in the SQLite-allocated trailing bytes of the file
-// struct.
-var (
-	fileHandlesMu sync.RWMutex
-	fileHandles   = map[uintptr]*fileHandle{}
-	// nextToken hands out unique pFile-state tokens. Independent of
-	// the cabi.Registry used for fsRegistry — fileHandles needs an
-	// FS-scoped iteration in Close() that the generic Registry
-	// doesn't expose.
-	nextToken atomic.Uintptr
-)
+// per-file Go-side state. The registry exists because perFileState
+// contains non-Go-safe pointer fields (snapshot maps, writeBuf maps)
+// that cannot live in the SQLite-allocated trailing bytes of the file
+// struct. The FS-scoped drain in (*FS).Close goes through
+// cabi.Registry.DeleteWhere.
+var fileHandles = cabi.NewRegistry[fileHandle]()
 
 // perFileState is the tail-allocated portion of the SQLite file
 // struct. It only needs to hold one pointer-sized identifier — the
@@ -90,25 +83,15 @@ func perFileStateOf(pFile uintptr) *perFileState {
 }
 
 func handleFor(pFile uintptr) *fileHandle {
-	tok := perFileStateOf(pFile).token
-	fileHandlesMu.RLock()
-	h := fileHandles[tok]
-	fileHandlesMu.RUnlock()
-	return h
+	return fileHandles.Lookup(perFileStateOf(pFile).token)
 }
 
 func storeHandle(h *fileHandle) uintptr {
-	tok := uintptr(nextToken.Add(1))
-	fileHandlesMu.Lock()
-	fileHandles[tok] = h
-	fileHandlesMu.Unlock()
-	return tok
+	return fileHandles.Register(h)
 }
 
 func dropHandle(tok uintptr) {
-	fileHandlesMu.Lock()
-	delete(fileHandles, tok)
-	fileHandlesMu.Unlock()
+	fileHandles.Unregister(tok)
 }
 
 // xOpenTrampoline allocates a perFileState + Go-side fileHandle for

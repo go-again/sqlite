@@ -496,12 +496,15 @@ func TestConcurrentReadsWrites_NoCorruption(t *testing.T) {
 	t.Cleanup(func() { _ = fs.Close() })
 
 	dbPath := filepath.Join(t.TempDir(), "stress.db")
-	// busy_timeout=5s gives SQLite room to serialize concurrent
-	// writers; without it WAL writes contend on the single-writer
-	// lock and surface SQLITE_BUSY immediately. This test cares
-	// about cipher-level correctness under concurrency, not lock
-	// fairness — let SQLite handle the queueing.
-	dsn := fmt.Sprintf("file:%s?vfs=%s&_pragma=busy_timeout(5000)", dbPath, name)
+	// busy_timeout gives SQLite room to serialize concurrent writers;
+	// without it WAL writes contend on the single-writer lock and
+	// surface SQLITE_BUSY immediately. 30s (rather than a tighter 5s)
+	// absorbs the slower, CPU-heavier encrypted writes on loaded
+	// Windows CI runners, where 5s was occasionally exceeded under
+	// 8-way contention. This test cares about cipher-level correctness
+	// under concurrency, not lock fairness — let SQLite handle the
+	// queueing.
+	dsn := fmt.Sprintf("file:%s?vfs=%s&_pragma=busy_timeout(30000)", dbPath, name)
 	db, _ := sql.Open(sqlite.DriverName, dsn)
 	t.Cleanup(func() { _ = db.Close() })
 	db.SetMaxOpenConns(8)

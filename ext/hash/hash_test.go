@@ -8,7 +8,6 @@ import (
 	_ "crypto/sha512"
 	"database/sql"
 	"encoding/hex"
-	"errors"
 	"strings"
 	"testing"
 
@@ -20,32 +19,14 @@ import (
 	_ "golang.org/x/crypto/ripemd160" //nolint:gosec,staticcheck
 	_ "golang.org/x/crypto/sha3"
 
-	sqlite "github.com/go-again/sqlite"
 	"github.com/go-again/sqlite/ext/hash"
+	"github.com/go-again/sqlite/internal/testhelp"
 )
 
 func openDB(t *testing.T) (*sql.DB, *sql.Conn) {
 	t.Helper()
-	db, err := sql.Open(sqlite.DriverName, ":memory:")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-	sc, err := db.Conn(context.Background())
-	if err != nil {
-		t.Fatalf("Conn: %v", err)
-	}
-	t.Cleanup(func() { _ = sc.Close() })
-	if err := sc.Raw(func(driverConn any) error {
-		c, ok := driverConn.(*sqlite.Conn)
-		if !ok {
-			return errors.New("not *sqlite.Conn")
-		}
-		return hash.Register(c)
-	}); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
+	db, sc := testhelp.OpenPinned(t, "sqlite", ":memory:")
+	testhelp.RegisterOn(t, sc, hash.Register)
 	return db, sc
 }
 

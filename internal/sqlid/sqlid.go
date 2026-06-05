@@ -8,12 +8,16 @@
 // quoting.
 //
 // This package centralizes NamedArg + Unquote so the various ext/* ports
-// share one parser. It is intentionally minimal — anything beyond the two
+// share one parser, plus the driver.Value coercion helpers (AsString /
+// AsInt64 / AsFloat) the vtab cursors use to read row values back from
+// child queries. It is intentionally minimal — anything beyond these
 // helpers belongs in the calling extension.
 package sqlid
 
 import (
 	"database/sql/driver"
+	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -128,6 +132,78 @@ func Unquote(val string) string {
 		old, new = `''`, `'`
 	}
 	return strings.ReplaceAll(inner, old, new)
+}
+
+// AsString coerces a driver.Value to its textual form the way the
+// vtab ext/* cursors expect when reading a value back from a child
+// query (e.g. a pivot column-key's display name, a bloom membership
+// key). NULL becomes the empty string; string / []byte pass through
+// (the latter is TEXT-as-bytes); int64 and float64 use the shortest
+// round-trippable rendering; bool renders "true"/"false". Anything
+// else falls back to fmt.Sprint.
+//
+// The numeric renderings are chosen to be byte-identical to the
+// fmt-based formatters the ext/* copies used before consolidation:
+// strconv.FormatInt(x, 10) == fmt.Sprintf("%d", x), and
+// strconv.FormatFloat(x, 'g', -1, 64) == fmt.Sprintf("%g", x).
+func AsString(v driver.Value) string {
+	switch x := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return x
+	case []byte:
+		return string(x)
+	case int64:
+		return strconv.FormatInt(x, 10)
+	case float64:
+		return strconv.FormatFloat(x, 'g', -1, 64)
+	case bool:
+		if x {
+			return "true"
+		}
+		return "false"
+	}
+	return fmt.Sprint(v)
+}
+
+// AsInt64 coerces a driver.Value to int64. int64 passes through;
+// float64 truncates toward zero; string / []byte are parsed as a
+// base-10 integer (full-string match — a non-numeric or partially
+// numeric value yields 0). Anything else, including NULL, yields 0.
+//
+// The string/[]byte branch uses strconv.ParseInt, which requires the
+// whole token to be a valid integer; callers that need fmt.Sscan's
+// leading-prefix tolerance must keep their own helper (see
+// ext/spellfix1, which is intentionally not routed here).
+func AsInt64(v driver.Value) int64 {
+	switch x := v.(type) {
+	case int64:
+		return x
+	case float64:
+		return int64(x)
+	case []byte:
+		n, _ := strconv.ParseInt(string(x), 10, 64)
+		return n
+	case string:
+		n, _ := strconv.ParseInt(x, 10, 64)
+		return n
+	}
+	return 0
+}
+
+// AsFloat coerces a driver.Value to float64. float64 passes through;
+// int64 widens; anything else, including string / []byte and NULL,
+// yields 0. (SQLite hands numeric columns back as int64/float64, so
+// the textual branches the integer path needs don't arise here.)
+func AsFloat(v driver.Value) float64 {
+	switch x := v.(type) {
+	case float64:
+		return x
+	case int64:
+		return float64(x)
+	}
+	return 0
 }
 
 // IsAlreadyExistsErr reports whether err carries SQLite's "table X

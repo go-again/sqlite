@@ -62,3 +62,43 @@ func (r *Registry[T]) Unregister(tok uintptr) {
 	delete(r.m, tok)
 	r.mu.Unlock()
 }
+
+// Range calls fn for every (token, pointer) pair currently registered,
+// stopping early if fn returns false. Iteration order is unspecified.
+//
+// Range holds only a read lock, so fn MUST NOT mutate the Registry
+// (Register / Unregister / DeleteWhere would self-deadlock). To delete
+// entries while iterating, use [Registry.DeleteWhere] instead. Iteration
+// runs over a snapshot of the keys captured under the lock, so entries
+// concurrently added or removed by other goroutines after the snapshot
+// may or may not be visited.
+func (r *Registry[T]) Range(fn func(tok uintptr, v *T) bool) {
+	r.mu.RLock()
+	toks := make([]uintptr, 0, len(r.m))
+	vals := make([]*T, 0, len(r.m))
+	for tok, v := range r.m {
+		toks = append(toks, tok)
+		vals = append(vals, v)
+	}
+	r.mu.RUnlock()
+	for i, tok := range toks {
+		if !fn(tok, vals[i]) {
+			return
+		}
+	}
+}
+
+// DeleteWhere removes every entry for which pred returns true, taking the
+// write lock once for the whole sweep. pred MUST NOT call back into the
+// Registry. It is the FS-scoped drain primitive the in-memory VFS Close
+// paths need: delete all file handles owned by the closing FS in a single
+// locked pass.
+func (r *Registry[T]) DeleteWhere(pred func(tok uintptr, v *T) bool) {
+	r.mu.Lock()
+	for tok, v := range r.m {
+		if pred(tok, v) {
+			delete(r.m, tok)
+		}
+	}
+	r.mu.Unlock()
+}

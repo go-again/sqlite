@@ -3,7 +3,6 @@ package fileio_test
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,55 +12,20 @@ import (
 
 	sqlite "github.com/go-again/sqlite"
 	"github.com/go-again/sqlite/ext/fileio"
+	"github.com/go-again/sqlite/internal/testhelp"
 )
 
 func openOS(t *testing.T) (*sql.DB, *sql.Conn) {
 	t.Helper()
-	db, err := sql.Open(sqlite.DriverName, ":memory:")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-	sc, err := db.Conn(context.Background())
-	if err != nil {
-		t.Fatalf("Conn: %v", err)
-	}
-	t.Cleanup(func() { _ = sc.Close() })
-	if err := sc.Raw(func(driverConn any) error {
-		c, ok := driverConn.(*sqlite.Conn)
-		if !ok {
-			return errors.New("not *sqlite.Conn")
-		}
-		return fileio.Register(c)
-	}); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
+	db, sc := testhelp.OpenPinned(t, "sqlite", ":memory:")
+	testhelp.RegisterOn(t, sc, fileio.Register)
 	return db, sc
 }
 
 func openFS(t *testing.T, fsys fstest.MapFS) (*sql.DB, *sql.Conn) {
 	t.Helper()
-	db, err := sql.Open(sqlite.DriverName, ":memory:")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-	sc, err := db.Conn(context.Background())
-	if err != nil {
-		t.Fatalf("Conn: %v", err)
-	}
-	t.Cleanup(func() { _ = sc.Close() })
-	if err := sc.Raw(func(driverConn any) error {
-		c, ok := driverConn.(*sqlite.Conn)
-		if !ok {
-			return errors.New("not *sqlite.Conn")
-		}
-		return fileio.RegisterFS(c, fsys)
-	}); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
+	db, sc := testhelp.OpenPinned(t, "sqlite", ":memory:")
+	testhelp.RegisterOn(t, sc, func(c *sqlite.Conn) error { return fileio.RegisterFS(c, fsys) })
 	return db, sc
 }
 

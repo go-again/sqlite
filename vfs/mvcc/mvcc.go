@@ -157,13 +157,9 @@ func (f *FS) Close() error {
 
 	// Drop any fileHandles still owned by this FS. Without this drain,
 	// repeated New/Close cycles permanently leak handle records.
-	fileHandlesMu.Lock()
-	for tok, h := range fileHandles {
-		if h.fs == f {
-			delete(fileHandles, tok)
-		}
-	}
-	fileHandlesMu.Unlock()
+	fileHandles.DeleteWhere(func(_ uintptr, h *fileHandle) bool {
+		return h.fs == f
+	})
 
 	f.mu.Lock()
 	f.memDBs = nil

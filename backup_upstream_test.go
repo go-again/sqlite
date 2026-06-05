@@ -74,6 +74,11 @@ func TestBackupCommitClosesConnOnError(t *testing.T) {
 	// Step should fail because the destination is read-only.
 	_, stepErr := bck.Step(-1)
 
+	// Capture the destination conn before Commit: on the error path Commit
+	// closes the destination and clears b.dstConn (b.dstConn = nil), so we
+	// keep our own handle to assert the close actually happened.
+	dstBefore := bck.dstConn
+
 	// Whether or not Step reported the error, Commit must propagate the
 	// error from backup_finish and close the destination connection.
 	conn, commitErr := bck.Commit()
@@ -94,8 +99,9 @@ func TestBackupCommitClosesConnOnError(t *testing.T) {
 	}
 
 	// The critical assertion: the destination connection must be closed.
-	// After Close(), db is set to 0.
-	if bck.dstConn.db != 0 {
+	// Commit closes it and clears b.dstConn, so check the captured handle:
+	// Close() zeros db.
+	if dstBefore == nil || dstBefore.db != 0 {
 		t.Fatal("Commit() did not close the destination connection on error")
 	}
 }

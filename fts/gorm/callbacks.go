@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/go-again/sqlite/fts"
+	"github.com/go-again/sqlite/internal/gormbridge"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
 )
@@ -19,7 +20,7 @@ func (p *plugin) afterCreate(db *gorm.DB) {
 	if !ok || mm.Mode == ModeExternal {
 		return
 	}
-	rows := iterateRows(db.Statement.ReflectValue)
+	rows := gormbridge.IterateRows(db.Statement.ReflectValue)
 	if len(rows) == 0 {
 		return
 	}
@@ -36,7 +37,7 @@ func (p *plugin) afterUpdate(db *gorm.DB) {
 	if !ok || mm.Mode == ModeExternal {
 		return
 	}
-	rows := iterateRows(db.Statement.ReflectValue)
+	rows := gormbridge.IterateRows(db.Statement.ReflectValue)
 	if len(rows) == 0 {
 		return
 	}
@@ -52,7 +53,7 @@ func (p *plugin) afterDelete(db *gorm.DB) {
 	if !ok || mm.Mode == ModeExternal {
 		return
 	}
-	rows := iterateRows(db.Statement.ReflectValue)
+	rows := gormbridge.IterateRows(db.Statement.ReflectValue)
 	if err := syncDelete(db, mm, rows); err != nil {
 		_ = db.AddError(err)
 	}
@@ -64,11 +65,11 @@ func (p *plugin) afterDelete(db *gorm.DB) {
 // SQLite's bind for raw INSERTs into virtual tables — bypassing it
 // keeps the args in declaration order.
 func syncInsert(db *gorm.DB, mm *modelMeta, rows []reflect.Value) error {
-	pool, err := activePool(db)
+	pool, err := gormbridge.ActivePool(db)
 	if err != nil {
 		return err
 	}
-	ctx := helperContext(db)
+	ctx := gormbridge.HelperContext(db)
 	// SQL shape depends only on mm — invariant across rows. Build once
 	// outside the loop so a 1000-row Create isn't rebuilding the same
 	// INSERT statement 1000 times.
@@ -92,7 +93,7 @@ func syncInsert(db *gorm.DB, mm *modelMeta, rows []reflect.Value) error {
 		)
 	}
 	for _, row := range rows {
-		rowid, ok := pkAsInt64(mm.PKField, row)
+		rowid, ok := gormbridge.PKAsInt64(mm.PKField, row)
 		if !ok {
 			continue
 		}
@@ -111,13 +112,13 @@ func syncInsert(db *gorm.DB, mm *modelMeta, rows []reflect.Value) error {
 // syncUpdate refreshes a row's text in the FTS5 table. We use FTS5's
 // 'delete' + INSERT idiom which works for all non-external modes.
 func syncUpdate(db *gorm.DB, mm *modelMeta, rows []reflect.Value) error {
-	pool, err := activePool(db)
+	pool, err := gormbridge.ActivePool(db)
 	if err != nil {
 		return err
 	}
-	ctx := helperContext(db)
+	ctx := gormbridge.HelperContext(db)
 	for _, row := range rows {
-		rowid, ok := pkAsInt64(mm.PKField, row)
+		rowid, ok := gormbridge.PKAsInt64(mm.PKField, row)
 		if !ok {
 			continue
 		}
@@ -147,14 +148,14 @@ func syncUpdate(db *gorm.DB, mm *modelMeta, rows []reflect.Value) error {
 // for both paths (soft-delete's underlying SQL is an UPDATE, but the
 // callback chain is gorm:delete).
 func syncDelete(db *gorm.DB, mm *modelMeta, rows []reflect.Value) error {
-	pool, err := activePool(db)
+	pool, err := gormbridge.ActivePool(db)
 	if err != nil {
 		return err
 	}
-	ctx := helperContext(db)
+	ctx := gormbridge.HelperContext(db)
 	if mm.SoftDelete {
 		for _, row := range rows {
-			rowid, ok := pkAsInt64(mm.PKField, row)
+			rowid, ok := gormbridge.PKAsInt64(mm.PKField, row)
 			if !ok {
 				continue
 			}
@@ -168,7 +169,7 @@ func syncDelete(db *gorm.DB, mm *modelMeta, rows []reflect.Value) error {
 		return nil
 	}
 	for _, row := range rows {
-		rowid, ok := pkAsInt64(mm.PKField, row)
+		rowid, ok := gormbridge.PKAsInt64(mm.PKField, row)
 		if !ok {
 			continue
 		}
@@ -215,30 +216,6 @@ func isSoftDeleted(_ *modelMeta, row reflect.Value) bool {
 		}
 	}
 	return false
-}
-
-// iterateRows normalizes db.Statement.ReflectValue into a flat list.
-func iterateRows(v reflect.Value) []reflect.Value {
-	for v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface {
-		v = v.Elem()
-	}
-	switch v.Kind() {
-	case reflect.Struct:
-		return []reflect.Value{v}
-	case reflect.Slice, reflect.Array:
-		out := make([]reflect.Value, 0, v.Len())
-		for i := 0; i < v.Len(); i++ {
-			elem := v.Index(i)
-			for elem.Kind() == reflect.Pointer {
-				elem = elem.Elem()
-			}
-			if elem.Kind() == reflect.Struct {
-				out = append(out, elem)
-			}
-		}
-		return out
-	}
-	return nil
 }
 
 // _ guards against schema being unused if reflect-only paths land below.

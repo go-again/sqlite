@@ -301,29 +301,33 @@ func escapeDSNPath(p string) string {
 	return b.String()
 }
 
-// pragmaURLValues returns the `_pragma=` URL values for the typed
-// Pragmas, deterministically ordered (declared fields first, then
-// Extra keys in sorted order). Empty / zero fields produce nothing.
-// Used by [Open] and [BuildDSN] to encode PRAGMAs into the DSN.
-func pragmaURLValues(p Pragmas) []string {
-	var out []string
+// pragmaPairs walks the typed Pragmas in canonical order (declared
+// fields first, then Extra keys sorted) and calls emit for each set
+// field. Empty / zero fields are skipped. The single ordered walk is
+// the source of truth for both DSN encodings below, so a newly-added
+// typed pragma can't end up in one encoding but not the other.
+//
+// fkOn is the rendering of a true ForeignKeys flag — "on" for the
+// `_pragma()` URL form, "ON" for the `PRAGMA … = …` statement form —
+// the only field whose canonical spelling differs between encodings.
+func pragmaPairs(p Pragmas, fkOn string, emit func(name, value string)) {
 	if p.JournalMode != "" {
-		out = append(out, fmt.Sprintf("%s(%s)", PragmaJournalMode, string(p.JournalMode)))
+		emit(PragmaJournalMode, string(p.JournalMode))
 	}
 	if p.BusyTimeout > 0 {
-		out = append(out, fmt.Sprintf("%s(%d)", PragmaBusyTimeout, p.BusyTimeout.Milliseconds()))
+		emit(PragmaBusyTimeout, fmt.Sprintf("%d", p.BusyTimeout.Milliseconds()))
 	}
 	if p.Synchronous != "" {
-		out = append(out, fmt.Sprintf("%s(%s)", PragmaSynchronous, string(p.Synchronous)))
+		emit(PragmaSynchronous, string(p.Synchronous))
 	}
 	if p.ForeignKeys {
-		out = append(out, fmt.Sprintf("%s(on)", PragmaForeignKeys))
+		emit(PragmaForeignKeys, fkOn)
 	}
 	if p.CacheSize != 0 {
-		out = append(out, fmt.Sprintf("%s(%d)", PragmaCacheSize, p.CacheSize))
+		emit(PragmaCacheSize, fmt.Sprintf("%d", p.CacheSize))
 	}
 	if p.TempStore != "" {
-		out = append(out, fmt.Sprintf("%s(%s)", PragmaTempStore, string(p.TempStore)))
+		emit(PragmaTempStore, string(p.TempStore))
 	}
 	if len(p.Extra) > 0 {
 		keys := make([]string, 0, len(p.Extra))
@@ -332,9 +336,19 @@ func pragmaURLValues(p Pragmas) []string {
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			out = append(out, fmt.Sprintf("%s(%s)", k, p.Extra[k]))
+			emit(k, p.Extra[k])
 		}
 	}
+}
+
+// pragmaURLValues returns the `_pragma=` URL values for the typed
+// Pragmas, deterministically ordered. Used by [Open] and [BuildDSN] to
+// encode PRAGMAs into the DSN.
+func pragmaURLValues(p Pragmas) []string {
+	var out []string
+	pragmaPairs(p, "on", func(name, value string) {
+		out = append(out, fmt.Sprintf("%s(%s)", name, value))
+	})
 	return out
 }
 
@@ -343,34 +357,9 @@ func pragmaURLValues(p Pragmas) []string {
 // by [ApplyPragmas] for the legacy `sql.Open(dsn)` path.
 func pragmaStatements(p Pragmas) []string {
 	var out []string
-	if p.JournalMode != "" {
-		out = append(out, fmt.Sprintf("PRAGMA %s = %s", PragmaJournalMode, string(p.JournalMode)))
-	}
-	if p.BusyTimeout > 0 {
-		out = append(out, fmt.Sprintf("PRAGMA %s = %d", PragmaBusyTimeout, p.BusyTimeout.Milliseconds()))
-	}
-	if p.Synchronous != "" {
-		out = append(out, fmt.Sprintf("PRAGMA %s = %s", PragmaSynchronous, string(p.Synchronous)))
-	}
-	if p.ForeignKeys {
-		out = append(out, fmt.Sprintf("PRAGMA %s = ON", PragmaForeignKeys))
-	}
-	if p.CacheSize != 0 {
-		out = append(out, fmt.Sprintf("PRAGMA %s = %d", PragmaCacheSize, p.CacheSize))
-	}
-	if p.TempStore != "" {
-		out = append(out, fmt.Sprintf("PRAGMA %s = %s", PragmaTempStore, string(p.TempStore)))
-	}
-	if len(p.Extra) > 0 {
-		keys := make([]string, 0, len(p.Extra))
-		for k := range p.Extra {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			out = append(out, fmt.Sprintf("PRAGMA %s = %s", k, p.Extra[k]))
-		}
-	}
+	pragmaPairs(p, "ON", func(name, value string) {
+		out = append(out, fmt.Sprintf("PRAGMA %s = %s", name, value))
+	})
 	return out
 }
 

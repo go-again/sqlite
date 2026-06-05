@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/go-again/sqlite/internal/gormbridge"
 	"github.com/go-again/sqlite/vec"
 	"gorm.io/gorm"
 )
@@ -51,7 +52,7 @@ func Migrate(db *gorm.DB, models ...any) error {
 
 	ctx := db.Statement.Context
 	if ctx == nil {
-		ctx = helperContext(db)
+		ctx = gormbridge.HelperContext(db)
 	}
 
 	for i, mm := range metas {

@@ -6,6 +6,8 @@ import (
 
 	"modernc.org/libc"
 	sqlite3 "modernc.org/sqlite/lib"
+
+	"github.com/go-again/sqlite/vfs/internal/memio"
 )
 
 // SQLite lock levels (mirror sqlite3.SQLITE_LOCK_*).
@@ -69,37 +71,27 @@ func xReadTrampoline(_ *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Tsq
 	}
 
 	maxSeen := max(snap.size, pendingSize)
-	n := int32(0)
-	end := off + sqlite3.Tsqlite3_int64(amt)
+	end := int64(off) + int64(amt)
+	// Order preserved from the original: copy any pending writes, then
+	// the snapshot pages, both into the same dst buffer. Pending and
+	// snapshot share page keys (the write buffer is cloned from the
+	// snapshot before being layered on), so the second copy wins on
+	// overlap; do not reorder without revisiting that interaction.
+	var n int32
 	if pendingWrites != nil {
-		readFromMap(pendingWrites, off, end, dst, &n)
+		n = memio.ReadFromPages(pendingWrites, int64(off), end, dst)
 	}
-	readFromMap(snap.pages, off, end, dst, &n)
+	if sn := memio.ReadFromPages(snap.pages, int64(off), end, dst); sn > n {
+		n = sn
+	}
 
-	if int64(end) > maxSeen {
+	if end > maxSeen {
 		return sqlite3.SQLITE_IOERR_SHORT_READ
 	}
 	if n < amt {
 		return sqlite3.SQLITE_IOERR_SHORT_READ
 	}
 	return sqlite3.SQLITE_OK
-}
-
-func readFromMap(m map[int64][]byte, off, end sqlite3.Tsqlite3_int64, dst []byte, n *int32) {
-	for k, v := range m {
-		pageStart := k
-		pageEnd := k + int64(len(v))
-		s := max(pageStart, int64(off))
-		e := min(pageEnd, int64(end))
-		if s >= e {
-			continue
-		}
-		copy(dst[s-int64(off):e-int64(off)], v[s-pageStart:e-pageStart])
-		filled := int32(e - s)
-		if filled > *n {
-			*n = filled
-		}
-	}
 }
 
 // xWrite buffers writes in the file handle until commit. The first

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/go-again/sqlite/internal/gormbridge"
 	"github.com/go-again/sqlite/vec"
 	"gorm.io/gorm"
-	"gorm.io/gorm/schema"
 )
 
 // afterCreate runs after the source-table INSERT. Reads the just-assigned
@@ -19,16 +19,16 @@ func (p *plugin) afterCreate(db *gorm.DB) {
 	if !ok {
 		return
 	}
-	rows := iterateRows(db.Statement.ReflectValue)
+	rows := gormbridge.IterateRows(db.Statement.ReflectValue)
 	if len(rows) == 0 {
 		return
 	}
 
-	ctx := helperContext(db)
+	ctx := gormbridge.HelperContext(db)
 	for _, m := range mm.Fields {
 		items := make([]vec.Row, 0, len(rows))
 		for _, row := range rows {
-			rowid, ok := pkAsInt64(mm.PKField, row)
+			rowid, ok := gormbridge.PKAsInt64(mm.PKField, row)
 			if !ok {
 				_ = db.AddError(fmt.Errorf(
 					"vecgorm: %s primary key value %v is not convertible to int64",
@@ -64,12 +64,12 @@ func (p *plugin) afterUpdate(db *gorm.DB) {
 	if !ok {
 		return
 	}
-	rows := iterateRows(db.Statement.ReflectValue)
+	rows := gormbridge.IterateRows(db.Statement.ReflectValue)
 	if len(rows) == 0 {
 		return
 	}
 
-	ctx := helperContext(db)
+	ctx := gormbridge.HelperContext(db)
 	for _, m := range mm.Fields {
 		// Detect soft-delete: when gorm processed the row as a
 		// soft-delete, db.Statement.Schema.LookUpField("DeletedAt")
@@ -86,7 +86,7 @@ func (p *plugin) afterUpdate(db *gorm.DB) {
 		}
 
 		for _, row := range rows {
-			rowid, ok := pkAsInt64(mm.PKField, row)
+			rowid, ok := gormbridge.PKAsInt64(mm.PKField, row)
 			if !ok {
 				continue
 			}
@@ -115,9 +115,9 @@ func (p *plugin) afterDelete(db *gorm.DB) {
 	if !ok {
 		return
 	}
-	rows := iterateRows(db.Statement.ReflectValue)
+	rows := gormbridge.IterateRows(db.Statement.ReflectValue)
 
-	ctx := helperContext(db)
+	ctx := gormbridge.HelperContext(db)
 	for _, m := range mm.Fields {
 		// Soft-delete-aware models: instead of DELETEing from the
 		// sidecar, sync the deleted flag from the source. The source
@@ -146,7 +146,7 @@ func (p *plugin) afterDelete(db *gorm.DB) {
 			continue
 		}
 		for _, row := range rows {
-			rowid, ok := pkAsInt64(mm.PKField, row)
+			rowid, ok := gormbridge.PKAsInt64(mm.PKField, row)
 			if !ok {
 				continue
 			}
@@ -156,52 +156,6 @@ func (p *plugin) afterDelete(db *gorm.DB) {
 			}
 		}
 	}
-}
-
-// iterateRows normalizes db.Statement.ReflectValue (which is either a
-// struct or a slice of structs depending on the call form) into a flat
-// []reflect.Value addressing each row.
-func iterateRows(v reflect.Value) []reflect.Value {
-	for v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface {
-		v = v.Elem()
-	}
-	switch v.Kind() {
-	case reflect.Struct:
-		return []reflect.Value{v}
-	case reflect.Slice, reflect.Array:
-		out := make([]reflect.Value, 0, v.Len())
-		for i := 0; i < v.Len(); i++ {
-			elem := v.Index(i)
-			for elem.Kind() == reflect.Pointer {
-				elem = elem.Elem()
-			}
-			if elem.Kind() == reflect.Struct {
-				out = append(out, elem)
-			}
-		}
-		return out
-	}
-	return nil
-}
-
-// pkAsInt64 reads the primary-key field off a row and converts to int64.
-// Returns false for unsupported types (composite PK fields land here too
-// because we already error in registerSchema on non-single PK setups).
-func pkAsInt64(f *schema.Field, row reflect.Value) (int64, bool) {
-	v := row.FieldByIndex(f.StructField.Index)
-	for v.Kind() == reflect.Pointer {
-		if v.IsNil() {
-			return 0, false
-		}
-		v = v.Elem()
-	}
-	switch v.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return v.Int(), true
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return int64(v.Uint()), true
-	}
-	return 0, false
 }
 
 // embeddingFrom reads a []float32 (or compatible) field off a row.
