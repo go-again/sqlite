@@ -58,10 +58,14 @@ jobs:
           out=$(gofmt -d $(find . -name '*.go' -not -path './.*/*'))
           if [ -n "$out" ]; then echo "$out"; exit 1; fi
       - name: staticcheck
-        uses: dominikh/staticcheck-action@v1
-        with:
-          version: latest
-          install-go: false
+        # We invoke staticcheck directly rather than dominikh/staticcheck-action
+        # because the action's latest tag (v1) still runs on Node.js 20, which
+        # GitHub is deprecating. Upstream has not cut a Node.js 24 release;
+        # running the binary on the existing toolchain bypasses the deprecated
+        # action entirely and produces identical lint output.
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          staticcheck ./...
       - name: golangci-lint
         # v8 of the action defaults to golangci-lint v2.x, which is the
         # major version `.golangci.yml` is written against (`version: "2"`).
@@ -203,7 +207,12 @@ jobs:
       # This job checks our repo out into ./sqlite (so gorm can be cloned
       # into a sibling dir), so the local action lives under ./sqlite —
       # not the workspace root, where every other job's checkout puts it.
+      # cache-dependency-path forwards to actions/setup-go so its
+      # toolchain cache restore finds our go.sum at the non-root checkout
+      # location; every other job inherits the default empty value.
       - uses: ./sqlite/.github/actions/setup
+        with:
+          cache-dependency-path: sqlite/go.sum
 
       - name: Clone gorm at pinned version
         run: |

@@ -33,6 +33,15 @@ type conn struct {
 	db  uintptr // *sqlite3.Xsqlite3
 	tls *libc.TLS
 
+	// inMemory records whether the underlying database lives only in memory
+	// (DSN like ":memory:", "file::memory:", or a shared-cache memory URI).
+	// For such databases the connection IS the database, so usable() must
+	// not report it unusable just because an in-flight query was interrupted
+	// — discarding the sole handle destroys the data. Ported from
+	// modernc.org/sqlite #196 (regressed there by the #198 is_interrupted
+	// check); set once at open via sqlite3_db_filename.
+	inMemory bool
+
 	// Context handling can cause conn.Close and conn.interrupt to be invoked
 	// concurrently.
 	sync.Mutex
@@ -140,6 +149,17 @@ func newConn(dsn string) (*conn, error) {
 	}
 
 	c.db = db
+	// Cache whether this is a memory-only database (sqlite3_db_filename
+	// returns "" for any non-file-backed DB) so usable() can keep an
+	// interrupted in-memory conn in the pool instead of dropping the sole
+	// handle to its data. See the inMemory field.
+	zMain, mainErr := libc.CString("main")
+	if mainErr != nil {
+		c.Close()
+		return nil, mainErr
+	}
+	c.inMemory = libc.GoString(sqlite3.Xsqlite3_db_filename(c.tls, c.db, zMain)) == ""
+	libc.Xfree(c.tls, zMain)
 	registerConn(c)
 	if err = c.extendedResultCodes(true); err != nil {
 		c.Close()
@@ -934,7 +954,17 @@ func (c *conn) IsValid() bool {
 }
 
 func (c *conn) usable() bool {
-	return c.db != 0 && sqlite3.Xsqlite3_is_interrupted(c.tls, c.db) == 0
+	if c.db == 0 {
+		return false
+	}
+	// In-memory databases live only in this connection; discarding it
+	// because the previous query was interrupted (e.g. a cancelled
+	// QueryContext) destroys the database. Keep it usable so database/sql
+	// returns it to the pool rather than dropping it. See the inMemory field.
+	if c.inMemory {
+		return true
+	}
+	return sqlite3.Xsqlite3_is_interrupted(c.tls, c.db) == 0
 }
 
 type userDefinedFunction struct {

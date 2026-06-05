@@ -218,13 +218,23 @@ func xLockTrampoline(_ *libc.TLS, pFile uintptr, level int32) int32 {
 		if !h.db.writeMu.TryLock() {
 			return sqlite3.SQLITE_BUSY
 		}
-		// Refresh the snapshot reference at the moment we acquire the
-		// writer lock so writes are layered on top of the latest
-		// published state, not the stale snapshot captured back at
-		// lockShared. Without this refresh, a concurrent writer that
-		// committed while we held lockShared would have its changes
-		// silently overwritten by our publish on xSync.
-		h.snap = h.db.snap.Load()
+		// If another writer published while we held our lockShared read
+		// snapshot, SQLite's page cache for this connection is now stale:
+		// it does not re-read already-cached pages mid-statement, so
+		// committing our buffered writes would silently overwrite that
+		// concurrent commit (a lost update — unlike real SQLite, mvcc
+		// can't block the commit because EXCLUSIVE here doesn't exclude a
+		// peer's SHARED). Abort with BUSY rather than refresh-and-proceed:
+		// SQLite restarts the statement, re-acquires lockShared, sees the
+		// bumped change-counter on page 1, and flushes its cache to read
+		// the fresh snapshot. (Merely updating h.snap is not enough — the
+		// stale pages are already in SQLite's cache.)
+		latest := h.db.snap.Load()
+		if h.snap != nil && h.snap != latest {
+			h.db.writeMu.Unlock()
+			return sqlite3.SQLITE_BUSY
+		}
+		h.snap = latest
 	}
 	if level >= lockShared && h.lockLvl < lockShared {
 		// Capture snapshot for the duration of the read transaction.

@@ -45,6 +45,21 @@ func (r *captureRecorder) OnSync(kind byte, dur time.Duration, rc int32) {
 	r.syncs = append(r.syncs, event{kind: kind, dur: dur, rc: rc})
 }
 
+// clockResolution returns the smallest non-zero duration the monotonic
+// clock can report, by spinning until two reads differ. Used to decide
+// whether a dur==0 event is a real signal (timing not wired) or just a
+// coarse-clock artefact — some virtualized Windows CI runners tick the
+// monotonic clock at millisecond scale, so these sub-millisecond
+// in-memory encrypted ops legitimately measure 0.
+func clockResolution() time.Duration {
+	start := time.Now()
+	for {
+		if d := time.Since(start); d > 0 {
+			return d
+		}
+	}
+}
+
 // TestRecorder_FiresOnReadsAndWrites confirms the optional Recorder
 // surface receives one event per io-method invocation, with the
 // file kind correctly tagged so consumers can split metrics per
@@ -98,7 +113,11 @@ func TestRecorder_FiresOnReadsAndWrites(t *testing.T) {
 		t.Error("no main_db write recorded")
 	}
 	// dur > 0 on at least one event — guards against accidentally
-	// dropping the time.Now()/Since calls.
+	// dropping the time.Now()/time.Since calls in the trampolines. Only
+	// meaningful when the monotonic clock can resolve these
+	// sub-millisecond in-memory encrypted ops: virtualized Windows CI
+	// runners expose a coarse (ms-scale) monotonic clock where every fast
+	// op legitimately measures 0 — a clock artefact, not a wiring bug.
 	var sawNonZeroDur bool
 	for _, e := range append(append([]event(nil), rec.reads...), rec.writes...) {
 		if e.dur > 0 {
@@ -107,7 +126,11 @@ func TestRecorder_FiresOnReadsAndWrites(t *testing.T) {
 		}
 	}
 	if !sawNonZeroDur {
-		t.Error("every event reported dur=0 — timing not wired")
+		if res := clockResolution(); res > time.Millisecond {
+			t.Logf("all event durations rounded to 0 under a coarse monotonic clock (~%v tick); dur>0 timing check skipped", res)
+		} else {
+			t.Error("every event reported dur=0 — timing not wired")
+		}
 	}
 	// Normal-path events report rc == SQLITE_OK or SHORT_READ
 	// (which fires during fresh-DB open).

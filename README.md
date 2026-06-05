@@ -861,6 +861,11 @@ preserved under its original license:
 - [github.com/glebarez/sqlite](https://github.com/glebarez/sqlite) —
   MIT; see [LICENSE.glebarez](LICENSE.glebarez). The `gorm/` sub-package
   is ported from glebarez.
+- [github.com/ncruces/go-sqlite3](https://github.com/ncruces/go-sqlite3) —
+  MIT; see [LICENSE.ncruces](LICENSE.ncruces). Several `ext/` sub-packages
+  port loadable extensions from ncruces — re-implemented against this
+  driver's `(*Conn).RegisterFunc` / vtab helper APIs rather than copied
+  verbatim, with a credit header in each ported package's doc.
 
 ## Acknowledgements
 
@@ -870,6 +875,9 @@ preserved under its original license:
   driver whose API we mirror.
 - [glebarez/sqlite](https://github.com/glebarez/sqlite) — the gorm dialector
   this package's gorm sub-package is ported from.
+- [ncruces/go-sqlite3](https://github.com/ncruces/go-sqlite3) — Nuno Cruces's
+  CGo-free (WASM/wazero) driver, whose loadable-extension lineup several
+  `ext/` sub-packages are ported from.
 - [asg017/sqlite-vec](https://github.com/asg017/sqlite-vec) — the vector
   search extension bundled by `modernc.org/sqlite/vec` and re-exported here.
 - [zalgonoise/fts](https://github.com/zalgonoise/x/tree/master/fts) — the

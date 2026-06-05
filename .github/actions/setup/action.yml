@@ -11,6 +11,17 @@ inputs:
     description: Go toolchain version (e.g. "1.25.x"). Defaults to the primary line.
     required: false
     default: '1.25.x'
+  cache-dependency-path:
+    description: |
+      Override for actions/setup-go's cache key lookup. Empty (the
+      default) keeps setup-go's auto-discovery at the workspace root,
+      which is correct for every job whose checkout lands there. Jobs
+      that check the repo out into a sub-path (e.g. gorm_upstream uses
+      ./sqlite so gorm can sibling-clone) must pass the explicit path
+      so the toolchain cache restore doesn't fail with "Dependencies
+      file is not found".
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -18,3 +29,4 @@ runs:
     - uses: actions/setup-go@v6
       with:
         go-version: ${{ inputs.go-version }}
+        cache-dependency-path: ${{ inputs.cache-dependency-path }}
