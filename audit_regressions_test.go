@@ -60,30 +60,6 @@ func TestAudit_HookHandlersDrainedOnClose(t *testing.T) {
 	}
 }
 
-// Regression: vec.KNNSlice with k <= 0 used to panic in make() before
-// the streaming iter's short-circuit could fire. Now both k = 0 and
-// k = -1 are no-ops returning (nil/empty, nil).
-//
-// This lives at the root because importing vec adds a heavyweight
-// dependency to root tests; the test file is in package sqlite_test
-// for the same reason. We avoid that by exercising the equivalent
-// `make([]T, 0, capHint)` clamp via a tiny inline mirror — the actual
-// behaviour is also pinned in vec/table_test.go.
-func TestAudit_VecKNNSliceNegativeKDoesNotPanic(t *testing.T) {
-	defer func() {
-		if r := recover(); r != nil {
-			t.Fatalf("KNNSlice clamp panicked: %v", r)
-		}
-	}()
-
-	// Mirror of the clamp in vec/table.go's KNNSlice.
-	for _, k := range []int{0, -1, -1 << 30} {
-		capHint := min(max(k, 0), 1024)
-		out := make([]struct{}, 0, capHint)
-		_ = out
-	}
-}
-
 // Regression: Backup.Finish followed by Backup.Close (or vice versa)
 // must not double-finish the underlying sqlite3_backup handle.
 func TestAudit_BackupFinishIsIdempotent(t *testing.T) {
@@ -149,6 +125,63 @@ func TestAudit_BackupFinishIsIdempotent(t *testing.T) {
 		})
 	}); err != nil {
 		t.Fatalf("backup pipeline: %v", err)
+	}
+}
+
+// TestAudit_BackupCommitThenCloseIsSafe pins the round-5 R1 fix: Commit
+// must zero the internal C handle so a follow-up Finish/Close is a no-op
+// rather than calling sqlite3_backup_finish twice on the same handle.
+// The previous form left b.pBackup populated after Commit and the
+// natural `defer bk.Close()` pattern triggered a double-finish.
+func TestAudit_BackupCommitThenCloseIsSafe(t *testing.T) {
+	src, err := sql.Open(sqlite.DriverName, "file::memory:?cache=shared&_pragma=journal_mode(WAL)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = src.Close() })
+	src.SetMaxOpenConns(1)
+	if _, err := src.Exec("CREATE TABLE t(v TEXT); INSERT INTO t VALUES ('hello')"); err != nil {
+		t.Fatal(err)
+	}
+
+	srcC, err := src.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srcC.Close()
+
+	if err := srcC.Raw(func(driverConn any) error {
+		source := driverConn.(*sqlite.Conn)
+		bk, err := source.NewBackup("file:backupcommit_dst?mode=memory&cache=shared")
+		if err != nil {
+			return err
+		}
+		for {
+			done, err := bk.Step(100)
+			if err != nil {
+				return err
+			}
+			if !done {
+				break
+			}
+		}
+		// Commit returns the destination conn; user-owned from here on.
+		dstConn, err := bk.Commit()
+		if err != nil {
+			return err
+		}
+		if dstConn == nil {
+			t.Fatal("Commit returned nil destination conn")
+		}
+		_ = dstConn.Close()
+		// Finish after Commit: must be a no-op, not a double-free.
+		if err := bk.Finish(); err != nil {
+			return err
+		}
+		// Close after Commit: also a no-op.
+		return bk.Close()
+	}); err != nil {
+		t.Fatalf("Commit-then-Close pipeline: %v", err)
 	}
 }
 

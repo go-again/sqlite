@@ -11,6 +11,17 @@
 //	    "github.com/go-again/sqlite/fts"
 //	)
 //
+// # Key types
+//
+// The K type parameter is the FTS5 rowid. K may be any int / int32 /
+// int64 / uint / uint32 / uint64 / float32 / float64 / string / []byte.
+// int64 keys are preserved at full 63-bit precision (no float64
+// detour), so snowflake IDs, unix-nano timestamps, and any other key
+// above 2^53 survive the Search round-trip exactly.
+//
+// V is the column type for the indexed text; string is the canonical
+// choice but []byte also works for raw-bytes columns.
+//
 // # Quick start
 //
 //	db, _ := sql.Open("sqlite3", ":memory:")

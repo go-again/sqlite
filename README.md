@@ -340,7 +340,8 @@ for i, h := range vecHits { vecKeys[i] = h.Rowid }
 ftsKeys := make([]int64, len(ftsHits))
 for i, h := range ftsHits { ftsKeys[i] = h.Key }
 
-top := fusion.RRF([][]int64{vecKeys, ftsKeys}, fusion.WithLimit(20))
+top, err := fusion.RRF([][]int64{vecKeys, ftsKeys}, fusion.WithLimit(20))
+if err != nil { log.Fatal(err) }
 for _, r := range top {
     fmt.Println(r.Key, r.Score)
 }
@@ -440,7 +441,7 @@ defer fs.Close()
 db, _ := sql.Open("sqlite", "file:secret.db?vfs="+name)
 ```
 
-Pure-Go page-level encryption — Adiantum (default, 32-byte key) or AES-XTS-256 (64-byte key). The main DB file, rollback journal, WAL frames, and temp files are all encrypted; the WAL `-shm` index stays plaintext (it's memory-mapped, not disk-resident in practice). No SQLCipher on-disk format compatibility, no MAC — confidentiality only; SQLCipher's per-page HMAC integrity is not what we ship. Overhead measured on Apple M4: ~+27% Adiantum, ~+44% AES-XTS over plaintext on a write-heavy microbenchmark (run `go test -bench=BenchmarkInsert ./vfs/crypto/` to verify on your hardware). Add `Options.Recorder = crypto.NewSlogRecorder(slog.Default())` (or any custom `crypto.Recorder`) for per-IO observability. See [`examples/vfs-crypto/`](examples/vfs-crypto/main.go) and [`examples/gorm-crypto/`](examples/gorm-crypto/main.go) for an end-to-end stack with gorm + vec + fts + fusion on top of encryption + Argon2id key derivation. Package docs in [`vfs/crypto/doc.go`](vfs/crypto/doc.go).
+Pure-Go page-level encryption — Adiantum (default, 32-byte key) or AES-XTS-256 (64-byte key). The main DB file, rollback journal, WAL frames, and temp files are all encrypted; the WAL `-shm` index stays plaintext (it's memory-mapped, not disk-resident in practice). No SQLCipher on-disk format compatibility, no MAC — confidentiality only; SQLCipher's per-page HMAC integrity is not what we ship. Overhead on a write-heavy microbenchmark is in the tens of percent; the exact factor depends on cipher and platform (Adiantum is faster than AES-XTS on most ARM, often the reverse on AES-NI capable x86). Run `go test -bench=BenchmarkInsert ./vfs/crypto/` to measure on your hardware. Add `Options.Recorder = crypto.NewSlogRecorder(slog.Default())` (or any custom `crypto.Recorder`) for per-IO observability. See [`examples/vfs-crypto/`](examples/vfs-crypto/main.go) and [`examples/gorm-crypto/`](examples/gorm-crypto/main.go) for an end-to-end stack with gorm + vec + fts + fusion on top of encryption + Argon2id key derivation. Package docs in [`vfs/crypto/doc.go`](vfs/crypto/doc.go).
 
 ### Corruption detection at rest
 
@@ -679,8 +680,9 @@ Numbers vary by workload, but the broad picture is consistent:
   measurable constant factor (the ccgo-transpiled call paths go through
   more indirection than mattn's CGo binding). For a no-op authorizer
   installed alongside a tiny SELECT, this package's overhead measures
-  ~3% time and +5 allocs/op on Apple M4 — see `BenchmarkAuthorizer_NoOp`
-  in `bench_test.go`.
+  in the low single-digit-percent range with a handful of extra
+  allocs/op; run `BenchmarkAuthorizer_NoOp` in `bench_test.go` to
+  measure on your hardware.
 - **Connection open** is faster here than mattn because there's no dlopen
   / dlsym / extension-resolution dance.
 

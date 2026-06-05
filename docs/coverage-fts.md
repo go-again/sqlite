@@ -50,7 +50,7 @@ Underlying FTS5 docs: https://www.sqlite.org/fts5.html
 | `content_rowid='col'` | ✓ typed | same | Maps the external rowid. |
 | External-content sync triggers (`SyncInsert\|SyncUpdate\|SyncDelete`) | ✓ typed | `TestExternal_SyncTriggers_Insert`, `_Update`, `_Delete`, `_PartialMode`, `_Idempotent` | `Options.External.SyncTriggers` auto-installs `CREATE TRIGGER IF NOT EXISTS` on the source table for the requested ops. Deterministic naming: `<source>_<fts>_{ai\|au\|ad}`. |
 | `content=''` (contentless) | ✓ typed | `TestContentless_RowidsOnly` | `Options.Contentless = true`. |
-| `contentless_delete=1` | ✓ typed | `TestContentless_DeleteSupported` | `Options.ContentlessDelete = true`. Requires SQLite ≥ 3.43. |
+| `contentless_delete=1` | ✓ typed | `TestContentless_DeleteSupported` | `Options.ContentlessDelete = true`. |
 | `detail=full` (default) | ✓ typed | — | `Options.Detail = fts.DetailFull` or zero. |
 | `detail=column` | ✓ typed | — | `Options.Detail = fts.DetailColumn`. |
 | `detail=none` | ✓ typed | — | `Options.Detail = fts.DetailNone`. |

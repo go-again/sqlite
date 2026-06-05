@@ -108,6 +108,7 @@ github.com/go-again/sqlite/
 ├── open_config.go          # sqlite.Open(Config) → *DB; BuildDSN; ApplyPragmas
 │
 ├── gorm/                   # gorm sub-package (originally ported from glebarez; now diverged with RETURNING gating, OpenConfig, error translator)
+│   ├── doc.go              # package doc (pkg.go.dev landing)
 │   ├── sqlite.go           # Dialector
 │   ├── migrator.go         # full Migrator (HasTable, AlterColumn, …)
 │   ├── ddlmod.go           # DDL regex parser used by recreateTable
@@ -190,7 +191,7 @@ github.com/go-again/sqlite/
 │   │   ├── uniquename.go   # UniqueName(prefix): process-global counter for VFS/module name suffixes
 │   │   └── callx.go        # CallX* family: typed wrappers for every sqlite3_io_methods slot
 │   ├── sqlid/              # SQLite arg-parsing helpers
-│   │   └── sqlid.go        # NamedArg, Unquote, QuoteIdent, QuoteIdentBacktick, ValidIdent, ToNamedValues
+│   │   └── sqlid.go        # NamedArg, Unquote, QuoteIdent, QuoteIdentBacktick, ValidIdent, ToNamedValues, IsAlreadyExistsErr
 │   ├── raceskip/           # raceskip.Enabled bool const (build-tag gated)
 │   │   ├── raceskip.go     # package doc
 │   │   ├── raceenabled_off.go # //go:build !race
@@ -336,8 +337,12 @@ sc.Raw(func(dc any) error {
 // Then use sc.ExecContext, NOT db.Exec.
 ```
 
-Several existing tests show this idiom; `compat_test.go::withSQLite3Conn` is
-the canonical helper.
+`internal/testhelp.OpenPinned(t, dsn)` is the canonical helper —
+returns a pool pinned to one conn so the hook installs and the
+follow-up queries land on the same `*sqlite.Conn`. Use `RawConn(sc,
+fn)` to get the concrete `*sqlite.Conn` for `RegisterUpdateHook` and
+friends. `compat_test.go::withSQLite3Conn` is a thin wrapper kept for
+the root-package tests that pre-dated `testhelp`.
 
 ### 5. sqlite-vec quirks
 
@@ -419,9 +424,9 @@ swept; new contributions should match.
 
 ### Test fixtures
 
-Each sub-package has a small reusable fixture function in its test files:
+The canonical pinned-conn helper is `internal/testhelp.OpenPinned(t, dsn)` plus `testhelp.RawConn(sc, fn)` — every new test that needs `MaxOpenConns=1` should reach for those. Per-sub-package fixtures handle the domain-specific seeding:
 
-- root: `compat_test.go::withSQLite3Conn(t, dsn)` returns `(*sql.DB, *sql.Conn, *sqlite.Conn)` with `MaxOpenConns=1` pinned
+- root: `compat_test.go::withSQLite3Conn(t, dsn)` returns `(*sql.DB, *sql.Conn, *sqlite.Conn)` with `MaxOpenConns=1` pinned — a thin wrapper over `testhelp.OpenPinned` kept for root-package tests that pre-dated the helper
 - `gorm/integration_test.go::openInMemory` returns a gorm DB
 - `vec/table_test.go::openDB` + `fixture` corpus + `fixtureQuery`
 - `fts/fts_test.go::openDB` + `fixtureCorpus`
@@ -575,7 +580,7 @@ let `go mod tidy` resolve the transitive set.
 | How do I read prepared-statement cache telemetry? | `(*Conn).StmtCacheStats()` in `stmt_cache.go` returns `{Hits, Misses, Evictions int64}` (monotonic per connection). Operators tune `_stmt_cache_size` against the hit rate. |
 | How does cksm/crypto chaining work? | `vfs/crypto/crypto.go::Options.WrapVFS` + per-package `fileMap` (a `cabi.PtrMap[FS]` in each `vfs.go`) maps pFile → owning `*FS`; per-FS `ourIoMethods` + `wrappedSzOsFile`. Both layers store state at their own offset and forward via the captured wrapped methods. Each layer owns its own PtrMap so chained inner/outer instances don't collide. |
 | Where's the vtab xCreate / xConnect split? | `module.go::CreateModuleSplit` (two-callback form). `ext/bloom` and `ext/spellfix1` use it to distinguish first-time shadow-table creation from subsequent reopens. |
-| Where's the shared NamedArg / Unquote parser? | `internal/sqlid/sqlid.go` (used by `ext/closure`, reusable by future named-arg vtabs) |
+| Where's the shared SQL-identifier toolkit? | `internal/sqlid/sqlid.go` — `NamedArg` / `Unquote` (used by `ext/closure`, `ext/pivot`, `ext/statement`), `QuoteIdent` / `QuoteIdentBacktick` / `ValidIdent` (re-exported by `vec` + `fts`), `ToNamedValues` (named-arg bridge in `ext/pivot`), `IsAlreadyExistsErr` (shared by `vec.Create` + `fts.New` idempotent paths). |
 | What's the prepared-statement cache? | `stmt_cache.go` + the `stmts` field on `conn` |
 | Where's the gorm Dialector? | `gorm/sqlite.go::Dialector` |
 | Where does AutoMigrate logic live? | `gorm/migrator.go::recreateTable` (DDL-parse → mutate → CREATE-INSERT-DROP-RENAME) |
@@ -613,8 +618,10 @@ let `go mod tidy` resolve the transitive set.
   process with "TODOTODO" before our error-return path can fire,
   which means even the disabled-extensions negative test triggers
   the abort. The two LoadExtension tests opt out via `raceEnabled`
-  (in `race_helper{,_race}_test.go`) and `loadExtensionUnsupported`
-  (in `platform_test.go`). linux is fine.
+  (in `race_helper_test.go`, mirrored by `race_helper_external_test.go`
+  for the `sqlite_test` package) and `loadExtensionUnsupported` (in
+  `platform_test.go`). Both files delegate to `internal/raceskip`. linux
+  is fine.
 - **CI's `build_all_targets` job swallows a `vec/` build failure** —
   `modernc.org/sqlite/vec` is the transpiled sqlite-vec extension; it
   isn't generated for every GOOS/GOARCH the matrix covers (notably some

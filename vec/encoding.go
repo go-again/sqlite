@@ -62,12 +62,6 @@ func (e Encoding) Placeholder() string {
 	return "?"
 }
 
-// encodeValue / matchPlaceholder are the legacy private helpers — kept
-// as thin wrappers so existing call sites compile unchanged. New code
-// should call the methods on Encoding directly.
-func encodeValue(v []float32, enc Encoding) any { return enc.Encode(v) }
-func matchPlaceholder(enc Encoding) string      { return enc.Placeholder() }
-
 // Encode is the package-function form of [Encoding.Placeholder] +
 // [Encoding.Encode]. Use it from raw-SQL escape hatches when you're
 // composing a query by hand and want the typed encoding pipeline

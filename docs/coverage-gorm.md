@@ -44,7 +44,7 @@ Tests live in `gorm/integration_test.go`.
 
 | Method | Status | Test |
 |---|---|---|
-| `AutoMigrate(dst ...any) error` | ⚠ inherited | `TestGorm_AutoMigrate_CreatesTable`, `TestGorm_NewWithConfig`, `TestGorm_Mattn3DriverName` |
+| `AutoMigrate(dst ...any) error` | ⚠ inherited | `TestGorm_AutoMigrate_CreatesTable`, `TestGorm_NewWithConfig`, `TestGorm_SQLite3DriverName` |
 | `CurrentDatabase() string` | ✓ typed | covered transitively | Overridden to use `PRAGMA database_list`. |
 | `FullDataTypeOf(*schema.Field) clause.Expr` | ⚠ inherited | — |
 | `GetTypeAliases(string) []string` | ⚠ inherited | — |

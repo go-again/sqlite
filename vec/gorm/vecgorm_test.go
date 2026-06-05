@@ -254,6 +254,43 @@ type SoftDoc struct {
 	Embedding []float32      `gorm:"-" vec:"dim=4"`
 }
 
+// CustomSoftDoc has gorm.DeletedAt under a non-default column name. Pins
+// the round-6 V1 fix: softDeleteSidecar must resolve the actual DBName
+// from the field at schema-parse time instead of hard-coding "deleted_at".
+type CustomSoftDoc struct {
+	ID        uint `gorm:"primaryKey"`
+	Title     string
+	RemovedAt gorm.DeletedAt `gorm:"column:removed_at;index"`
+	Embedding []float32      `gorm:"-" vec:"dim=4"`
+}
+
+func TestSoftDelete_CustomDeletedAtColumnName(t *testing.T) {
+	db := openTestDB(t)
+	if err := vecgorm.Migrate(db, &CustomSoftDoc{}); err != nil {
+		t.Fatal(err)
+	}
+	docs := []CustomSoftDoc{
+		{Title: "alive", Embedding: []float32{1, 0, 0, 0}},
+		{Title: "dead", Embedding: []float32{0.99, 0, 0, 0}},
+	}
+	if err := db.Create(&docs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Delete(&docs[1]).Error; err != nil {
+		t.Fatal(err)
+	}
+	results, err := vecgorm.KNN[CustomSoftDoc](context.Background(), db, []float32{1, 0, 0, 0}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results=%d, want 1 (dead excluded via removed_at column)", len(results))
+	}
+	if results[0].Model.Title != "alive" {
+		t.Errorf("got %q, want 'alive'", results[0].Model.Title)
+	}
+}
+
 func TestSoftDelete_ExcludedFromKNNByDefault(t *testing.T) {
 	db := openTestDB(t)
 	if err := vecgorm.Migrate(db, &SoftDoc{}); err != nil {

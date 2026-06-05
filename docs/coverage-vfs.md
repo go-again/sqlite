@@ -77,15 +77,16 @@ every existing page with the trailer in place.
 
 ## Adding a new VFS wrapper
 
-1. Pick an upstream pattern from `.ncruces-go-sqlite3/vfs/<name>/` or
-   the SQLite extensions registry.
+1. Pick an upstream pattern from the [ncruces/go-sqlite3 vfs/ tree](https://github.com/ncruces/go-sqlite3/tree/main/vfs)
+   or the SQLite extensions registry.
 2. Mirror the `vfs/crypto` layout: `cksm.go`-style `New`/`Close`/`FS`,
    `vfs.go`-style `perFileState` + `xOpen` trampoline,
    `iomethods.go`-style 12 io-method trampolines plus `callXFoo`
    wrappers, optional `derive_*.go` or `cipher.go` for any helpers.
 3. Use `internal/cabi.FuncPointer` for Go→C function-pointer slots and
-   the local `asFunc[F]` helper for C→Go reads back from stored
-   uintptrs. (Both are the same pattern as `vfs/crypto`.)
+   `internal/cabi.AsFunc[F]` for C→Go reads back from stored uintptrs,
+   or the typed `cabi.CallX*` family for io-method slot dispatch. (All
+   three are the same pattern as `vfs/crypto`.)
 4. Add a row to the table above; flip to ✓ landed once tests + lint
    pass.
 5. Add a one-line entry to [`llms.txt`](../llms.txt) under "Per-package

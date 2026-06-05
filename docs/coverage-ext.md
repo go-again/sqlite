@@ -90,7 +90,7 @@ The explicit form is the canonical entry; the blank-import `auto` sub-package is
 
 ## Adding a new extension
 
-1. Pick the upstream ncruces module under [`.ncruces-go-sqlite3/ext/<name>`](../.ncruces-go-sqlite3/ext/) (read-only mirror).
+1. Pick the upstream ncruces module from [`ncruces/go-sqlite3/ext/<name>`](https://github.com/ncruces/go-sqlite3/tree/main/ext).
 2. Translate to our `(*Conn).RegisterFunc` / `RegisterAggregator` / `RegisterWindowFunction` / vtab helper APIs. Don't copy upstream verbatim; the runtime is different.
 3. Ship `ext/<name>/<name>.go` + `<name>_test.go` + `doc.go` + `ext/<name>/auto/auto.go`.
 4. Add a row to the relevant table above; flip status to ✓ landed once tests and lint pass.

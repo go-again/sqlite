@@ -153,8 +153,14 @@ func (m Migrator) ColumnTypes(value any) ([]gorm.ColumnType, error) {
 		if err != nil {
 			return err
 		}
+		// Run the rows.Close() AND only let it set err when the
+		// primary path returned nil. The previous form (`err =
+		// rows.Close()`) clobbered a real ColumnTypes failure with
+		// a happy Close return — silent error swallow.
 		defer func() {
-			err = rows.Close()
+			if cerr := rows.Close(); err == nil {
+				err = cerr
+			}
 		}()
 
 		var rawColumnTypes []*sql.ColumnType

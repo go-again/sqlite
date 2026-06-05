@@ -621,8 +621,18 @@ func (i *Index[K, V]) Search(ctx context.Context, q Query, opts ...SearchOption)
 
 // SearchSlice is a convenience around Search that collects all matches into a
 // slice. Use Search when you need streaming behavior.
+//
+// The output slice is pre-sized from the parsed [WithLimit], clamped at
+// 1024 so a pathological caller can't drive a huge make() request before
+// any hit lands. Mirrors [vec.Table.KNNSlice]'s capacity discipline so
+// the two parallel sub-packages stay symmetric on the hot path.
 func (i *Index[K, V]) SearchSlice(ctx context.Context, q Query, opts ...SearchOption) ([]Hit[K, V], error) {
-	var out []Hit[K, V]
+	var cfg searchConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	capHint := min(max(cfg.limit, 0), 1024)
+	out := make([]Hit[K, V], 0, capHint)
 	for m, err := range i.Search(ctx, q, opts...) {
 		if err != nil {
 			return nil, err

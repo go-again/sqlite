@@ -219,16 +219,27 @@ func isSoftDelete(db *gorm.DB) bool {
 }
 
 // softDeleteSidecar resyncs the sidecar's `deleted` metadata column from
-// the source table's deleted_at, *after* gorm's soft-delete UPDATE has
-// run on the source. Issued through db.Exec so the write participates in
+// the source table's gorm.DeletedAt column, *after* gorm's soft-delete
+// UPDATE has run on the source. The DeletedAt column name is resolved
+// at schema-parse time (mm.SoftDeleteColumn) so models using
+// `gorm:"column:soft_del_ts"` or a non-default NamingStrategy still
+// sync correctly. Issued through db.Exec so the write participates in
 // any active gorm.Transaction.
 func softDeleteSidecar(db *gorm.DB, mm modelMeta, m meta) error {
+	if mm.SoftDeleteColumn == "" {
+		// Caller already gated on isSoftDelete; defensive guard for
+		// completeness — a model without gorm.DeletedAt would have
+		// nothing to source from.
+		return nil
+	}
 	pkColumn := quoteIdent(mm.PKField.DBName)
+	delColumn := quoteIdent(mm.SoftDeleteColumn)
 	stmt := fmt.Sprintf(
 		"UPDATE %s SET deleted = "+
-			"COALESCE((SELECT CASE WHEN deleted_at IS NOT NULL THEN 1 ELSE 0 END "+
+			"COALESCE((SELECT CASE WHEN %s IS NOT NULL THEN 1 ELSE 0 END "+
 			"FROM %s WHERE %s.%s = %s.rowid), 0)",
 		quoteIdent(m.Table),
+		delColumn,
 		quoteIdent(mm.SourceTable),
 		quoteIdent(mm.SourceTable), pkColumn,
 		quoteIdent(m.Table),
@@ -245,7 +256,7 @@ func softDeleteSidecar(db *gorm.DB, mm modelMeta, m meta) error {
 // we cannot enumerate affected PKs from db.Statement.ReflectValue.
 //
 // Routes through db.Exec so it joins the active transaction.
-func deleteByWhere(ctx context.Context, db *gorm.DB, mm modelMeta, m meta, _ *vec.Table) error {
+func deleteByWhere(ctx context.Context, db *gorm.DB, mm modelMeta, m meta) error {
 	stmt := fmt.Sprintf(
 		"DELETE FROM %s WHERE rowid NOT IN (SELECT %s FROM %s)",
 		quoteIdent(m.Table),

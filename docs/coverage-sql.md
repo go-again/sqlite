@@ -47,7 +47,7 @@ Run locally with `go test ./tests/sql/...`.
 |---|---|---|
 | INNER JOIN | ✓ typed | `TestJoin_InnerJoin` |
 | LEFT [OUTER] JOIN | ✓ typed | `TestJoin_LeftJoin`, `TestJoin_LeftJoin_ThreeWay` |
-| RIGHT JOIN (SQLite ≥ 3.39) | ✓ typed | `TestJoin_RightOuterSupported` |
+| RIGHT JOIN | ✓ typed | `TestJoin_RightOuterSupported` |
 | CROSS JOIN | ✓ typed | `TestJoin_CrossJoin` |
 | USING(col) | ✓ typed | `TestJoin_Using` |
 | Self-join | ✓ typed | `TestJoin_SelfJoin` |

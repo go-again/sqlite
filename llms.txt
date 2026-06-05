@@ -85,7 +85,7 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [docs/coverage-fts.md](docs/coverage-fts.md): every FTS5 feature with status.
 - [docs/coverage-gorm.md](docs/coverage-gorm.md): every gorm.Dialector / Migrator / ErrorTranslator method with status.
 - [docs/coverage-ext.md](docs/coverage-ext.md): every `ext/` loadable extension with status (✓ landed / ⚠ partial / ✗ deferred / ✗ skipped), upstream reference, and the test pin. Includes the per-extension scaffolding checklist.
-- [docs/coverage-vfs.md](docs/coverage-vfs.md): every `vfs/` sub-package (root fs.FS adapter, crypto, cksm) with status, upstream reference, and the test pin. Includes the per-VFS scaffolding checklist.
+- [docs/coverage-vfs.md](docs/coverage-vfs.md): every `vfs/` sub-package (root fs.FS adapter + `vfs.NewReader`, crypto, cksm, mvcc, memdb) with status, upstream reference, and the test pin. Includes the per-VFS scaffolding checklist.
 
 ## Optional
 

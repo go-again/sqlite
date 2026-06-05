@@ -40,11 +40,11 @@ type Table struct {
 func (t *Table) buildSQL() {
 	t.insertSQL = fmt.Sprintf(
 		"INSERT INTO %s (rowid, %s) VALUES (?, %s)",
-		quote(t.name), quote(t.embedding), matchPlaceholder(t.encoding),
+		quote(t.name), quote(t.embedding), t.encoding.Placeholder(),
 	)
 	t.updateSQL = fmt.Sprintf(
 		"UPDATE %s SET %s = %s WHERE rowid = ?",
-		quote(t.name), quote(t.embedding), matchPlaceholder(t.encoding),
+		quote(t.name), quote(t.embedding), t.encoding.Placeholder(),
 	)
 	t.deleteSQL = fmt.Sprintf("DELETE FROM %s WHERE rowid = ?", quote(t.name))
 }
@@ -171,8 +171,12 @@ func Open(db *sql.DB, name string, dim int, opts Options) (*Table, error) {
 	if dim <= 0 {
 		return nil, fmt.Errorf("vec.Open: dim must be > 0, got %d", dim)
 	}
-	if name == "" {
-		return nil, errors.New("vec.Open: name is required")
+	// Use the same admission rule as Create: ValidIdent rejects names
+	// that vec0 would mishandle anyway, AND blocks string-builder
+	// injection through this entry point. The previous empty-string
+	// check let `Open(db, "items; DROP", …)` past the door.
+	if !validIdent(name) {
+		return nil, fmt.Errorf("vec.Open: %q is not a valid SQL identifier", name)
 	}
 	t := &Table{
 		db:        db,
@@ -185,6 +189,12 @@ func Open(db *sql.DB, name string, dim int, opts Options) (*Table, error) {
 	t.buildSQL()
 	return t, nil
 }
+
+// Close is a no-op kept for API symmetry with [fts.Index.Close] and
+// io.Closer-shaped consumer code. Table holds no per-instance resource
+// (the *sql.DB is caller-owned), so `defer tbl.Close()` is safe to add
+// without any teardown cost. Always returns nil.
+func (t *Table) Close() error { return nil }
 
 // Name returns the table name as known to SQLite.
 func (t *Table) Name() string { return t.name }
@@ -208,7 +218,7 @@ func (t *Table) Insert(ctx context.Context, rowid int64, embedding []float32) er
 	if len(embedding) != t.dim {
 		return fmt.Errorf("vec.Insert: embedding length %d != dim %d", len(embedding), t.dim)
 	}
-	_, err := t.db.ExecContext(ctx, t.insertSQL, rowid, encodeValue(embedding, t.encoding))
+	_, err := t.db.ExecContext(ctx, t.insertSQL, rowid, t.encoding.Encode(embedding))
 	return err
 }
 
@@ -238,7 +248,7 @@ func (t *Table) BatchInsert(ctx context.Context, items []Row) error {
 				tx.Rollback(),
 			)
 		}
-		if _, err := stmt.ExecContext(ctx, it.Rowid, encodeValue(it.Embedding, t.encoding)); err != nil {
+		if _, err := stmt.ExecContext(ctx, it.Rowid, t.encoding.Encode(it.Embedding)); err != nil {
 			return errors.Join(fmt.Errorf("vec.BatchInsert[%d]: %w", i, err), tx.Rollback())
 		}
 	}
@@ -256,7 +266,7 @@ func (t *Table) Update(ctx context.Context, rowid int64, embedding []float32) er
 	if len(embedding) != t.dim {
 		return fmt.Errorf("vec.Update: embedding length %d != dim %d", len(embedding), t.dim)
 	}
-	_, err := t.db.ExecContext(ctx, t.updateSQL, encodeValue(embedding, t.encoding), rowid)
+	_, err := t.db.ExecContext(ctx, t.updateSQL, t.encoding.Encode(embedding), rowid)
 	return err
 }
 
@@ -413,7 +423,7 @@ func (t *Table) buildKNNSQL(query []float32, k int, cfg *queryConfig) (string, [
 	b.WriteString(" WHERE ")
 	b.WriteString(quote(t.embedding))
 	b.WriteString(" MATCH ")
-	b.WriteString(matchPlaceholder(t.encoding))
+	b.WriteString(t.encoding.Placeholder())
 	// k = N is required when there's a JOIN — sqlite-vec's planner can't
 	// extract a `LIMIT N` constraint through a join boundary, but the
 	// `k = N` predicate is a vec0-recognized vtab hint that survives.
@@ -452,7 +462,7 @@ func (t *Table) buildKNNSQL(query []float32, k int, cfg *queryConfig) (string, [
 		argCap += len(cfg.whereArgs)
 	}
 	args := make([]any, 0, argCap)
-	args = append(args, encodeValue(query, t.encoding))
+	args = append(args, t.encoding.Encode(query))
 	if emitWhereArgs {
 		args = append(args, cfg.whereArgs...)
 	}

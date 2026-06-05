@@ -205,6 +205,15 @@ func reflectScalar(impl any) (func(*FunctionContext, []driver.Value) (driver.Val
 	scalar := func(ctx *FunctionContext, args []driver.Value) (driver.Value, error) {
 		var callArgs []reflect.Value
 		var pooled *[]reflect.Value
+		// Defer the pool return so a user-UDF panic propagating out of
+		// v.Call still recycles the buffer. The previous form returned
+		// only on the success/early-error paths and dropped the buffer
+		// on panic.
+		defer func() {
+			if pooled != nil {
+				argsPool.Put(pooled)
+			}
+		}()
 		if variadic {
 			fixed := nin - 1
 			if len(args) < fixed {
@@ -235,16 +244,12 @@ func reflectScalar(impl any) (func(*FunctionContext, []driver.Value) (driver.Val
 			for i := range nin {
 				rv, err := converters[i](args[i])
 				if err != nil {
-					argsPool.Put(pooled)
 					return nil, fmt.Errorf("arg %d: %w", i, err)
 				}
 				callArgs[i] = rv
 			}
 		}
 		out := v.Call(callArgs)
-		if pooled != nil {
-			argsPool.Put(pooled)
-		}
 		if nout == 2 && !out[1].IsNil() {
 			return nil, out[1].Interface().(error)
 		}

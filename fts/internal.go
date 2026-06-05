@@ -45,9 +45,28 @@ func assignSQLType[T SQLType](raw any) (T, error) {
 	case float64:
 		return convertNumber[T](v)
 	case string:
-		return convertText[T](v, []byte(v))
+		// String → string fast-path skips the `[]byte(v)` copy that
+		// convertText would otherwise compute eagerly — the alternate
+		// arm is discarded for T = string, so the alloc was per-row
+		// dead weight on the FTS Search hot path. Cross-type
+		// (T = []byte) still pays one alloc; numeric T fails fast.
+		if _, ok := any(zero).(string); ok {
+			return any(v).(T), nil
+		}
+		if _, ok := any(zero).([]byte); ok {
+			return any([]byte(v)).(T), nil
+		}
+		return convertText[T](v, nil)
 	case []byte:
-		return convertText[T](string(v), v)
+		// []byte → []byte fast-path skips the matching `string(v)`
+		// alloc. Cross-type (T = string) still pays one alloc.
+		if _, ok := any(zero).([]byte); ok {
+			return any(v).(T), nil
+		}
+		if _, ok := any(zero).(string); ok {
+			return any(string(v)).(T), nil
+		}
+		return convertText[T]("", v)
 	}
 	return zero, fmt.Errorf("cannot assign %T to %T", raw, zero)
 }

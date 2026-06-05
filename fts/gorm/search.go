@@ -60,7 +60,10 @@ func WithLimit(n int) Option { return func(o *options) { o.limit = n } }
 func WithOffset(n int) Option { return func(o *options) { o.offset = n } }
 
 // WithRanking applies per-column BM25 weights. len(weights) must match
-// the FTS5 column count or it's silently ignored by SQLite.
+// the FTS5 column count exactly — passing a mismatched length surfaces
+// "wrong number of arguments to function bm25()" from SQLite at query
+// time, NOT a silent ignore. Validate `len(weights) == len(mm.Fields)`
+// at the call site before plumbing the option through Search.
 func WithRanking(weights ...float64) Option {
 	return func(o *options) { o.weights = weights }
 }

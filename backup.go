@@ -6,6 +6,7 @@ package sqlite // import "github.com/go-again/sqlite"
 
 import (
 	"database/sql/driver"
+	"errors"
 
 	sqlite3 "modernc.org/sqlite/lib"
 )
@@ -67,13 +68,24 @@ func (b *Backup) Finish() error {
 //
 // The destination database connection is returned to the caller or an error if raised.
 // It is the responsibility of the caller to handle the connection closure.
+//
+// Calling Commit followed by Finish (or Close) is safe — Commit zeros the
+// internal backup handle so the follow-up is a no-op rather than a
+// double sqlite3_backup_finish call on the same C handle.
 func (b *Backup) Commit() (driver.Conn, error) {
+	if b.pBackup == 0 || b.srcConn == nil {
+		return nil, errors.New("sqlite: Commit on closed Backup")
+	}
 	rc := sqlite3.Xsqlite3_backup_finish(b.srcConn.tls, b.pBackup)
+	b.pBackup = 0
+	dst := b.dstConn
+	b.dstConn = nil
 
 	if rc == sqlite3.SQLITE_OK {
-		return b.dstConn, nil
-	} else {
-		b.dstConn.Close()
-		return nil, b.srcConn.errstr(rc)
+		return dst, nil
 	}
+	if dst != nil {
+		dst.Close()
+	}
+	return nil, b.srcConn.errstr(rc)
 }

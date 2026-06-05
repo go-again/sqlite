@@ -18,6 +18,14 @@
 // pattern; use mvcc when you actually need snapshot isolation across
 // concurrent readers and writers in the same process.
 //
+// # Composition
+//
+// memdb is a **terminal** VFS — it owns the page store directly and
+// does not expose `Options.WrapVFS`. The disk-oriented wrappers
+// [github.com/go-again/sqlite/vfs/cksm] and
+// [github.com/go-again/sqlite/vfs/crypto] cannot meaningfully layer
+// over an in-memory store, and there is no inner VFS to chain to.
+//
 // # Naming convention
 //
 // Database file names follow the same shared/private split as mvcc:

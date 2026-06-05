@@ -130,7 +130,7 @@ func (p *plugin) afterDelete(db *gorm.DB) {
 				_ = db.AddError(err)
 				return
 			}
-			if err := deleteByWhere(ctx, db, mm, m, nil); err != nil {
+			if err := deleteByWhere(ctx, db, mm, m); err != nil {
 				_ = db.AddError(err)
 				return
 			}
@@ -139,7 +139,7 @@ func (p *plugin) afterDelete(db *gorm.DB) {
 
 		// Non-soft-delete models: straight delete from sidecar.
 		if len(rows) == 0 {
-			if err := deleteByWhere(ctx, db, mm, m, nil); err != nil {
+			if err := deleteByWhere(ctx, db, mm, m); err != nil {
 				_ = db.AddError(err)
 				return
 			}

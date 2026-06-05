@@ -85,7 +85,8 @@ Encryption at rest uses the same Config shape:
 ```go
 import "github.com/go-again/sqlite/vfs/crypto"
 
-key := crypto.DeriveKey(passphrase, salt, sqlite.Adiantum) // Argon2id
+key, err := crypto.DeriveKey(passphrase, salt, sqlite.Adiantum) // Argon2id
+if err != nil { log.Fatal(err) }
 db, _ := sqlite.Open(sqlite.Config{
     Path:    "secret.db",
     Pragmas: sqlite.RecommendedPragmas(),
@@ -139,8 +140,10 @@ parameter names):
   `time.Time` instead of RFC3339 strings in map-mode reads. The gorm
   dialector injects this automatically. Set it manually if you want the
   same behaviour with raw `database/sql` map-row scans.
-- `_stmt_cache_size=N` — accepted as a no-op for now (prepared-stmt LRU
-  is built but not yet sized by this flag).
+- `_stmt_cache_size=N` — sizes the per-connection prepared-statement
+  LRU cache (default 100, 0 disables). Each conn in a pool holds its
+  own cache capped at N, so aggregate memory scales with pool size.
+  Inspect counters via `(*sqlite.Conn).StmtCacheStats()`.
 
 Rejected with a clear error:
 
@@ -281,7 +284,8 @@ for i, h := range vecHits { vecKeys[i] = h.Rowid }
 ftsKeys := make([]int64, len(ftsHits))
 for i, h := range ftsHits { ftsKeys[i] = h.Key }
 
-top := fusion.RRF([][]int64{vecKeys, ftsKeys}, fusion.WithLimit(20))
+top, err := fusion.RRF([][]int64{vecKeys, ftsKeys}, fusion.WithLimit(20))
+if err != nil { log.Fatal(err) }
 ```
 
 Reciprocal Rank Fusion (Cormack 2009) — pure Go, no SQL, no extension. `fusion.WithK(k)` tunes the rank-1-vs-rank-N spread; `fusion.WithWeights(w1, w2, …)` lets a ranker you trust more dominate. Works over any comparable key type, not just SQLite rowids.
@@ -412,10 +416,36 @@ db2, _ := sql.Open("sqlite", "file:scratch.db?vfs="+name)
 
 In-memory MVCC VFS — reader snapshots taken at SHARED-lock acquire; writer mutations buffered until xSync, then atomically published as a new snapshot. Concurrent readers see the pre-commit state for the duration of their transaction. One writer at a time per shared DB; private DBs are fully isolated. WAL mode is not supported (no log file in an in-memory store); use the snapshot-isolation semantics directly. Trade-offs: no durability, no checkpoint, per-commit memory copy is proportional to dataset size.
 
+# Open shortcuts
+
+For common configurations, skip building a DSN by hand:
+
+- `sqlite.OpenInMemory()` — anonymous private in-memory DB
+- `sqlite.OpenWAL(path)` — file-backed with WAL journal mode + NORMAL sync, the right default for write-heavy apps
+- `sqlite.OpenReadOnly(path)` — read-only file open (no schema modifications, no journal)
+- `sqlite.OpenShared(name)` — process-wide shared in-memory DB addressable by `name`
+
+Each is a thin wrapper over `sql.Open(DriverName, …)` with the matching DSN baked in. Compose with `sqlite.Open(sqlite.Config{…})` when you need typed `Pragmas`, `Encryption`, or the full Config surface.
+
+# Typed Pragma enums
+
+`sqlite.Config{Pragmas: ...}` accepts typed enum values so you don't fight string-typos at runtime:
+
+- `sqlite.JournalModeWAL` / `JournalModeMemory` / `JournalModeDelete` / `JournalModeTruncate` / `JournalModeOff` / `JournalModePersist`
+- `sqlite.SyncOff` / `SyncNormal` / `SyncFull` / `SyncExtra`
+- `sqlite.LockingModeNormal` / `LockingModeExclusive`
+- `sqlite.TempStoreDefault` / `TempStoreFile` / `TempStoreMemory`
+
+Each implements `Stringer` so it round-trips into the DSN form SQLite expects. Mix freely with raw string keys for less-common pragmas.
+
 # Pitfalls
 
 These bite at runtime and aren't obvious from the API surface. Read
 this section.
+
+## Bind values capped at 2 GiB
+
+SQLite's `sqlite3_bind_text` / `sqlite3_bind_blob` use an int32 length field. Passing a string or `[]byte` larger than `math.MaxInt32` (2 GiB) now surfaces a clear error instead of silently truncating to a negative length (which SQLite interprets as "use strlen" or "until null", producing corrupted data). On 64-bit hosts this primarily matters for callers streaming whole large media blobs through `Exec(?)` — chunk them, or use `(*sqlite.Conn).OpenBlob` for incremental BLOB I/O.
 
 ## Virtual tables are per-connection
 

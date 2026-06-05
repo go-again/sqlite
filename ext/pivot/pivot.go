@@ -331,24 +331,23 @@ func (c *cursor) Column(col int) (sqlite.Value, error) {
 func (c *cursor) Rowid() (int64, error) { return c.rowID, nil }
 
 func (c *cursor) Close() error {
-	var err error
+	// errors.Join surfaces every close error instead of dropping
+	// everything after the first — the previous "first wins" pattern
+	// hid real cellStmt/scanStmt corruption behind a benign scan.Close.
+	var errs []error
 	if c.scan != nil {
-		err = c.scan.Close()
+		errs = append(errs, c.scan.Close())
 		c.scan = nil
 	}
 	if c.scanStmt != nil {
-		if e := c.scanStmt.Close(); e != nil && err == nil {
-			err = e
-		}
+		errs = append(errs, c.scanStmt.Close())
 		c.scanStmt = nil
 	}
 	if c.cellStmt != nil {
-		if e := c.cellStmt.Close(); e != nil && err == nil {
-			err = e
-		}
+		errs = append(errs, c.cellStmt.Close())
 		c.cellStmt = nil
 	}
-	return err
+	return errors.Join(errs...)
 }
 
 func opString(op sqlite.ConstraintOp) string {

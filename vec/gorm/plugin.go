@@ -32,6 +32,12 @@ type modelMeta struct {
 	// value at callback time to feed the sidecar's rowid.
 	PKField *schema.Field
 
+	// SoftDeleteColumn is the DBName of the model's gorm.DeletedAt
+	// field, captured at schema-parse time so soft-delete sync uses the
+	// model's actual column name rather than the hard-coded
+	// "deleted_at" default. Empty when the model has no DeletedAt.
+	SoftDeleteColumn string
+
 	// Fields is the list of vec-tagged fields. One model can have
 	// multiple embeddings (one sidecar per field).
 	Fields []meta
@@ -118,6 +124,9 @@ func (p *plugin) registerSchema(db *gorm.DB, model any) (modelMeta, error) {
 			rt.Name(), len(pkFields))
 	}
 	mm.PKField = pkFields[0]
+	if del := stmt.Schema.LookUpField("DeletedAt"); del != nil {
+		mm.SoftDeleteColumn = del.DBName
+	}
 
 	for _, f := range stmt.Schema.Fields {
 		tag, ok := f.StructField.Tag.Lookup(tagName)
@@ -128,9 +137,18 @@ func (p *plugin) registerSchema(db *gorm.DB, model any) (modelMeta, error) {
 		if err != nil {
 			return modelMeta{}, err
 		}
-		// Fill in defaults that need schema context.
+		// Fill in defaults that need schema context. The defaulted
+		// `<source>_vec` name still has to pass isIdent — a gorm
+		// model whose TableName() returns whitespace or a `;` would
+		// otherwise land raw inside CREATE VIRTUAL TABLE. The explicit
+		// `table=` tag value is already validated in parseTag.
 		if m.Table == "" {
 			m.Table = mm.SourceTable + "_vec"
+		}
+		if !isIdent(m.Table) {
+			return modelMeta{}, fmt.Errorf(
+				"vecgorm: invalid sidecar table name %q (derived from source table %q); set vec:\"…;table=<name>\" explicitly",
+				m.Table, mm.SourceTable)
 		}
 		m.SoftDelete = stmt.Schema.LookUpField("DeletedAt") != nil
 
