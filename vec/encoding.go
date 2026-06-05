@@ -7,9 +7,11 @@ import (
 	"strings"
 )
 
-// encodeJSON serializes a []float32 as the `[v0, v1, ...]` text form
-// sqlite-vec parses by default. It uses a fixed 'g' format so we don't lose
-// precision on round-trip.
+// encodeJSON serializes a []float32 as the `[v0,v1,...]` JSON-array text
+// form sqlite-vec parses by default. Values are comma-separated with no
+// whitespace — the parser accepts either, but skipping spaces keeps the
+// payload tighter. 'g' with precision -1 picks the shortest representation
+// that uniquely identifies each float32, so round-trips are lossless.
 func encodeJSON(v []float32) string {
 	var b strings.Builder
 	b.Grow(2 + len(v)*16)

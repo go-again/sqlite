@@ -119,13 +119,11 @@ func TestColumnSpec_BackwardCompat_StringList(t *testing.T) {
 	}
 }
 
-// TestColumnSpec_Precedence_RichWinsWhenBothSet pins the precedence
-// rule documented on Options.ColumnsRich: when both Columns and
-// ColumnsRich are populated, ColumnsRich wins and Columns is ignored.
-// Without this test, a future refactor could silently flip the
-// precedence and the existing tests (each setting only one) wouldn't
-// catch it.
-func TestColumnSpec_Precedence_RichWinsWhenBothSet(t *testing.T) {
+// TestColumnSpec_BothPopulated_Errors pins the contract that setting
+// both Options.Columns and Options.ColumnsRich is a builder bug — the
+// previous silent-precedence rule (ColumnsRich wins) hid mid-edit
+// typos. fts.New now rejects the conflict so the caller picks one.
+func TestColumnSpec_BothPopulated_Errors(t *testing.T) {
 	db := openDB(t)
 	ctx := context.Background()
 	_, err := fts.New[int64, string](ctx, db, "docs", fts.Options{
@@ -135,20 +133,11 @@ func TestColumnSpec_Precedence_RichWinsWhenBothSet(t *testing.T) {
 			{Name: "tenant", Unindexed: true},
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("fts.New with both Columns and ColumnsRich: want error, got nil")
 	}
-	var sql string
-	if err := db.QueryRowContext(ctx,
-		`SELECT sql FROM sqlite_master WHERE type='table' AND name='docs'`,
-	).Scan(&sql); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(sql, "ignored_a") || strings.Contains(sql, "ignored_b") {
-		t.Errorf("Columns leaked into CREATE despite ColumnsRich being set: %s", sql)
-	}
-	if !strings.Contains(sql, "body") || !strings.Contains(sql, "tenant UNINDEXED") {
-		t.Errorf("ColumnsRich did not drive CREATE: %s", sql)
+	if !strings.Contains(err.Error(), "Columns OR Options.ColumnsRich") {
+		t.Errorf("error message %q should name both fields so the caller fixes the right one", err.Error())
 	}
 }
 

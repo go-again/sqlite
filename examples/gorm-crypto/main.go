@@ -165,7 +165,10 @@ func main() {
 
 	// Hybrid: fuse the two rankings with RRF.
 	fmt.Println("\nFused ranking (RRF over both):")
-	fused := fusion.RRF2(vecKeys, ftsKeys, fusion.WithLimit(5))
+	fused, err := fusion.RRF2(vecKeys, ftsKeys, fusion.WithLimit(5))
+	if err != nil {
+		log.Fatal(err)
+	}
 	for i, r := range fused {
 		var n Note
 		db.Select("id, title").First(&n, r.Key)

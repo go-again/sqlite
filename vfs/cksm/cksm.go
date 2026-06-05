@@ -134,7 +134,9 @@ func New(opts Options) (name string, fs *FS, err error) {
 		wrappedVfsPtr:   defPtr,
 		wrappedSzOsFile: defVfs.FszOsFile,
 	}
-	fs.initIoMethods()
+	if err := fs.initIoMethods(); err != nil {
+		return "", nil, err
+	}
 	fs.token = registerFS(fs)
 
 	ourVfs := (*sqlite3.Tsqlite3_vfs)(unsafe.Pointer(cvfs))

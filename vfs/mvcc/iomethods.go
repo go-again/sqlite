@@ -25,6 +25,16 @@ func xCloseTrampoline(_ *libc.TLS, pFile uintptr) int32 {
 	if h == nil {
 		return sqlite3.SQLITE_OK
 	}
+	// Drop any lock the handle still holds. SQLite normally walks the
+	// lock state machine down to NONE before xClose, but force-cleanup
+	// paths (context cancel mid-tx, abnormal Close) can skip xUnlock.
+	// Leaking writeMu would deadlock the next writer on a shared DB.
+	h.mu.Lock()
+	if h.lockLvl >= lockReserved && h.db != nil {
+		h.db.writeMu.Unlock()
+	}
+	h.lockLvl = lockNone
+	h.mu.Unlock()
 	dropHandle(pst.token)
 	pst.token = 0
 	if h.db != nil {
@@ -79,8 +89,8 @@ func readFromMap(m map[int64][]byte, off, end sqlite3.Tsqlite3_int64, dst []byte
 	for k, v := range m {
 		pageStart := k
 		pageEnd := k + int64(len(v))
-		s := max64(pageStart, int64(off))
-		e := min64(pageEnd, int64(end))
+		s := max(pageStart, int64(off))
+		e := min(pageEnd, int64(end))
 		if s >= e {
 			continue
 		}
@@ -280,18 +290,4 @@ func xDeviceCharacteristicsTrampoline(_ *libc.TLS, _ uintptr) int32 {
 	// writes either land entirely or not at all (memory swap), and
 	// there's no torn-write concern.
 	return 0x0001 | 0x1000
-}
-
-func max64(a, b int64) int64 {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func min64(a, b int64) int64 {
-	if a < b {
-		return a
-	}
-	return b
 }

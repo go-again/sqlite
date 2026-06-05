@@ -213,6 +213,7 @@ func (t *table) Open() (sqlite.VTabCursor, error) {
 type cursor struct {
 	table    *table
 	scan     driver.Rows
+	scanStmt *sqlite.Stmt   // prepared scan SQL, lifetime-tied to c.scan
 	cellStmt *sqlite.Stmt   // prepared cell SQL, reused for every (row, col) cell
 	cellArgs []driver.Value // scratch arg slice for cellStmt.Query
 	row      []driver.Value
@@ -225,6 +226,10 @@ func (c *cursor) Filter(_ int, idxStr string, args []driver.Value) error {
 		_ = c.scan.Close()
 		c.scan = nil
 	}
+	if c.scanStmt != nil {
+		_ = c.scanStmt.Close()
+		c.scanStmt = nil
+	}
 	if idxStr == "" {
 		idxStr = c.table.scan
 	}
@@ -232,12 +237,18 @@ func (c *cursor) Filter(_ int, idxStr string, args []driver.Value) error {
 	if err != nil {
 		return fmt.Errorf("pivot: prepare scan: %w", err)
 	}
-	rs, err := stmt.(*sqlite.Stmt).QueryContext(context.Background(), sqlid.ToNamedValues(args))
+	scanStmt := stmt.(*sqlite.Stmt)
+	rs, err := scanStmt.QueryContext(context.Background(), sqlid.ToNamedValues(args))
 	if err != nil {
-		_ = stmt.Close()
+		_ = scanStmt.Close()
 		return fmt.Errorf("pivot: run scan: %w", err)
 	}
 	c.scan = rs
+	// Hold the stmt shell so cursor.Close can free its psql CString;
+	// dropping it here would leak the CString per Filter call. The
+	// stmt's pstmt was donated/cached by QueryContext, but the shell
+	// still owns psql until Close runs.
+	c.scanStmt = scanStmt
 
 	// Prepare the cell statement once per Filter, reuse across every
 	// (row, col) pair the cursor enumerates. The hot-path savings vs
@@ -324,6 +335,12 @@ func (c *cursor) Close() error {
 	if c.scan != nil {
 		err = c.scan.Close()
 		c.scan = nil
+	}
+	if c.scanStmt != nil {
+		if e := c.scanStmt.Close(); e != nil && err == nil {
+			err = e
+		}
+		c.scanStmt = nil
 	}
 	if c.cellStmt != nil {
 		if e := c.cellStmt.Close(); e != nil && err == nil {

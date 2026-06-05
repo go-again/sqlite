@@ -814,7 +814,14 @@ func (gen *idGen) reclaim(id uintptr) {
 		return
 	}
 	bit := id - 1
-	gen.bitset[bit/64] &^= 1 << (bit % 64)
+	word := bit / 64
+	if int(word) >= len(gen.bitset) {
+		// An id minted by a different idGen instance (cleanup-path bug)
+		// would index past our bitset and crash the process. Same
+		// "defensive no-op" rationale as the `id == 0` guard above.
+		return
+	}
+	gen.bitset[word] &^= 1 << (bit % 64)
 }
 
 func makeAggregate(tls *libc.TLS, ctx uintptr) (AggregateFunction, uintptr) {

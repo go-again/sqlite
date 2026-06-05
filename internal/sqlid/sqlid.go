@@ -129,3 +129,17 @@ func Unquote(val string) string {
 	}
 	return strings.ReplaceAll(inner, old, new)
 }
+
+// IsAlreadyExistsErr reports whether err carries SQLite's "table X
+// already exists" signal. SQLite returns SQLITE_ERROR (no extended
+// code) for this; we string-match the engine's stable message
+// fragment. Lowercased for safety against future-version case changes.
+//
+// Used by vec.Create and fts.New to map the raw SQLite error to their
+// typed ErrAlreadyExists sentinels.
+func IsAlreadyExistsErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "already exists")
+}

@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"modernc.org/libc"
@@ -47,7 +48,7 @@ func Pointer(v any) any {
 // bool, time.Time, nil).
 func ValuePointer(v Value) (any, bool) {
 	switch v.(type) {
-	case nil, int64, float64, bool, string, []byte:
+	case nil, int64, float64, bool, string, []byte, time.Time:
 		return v, false
 	}
 	return v, true

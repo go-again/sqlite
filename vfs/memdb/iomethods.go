@@ -40,8 +40,8 @@ func xReadTrampoline(_ *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Tsq
 	for k, v := range h.db.pages {
 		pageStart := k
 		pageEnd := k + int64(len(v))
-		s := max64(pageStart, int64(off))
-		e := min64(pageEnd, int64(end))
+		s := max(pageStart, int64(off))
+		e := min(pageEnd, int64(end))
 		if s >= e {
 			continue
 		}
@@ -151,18 +151,4 @@ func xDeviceCharacteristicsTrampoline(_ *libc.TLS, _ uintptr) int32 {
 	// SQLITE_IOCAP_ATOMIC | SQLITE_IOCAP_POWERSAFE_OVERWRITE — every
 	// write either lands or doesn't (memory swap); no torn-write risk.
 	return 0x0001 | 0x1000
-}
-
-func max64(a, b int64) int64 {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func min64(a, b int64) int64 {
-	if a < b {
-		return a
-	}
-	return b
 }

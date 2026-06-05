@@ -108,10 +108,12 @@ type traceState struct {
 // dropHookHandlers removes any entries this conn left in the six
 // process-global hook maps (xUpdateHandlers, xAuthorizerHandlers,
 // xTraceHandlers, xPreUpdateHandlers, xCommitHandlers,
-// xRollbackHandlers). Called from (*conn).Close; without it captured
-// closures (and their *libc.TLS) would live for the process lifetime,
-// and a stale callback could fire if SQLite later recycled the
-// uintptr handle for a new connection.
+// xRollbackHandlers) and the three UDF/collation/aggregate registries
+// populated by [Conn.RegisterFunc] / [Conn.RegisterCollation] /
+// [Conn.RegisterAggregator]. Called from (*conn).Close; without it
+// captured closures (and their *libc.TLS) would live for the process
+// lifetime, and a stale callback could fire if SQLite later recycled
+// the uintptr handle for a new connection.
 func (c *conn) dropHookHandlers() {
 	h := c.db
 	xUpdateHandlers.mu.Lock()
@@ -132,6 +134,34 @@ func (c *conn) dropHookHandlers() {
 	xRollbackHandlers.mu.Lock()
 	delete(xRollbackHandlers.m, h)
 	xRollbackHandlers.mu.Unlock()
+
+	if len(c.fnIDs) > 0 {
+		xFuncs.mu.Lock()
+		for _, id := range c.fnIDs {
+			delete(xFuncs.m, id)
+			xFuncs.ids.reclaim(id)
+		}
+		xFuncs.mu.Unlock()
+		c.fnIDs = nil
+	}
+	if len(c.collIDs) > 0 {
+		xCollations.mu.Lock()
+		for _, id := range c.collIDs {
+			delete(xCollations.m, id)
+			xCollations.ids.reclaim(id)
+		}
+		xCollations.mu.Unlock()
+		c.collIDs = nil
+	}
+	if len(c.aggIDs) > 0 {
+		xAggregateFactories.mu.Lock()
+		for _, id := range c.aggIDs {
+			delete(xAggregateFactories.m, id)
+			xAggregateFactories.ids.reclaim(id)
+		}
+		xAggregateFactories.mu.Unlock()
+		c.aggIDs = nil
+	}
 }
 
 // RegisterUpdateHook installs a callback that fires after every INSERT, UPDATE,
@@ -192,6 +222,13 @@ func (c *Conn) SetTrace(cfg *TraceConfig) error {
 	xTraceHandlers.mu.Unlock()
 	rc := sqlite3.Xsqlite3_trace_v2(c.tls, c.db, uint32(cfg.EventMask), cFuncPointer(traceTrampoline), c.db)
 	if rc != sqlite3.SQLITE_OK {
+		// Trampoline never got wired to SQLite; drop the orphan map
+		// entry so the trace callback can't fire on a half-installed
+		// state and so a follow-up SetTrace doesn't have to clear stale
+		// state to succeed.
+		xTraceHandlers.mu.Lock()
+		delete(xTraceHandlers.m, c.db)
+		xTraceHandlers.mu.Unlock()
 		return c.errstr(rc)
 	}
 	return nil

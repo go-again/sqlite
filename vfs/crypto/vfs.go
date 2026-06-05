@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"errors"
 	"unsafe"
 
 	"modernc.org/libc"
@@ -43,14 +44,16 @@ type perFileState struct {
 // initIoMethods fills the FS's owned io-methods table. Called once at
 // New() time. Each FS gets its own table because trampolines recover
 // the owning *FS by reading pMethods from pFile and reverse-mapping
-// via [FS.ourIoMethods]'s known offset within the FS struct.
-func (fs *FS) initIoMethods() {
+// via [FS.ourIoMethods]'s known offset within the FS struct. Returns
+// an error on OOM so callers can fail gracefully instead of crashing
+// the host process.
+func (fs *FS) initIoMethods() error {
 	// Allocate the methods table via libc so checkptr (-race) doesn't
 	// instrument arithmetic against it — modernc's transpiled lib does
 	// pointer arithmetic against the table internally.
 	p := libc.Xmalloc(fs.tls, libc.Tsize_t(unsafe.Sizeof(sqlite3.Tsqlite3_io_methods{})))
 	if p == 0 {
-		panic("crypto: alloc io-methods: out of memory")
+		return errors.New("crypto: alloc io-methods: out of memory")
 	}
 	fs.ourIoMethods = (*sqlite3.Tsqlite3_io_methods)(unsafe.Pointer(p))
 	// iVersion=2 + FxShmMap non-zero is what SQLite checks before it
@@ -78,6 +81,7 @@ func (fs *FS) initIoMethods() {
 		FxShmBarrier:            cabi.FuncPointer(xShmBarrierTrampoline),
 		FxShmUnmap:              cabi.FuncPointer(xShmUnmapTrampoline),
 	}
+	return nil
 }
 
 // perFileStateOf returns the per-file state slot for pFile, using

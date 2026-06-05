@@ -158,17 +158,10 @@ func Create(ctx context.Context, db *sql.DB, name string, dim int, opts Options,
 	return t, nil
 }
 
-// isAlreadyExistsErr reports whether err carries SQLite's "table X
-// already exists" signal. SQLite returns SQLITE_ERROR (no extended
-// code) for this; we string-match the engine's stable message
-// fragment. The match is lowercased for safety against future-version
-// case changes.
-func isAlreadyExistsErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(strings.ToLower(err.Error()), "already exists")
-}
+// isAlreadyExistsErr is a thin local alias for [internal/sqlid.IsAlreadyExistsErr]
+// — both vec and fts need the same upstream-message-fragment match, so the
+// implementation lives in the shared internal/sqlid helper.
+func isAlreadyExistsErr(err error) bool { return sqlid.IsAlreadyExistsErr(err) }
 
 // Open returns a Table handle for a vec0 virtual table that already exists in
 // db. It does not validate the table's schema — the dim/encoding/metric

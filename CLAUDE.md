@@ -107,7 +107,7 @@ github.com/go-again/sqlite/
 ├── config.go               # sqlite.Config / Pragmas / Encryption / Cipher (modern Go-typed open)
 ├── open_config.go          # sqlite.Open(Config) → *DB; BuildDSN; ApplyPragmas
 │
-├── gorm/                   # gorm sub-package (ported verbatim from glebarez)
+├── gorm/                   # gorm sub-package (originally ported from glebarez; now diverged with RETURNING gating, OpenConfig, error translator)
 │   ├── sqlite.go           # Dialector
 │   ├── migrator.go         # full Migrator (HasTable, AlterColumn, …)
 │   ├── ddlmod.go           # DDL regex parser used by recreateTable
@@ -142,6 +142,7 @@ github.com/go-again/sqlite/
 │   ├── query.go            # Term/Phrase/Prefix/And/Or/Not/Near/Column/Raw + Build()
 │   ├── internal.go         # QuoteIdent / ValidIdent exports + SQLType conversion
 │   ├── observability.go    # Wrap / WithLogger / WithRecorder (parallel to vec/)
+│   ├── triggers.go         # installSyncTriggers — AFTER INSERT/UPDATE/DELETE on external-content source
 │   └── gorm/               # tag-driven gorm bridge (package ftsgorm)
 │       ├── plugin.go       # gorm.Plugin + DropTableHook implementer
 │       ├── tag.go          # fts5:"tokenize=...;prefix=...;external=...;contentless=..."
@@ -161,7 +162,7 @@ github.com/go-again/sqlite/
 │       ├── doc.go          # crypto contract + threat model + drift discipline + observability
 │       ├── crypto.go       # New(), Options, Cipher constants, *FS handle
 │       ├── vfs.go          # registration, xOpen, perFileState, struct layout
-│       ├── iomethods.go    # 12 io-method trampolines + sync.Pool scratch
+│       ├── iomethods.go    # 16 io-method trampolines (12 base + 4 xShm*) + sync.Pool scratch
 │       ├── cipher.go       # pageCipher interface + Adiantum/AESXTS bindings + file-kind tweak
 │       ├── observability.go # Recorder interface, NewSlogRecorder, FileKindName
 │       └── derive_key.go    # DeriveKey: Argon2id passphrase + salt → cipher-sized key
@@ -169,7 +170,7 @@ github.com/go-again/sqlite/
 │       ├── doc.go          # contract, on-disk format, EnableChecksums recipe
 │       ├── cksm.go         # New(), Options, compute()
 │       ├── vfs.go          # registration, xOpen, perFileState (with atomic.Int32 enabled)
-│       └── iomethods.go    # 12 io-method trampolines (verify on read, stamp on write)
+│       └── iomethods.go    # 16 io-method trampolines (12 base + 4 xShm*) — verify on read, stamp on write
 │   └── mvcc/               # in-memory snapshot-isolation VFS (Go-native MVCC)
 │       ├── doc.go          # snapshot/commit/abort contract, shared vs private DBs
 │       ├── mvcc.go         # New(), Options, FS, memDB, snapshot, acquire/release
@@ -335,7 +336,7 @@ sc.Raw(func(dc any) error {
 // Then use sc.ExecContext, NOT db.Exec.
 ```
 
-Several existing tests show this idiom; `compat_test.go::withMattnConn` is
+Several existing tests show this idiom; `compat_test.go::withSQLite3Conn` is
 the canonical helper.
 
 ### 5. sqlite-vec quirks
@@ -420,7 +421,7 @@ swept; new contributions should match.
 
 Each sub-package has a small reusable fixture function in its test files:
 
-- root: `compat_test.go::withMattnConn(t, dsn)` returns `(*sql.DB, *sql.Conn, *sqlite.Conn)` with `MaxOpenConns=1` pinned
+- root: `compat_test.go::withSQLite3Conn(t, dsn)` returns `(*sql.DB, *sql.Conn, *sqlite.Conn)` with `MaxOpenConns=1` pinned
 - `gorm/integration_test.go::openInMemory` returns a gorm DB
 - `vec/table_test.go::openDB` + `fixture` corpus + `fixtureQuery`
 - `fts/fts_test.go::openDB` + `fixtureCorpus`

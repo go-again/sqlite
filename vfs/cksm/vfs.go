@@ -2,6 +2,7 @@ package cksm
 
 import (
 	"bytes"
+	"errors"
 	"sync/atomic"
 	"unsafe"
 
@@ -32,11 +33,12 @@ type perFileState struct {
 // allocated via libc so checkptr (-race) doesn't track its
 // arithmetic — modernc's transpiled lib does pointer-arithmetic
 // against the methods struct internally, and Go-heap allocations
-// would trip the analyzer.
-func (fs *FS) initIoMethods() {
+// would trip the analyzer. Returns an error on OOM so callers can
+// fail gracefully instead of crashing the host process.
+func (fs *FS) initIoMethods() error {
 	p := libc.Xmalloc(fs.tls, libc.Tsize_t(unsafe.Sizeof(sqlite3.Tsqlite3_io_methods{})))
 	if p == 0 {
-		panic("cksm: alloc io-methods: out of memory")
+		return errors.New("cksm: alloc io-methods: out of memory")
 	}
 	fs.ourIoMethods = (*sqlite3.Tsqlite3_io_methods)(unsafe.Pointer(p))
 	*fs.ourIoMethods = sqlite3.Tsqlite3_io_methods{
@@ -58,6 +60,7 @@ func (fs *FS) initIoMethods() {
 		FxShmBarrier:            cabi.FuncPointer(xShmBarrierTrampoline),
 		FxShmUnmap:              cabi.FuncPointer(xShmUnmapTrampoline),
 	}
+	return nil
 }
 
 func (fs *FS) perFileStateOf(pFile uintptr) *perFileState {

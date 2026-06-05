@@ -14,13 +14,34 @@ func approxEq(a, b float64) bool {
 	return math.Abs(a-b) < 1e-9
 }
 
+// mustRRF fails the test if the call returns an error. Test helper to
+// keep happy-path call sites readable when error returns aren't the
+// thing under test.
+func mustRRF[K comparable](t *testing.T, slices [][]K, opts ...fusion.Option) []fusion.Result[K] {
+	t.Helper()
+	got, err := fusion.RRF(slices, opts...)
+	if err != nil {
+		t.Fatalf("RRF: %v", err)
+	}
+	return got
+}
+
+func mustRRF2[K comparable](t *testing.T, a, b []K, opts ...fusion.Option) []fusion.Result[K] {
+	t.Helper()
+	got, err := fusion.RRF2(a, b, opts...)
+	if err != nil {
+		t.Fatalf("RRF2: %v", err)
+	}
+	return got
+}
+
 // TestRRF_TwoSlices_OverlappingKeys verifies keys present in both
 // inputs accumulate scores. Key 1 appears at rank 1 in both lists so
 // it should win even though key 2 holds a higher rank average.
 func TestRRF_TwoSlices_OverlappingKeys(t *testing.T) {
 	a := []int64{1, 2, 3}
 	b := []int64{1, 4, 2}
-	got := fusion.RRF([][]int64{a, b})
+	got := mustRRF(t, [][]int64{a, b})
 	if len(got) != 4 {
 		t.Fatalf("len=%d, want 4 (union of {1,2,3,4})", len(got))
 	}
@@ -39,7 +60,7 @@ func TestRRF_TwoSlices_OverlappingKeys(t *testing.T) {
 func TestRRF_DisjointKeys(t *testing.T) {
 	a := []int64{10, 20}
 	b := []int64{30, 40}
-	got := fusion.RRF([][]int64{a, b})
+	got := mustRRF(t, [][]int64{a, b})
 	if len(got) != 4 {
 		t.Fatalf("len=%d, want 4", len(got))
 	}
@@ -57,7 +78,7 @@ func TestRRF_DisjointKeys(t *testing.T) {
 func TestRRF_WithWeights(t *testing.T) {
 	a := []int64{1}
 	b := []int64{2}
-	got := fusion.RRF([][]int64{a, b}, fusion.WithWeights(10.0, 1.0))
+	got := mustRRF(t, [][]int64{a, b}, fusion.WithWeights(10.0, 1.0))
 	if got[0].Key != 1 {
 		t.Errorf("top key=%d, want key=1 (10× weight)", got[0].Key)
 	}
@@ -66,7 +87,7 @@ func TestRRF_WithWeights(t *testing.T) {
 // TestRRF_WithLimit truncates to the top-N.
 func TestRRF_WithLimit(t *testing.T) {
 	a := []int64{1, 2, 3, 4, 5}
-	got := fusion.RRF([][]int64{a}, fusion.WithLimit(2))
+	got := mustRRF(t, [][]int64{a}, fusion.WithLimit(2))
 	if len(got) != 2 {
 		t.Errorf("len=%d, want 2", len(got))
 	}
@@ -77,7 +98,7 @@ func TestRRF_WithLimit(t *testing.T) {
 
 // TestRRF_EmptyInputs returns an empty result without panicking.
 func TestRRF_EmptyInputs(t *testing.T) {
-	got := fusion.RRF([][]int64{nil, nil})
+	got := mustRRF(t, [][]int64{nil, nil})
 	if len(got) != 0 {
 		t.Errorf("len=%d, want 0", len(got))
 	}
@@ -88,8 +109,8 @@ func TestRRF_EmptyInputs(t *testing.T) {
 // apart at k=10 than at k=60.
 func TestRRF_KConstant_TightSpread(t *testing.T) {
 	a := []int64{1, 2}
-	tight := fusion.RRF([][]int64{a}, fusion.WithK(10))
-	loose := fusion.RRF([][]int64{a}, fusion.WithK(60))
+	tight := mustRRF(t, [][]int64{a}, fusion.WithK(10))
+	loose := mustRRF(t, [][]int64{a}, fusion.WithK(60))
 	tightRatio := tight[0].Score / tight[1].Score
 	looseRatio := loose[0].Score / loose[1].Score
 	if tightRatio <= looseRatio {
@@ -97,16 +118,18 @@ func TestRRF_KConstant_TightSpread(t *testing.T) {
 	}
 }
 
-// TestRRF_WeightCountMismatch_Panics is a programming-error path: if
-// the caller hands WithWeights a length mismatch, RRF panics. We
-// document that explicitly in the WithWeights docstring.
-func TestRRF_WeightCountMismatch_Panics(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic on weight count mismatch")
-		}
-	}()
-	fusion.RRF([][]int64{{1}, {2}}, fusion.WithWeights(1.0))
+// TestRRF_WeightCountMismatch_ReturnsError pins the error-return
+// contract: WithWeights length mismatch produces a clean error
+// instead of panicking the caller. The error message names both
+// counts so the caller can fix the call site.
+func TestRRF_WeightCountMismatch_ReturnsError(t *testing.T) {
+	got, err := fusion.RRF([][]int64{{1}, {2}}, fusion.WithWeights(1.0))
+	if err == nil {
+		t.Fatal("want error on weight count mismatch, got nil")
+	}
+	if got != nil {
+		t.Errorf("want nil result on error, got %v", got)
+	}
 }
 
 // TestRRF_DeterministicTiebreak pins the tiebreak rule: when scores
@@ -120,9 +143,9 @@ func TestRRF_DeterministicTiebreak(t *testing.T) {
 	// when that happens.
 	a := []int64{10, 20, 30}
 	b := []int64{40, 50, 60}
-	first := fusion.RRF([][]int64{a, b})
+	first := mustRRF(t, [][]int64{a, b})
 	for i := range 16 {
-		got := fusion.RRF([][]int64{a, b})
+		got := mustRRF(t, [][]int64{a, b})
 		if len(got) != len(first) {
 			t.Fatalf("run %d: len=%d, want %d", i, len(got), len(first))
 		}
@@ -150,8 +173,8 @@ func TestRRF_DeterministicTiebreak(t *testing.T) {
 func TestRRF2_MatchesRRFTwoSlice(t *testing.T) {
 	a := []int64{1, 2, 3}
 	b := []int64{2, 3, 4}
-	via2 := fusion.RRF2(a, b, fusion.WithLimit(3))
-	viaN := fusion.RRF([][]int64{a, b}, fusion.WithLimit(3))
+	via2 := mustRRF2(t, a, b, fusion.WithLimit(3))
+	viaN := mustRRF(t, [][]int64{a, b}, fusion.WithLimit(3))
 	if len(via2) != len(viaN) {
 		t.Fatalf("len mismatch: RRF2=%d, RRF=%d", len(via2), len(viaN))
 	}
@@ -167,7 +190,7 @@ func TestRRF2_MatchesRRFTwoSlice(t *testing.T) {
 func TestRRF_StringKeys(t *testing.T) {
 	a := []string{"alpha", "beta"}
 	b := []string{"beta", "alpha"}
-	got := fusion.RRF([][]string{a, b})
+	got := mustRRF(t, [][]string{a, b})
 	if len(got) != 2 {
 		t.Fatalf("len=%d, want 2", len(got))
 	}

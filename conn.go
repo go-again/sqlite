@@ -7,7 +7,9 @@ package sqlite // import "github.com/go-again/sqlite"
 import (
 	"context"
 	"database/sql/driver"
+	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,6 +20,14 @@ import (
 	"modernc.org/libc/sys/types"
 	sqlite3 "modernc.org/sqlite/lib"
 )
+
+// errBindValueTooLarge is returned by the text/blob bind paths when the
+// payload exceeds math.MaxInt32 bytes. SQLite's bind APIs take an int32
+// length; without this guard, callers passing a >2 GiB string or blob on
+// 64-bit hosts would silently truncate to a negative length, which
+// sqlite3_bind_* interprets as "use strlen" / "until null" and
+// produces corrupted data instead of an error.
+var errBindValueTooLarge = errors.New("sqlite: bind value larger than 2 GiB; SQLite's int32 length field can't represent it")
 
 type conn struct {
 	db  uintptr // *sqlite3.Xsqlite3
@@ -39,6 +49,15 @@ type conn struct {
 	// one when _stmt_cache_size > 0. database/sql pins one goroutine per
 	// conn at a time so no locking is needed around the cache itself.
 	stmts *stmtCache
+
+	// fnIDs, collIDs, aggIDs hold the ids this conn minted in the three
+	// process-global UDF/collation/aggregate maps so (*conn).Close can
+	// drain them. Without this drain the closures (and their captured
+	// state) would live for the process lifetime, even after the
+	// connection that owned them closed.
+	fnIDs   []uintptr
+	collIDs []uintptr
+	aggIDs  []uintptr
 }
 
 // defaultStmtCacheSize matches mattn's _stmt_cache_size default. A cache that
@@ -567,6 +586,9 @@ func (c *conn) bindNull(pstmt uintptr, idx1 int) (uintptr, error) {
 //
 //	int sqlite3_bind_text(sqlite3_stmt*,int,const char*,int,void(*)(void*));
 func (c *conn) bindText(pstmt uintptr, idx1 int, value string) (uintptr, error) {
+	if len(value) > math.MaxInt32 {
+		return 0, errBindValueTooLarge
+	}
 	p, err := libc.CString(value)
 	if err != nil {
 		return 0, err
@@ -1211,6 +1233,9 @@ func (c *conn) bindBlob(pstmt uintptr, idx1 int, value []byte) (uintptr, error) 
 			return 0, c.errstr(rc)
 		}
 		return 0, nil
+	}
+	if len(value) > math.MaxInt32 {
+		return 0, errBindValueTooLarge
 	}
 
 	p, err := c.malloc(len(value))

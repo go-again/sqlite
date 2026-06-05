@@ -9,6 +9,11 @@ import (
 // encode returns the value of the FTS5 `tokenize=` option as it should appear
 // in CREATE VIRTUAL TABLE, including any single-quote escaping required by
 // the FTS5 grammar.
+//
+// The encode method is unexported on purpose: the Tokenizer set is closed
+// to the four built-ins shipped here ([Unicode61], [Ascii], [Porter],
+// [Trigram]) — the ones FTS5 itself supports. External implementations
+// would be silently ignored by FTS5, so we keep the type sealed.
 type Tokenizer interface {
 	encode() string
 }

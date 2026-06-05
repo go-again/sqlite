@@ -34,6 +34,13 @@ func assignSQLType[T SQLType](raw any) (T, error) {
 	case nil:
 		return zero, nil
 	case int64:
+		// Direct int64 → int64 fast-path. Without it the value would
+		// detour through float64, which silently mangles rowids above
+		// 2^53 — a real failure mode for snowflake IDs or unix-nano
+		// keys held in FTS5 INTEGER PRIMARY KEY columns.
+		if _, ok := any(zero).(int64); ok {
+			return any(v).(T), nil
+		}
 		return convertNumber[T](float64(v))
 	case float64:
 		return convertNumber[T](v)

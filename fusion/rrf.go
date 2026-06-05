@@ -41,8 +41,8 @@ func WithK(k float64) Option {
 
 // WithWeights applies a multiplicative weight per input slice. The
 // number of weights MUST match the number of input slices passed to
-// RRF; otherwise RRF panics — this is a programming error, not a
-// runtime condition.
+// RRF; otherwise RRF returns an error naming both counts so the
+// caller can fix the call site.
 //
 // Common use: a ranker you trust more gets weight > 1.0; a ranker
 // you're hedging on gets weight < 1.0. Weights sum into the score
@@ -64,8 +64,8 @@ func WithLimit(n int) Option {
 // call site and avoids the [][]K wrapper most callers don't need.
 //
 // WithWeights still expects exactly two weights; passing any other
-// count panics, same as [RRF].
-func RRF2[K comparable](a, b []K, opts ...Option) []Result[K] {
+// count returns an error, same as [RRF].
+func RRF2[K comparable](a, b []K, opts ...Option) ([]Result[K], error) {
 	return RRF([][]K{a, b}, opts...)
 }
 
@@ -76,17 +76,19 @@ func RRF2[K comparable](a, b []K, opts ...Option) []Result[K] {
 // still contribute, just from one source.
 //
 // Returns a single descending-by-score slice. With WithLimit(n) only
-// the top n results are returned.
+// the top n results are returned. Returns an error if [WithWeights]
+// is supplied with a length that doesn't match `slices`.
 //
 // Slice order across the variadic is irrelevant to the math; it only
 // affects which weight (from WithWeights) attaches to which slice.
-func RRF[K comparable](slices [][]K, opts ...Option) []Result[K] {
+func RRF[K comparable](slices [][]K, opts ...Option) ([]Result[K], error) {
 	cfg := &config{k: 60}
 	for _, opt := range opts {
 		opt(cfg)
 	}
 	if cfg.weights != nil && len(cfg.weights) != len(slices) {
-		panic("fusion.RRF: len(WithWeights) must equal the number of input slices")
+		return nil, fmt.Errorf("fusion.RRF: len(WithWeights)=%d must equal len(slices)=%d",
+			len(cfg.weights), len(slices))
 	}
 
 	scores := make(map[K]float64)
@@ -118,5 +120,5 @@ func RRF[K comparable](slices [][]K, opts ...Option) []Result[K] {
 	if cfg.limit > 0 && len(out) > cfg.limit {
 		out = out[:cfg.limit]
 	}
-	return out
+	return out, nil
 }

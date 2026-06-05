@@ -2,22 +2,25 @@ package sqlite
 
 import (
 	"database/sql"
-	"log"
 	"testing"
 )
 
+// TestSQLiteVersion is a smoke test that the gorm sub-package's
+// DriverName resolves through database/sql to a working SQLite
+// connection. Asserts the version string isn't empty — a typical
+// `3.x.y` string today.
 func TestSQLiteVersion(t *testing.T) {
-	var version string
-
 	db, err := sql.Open(DriverName, ":memory:")
 	if err != nil {
-		log.Fatal(err)
+		t.Fatalf("sql.Open(%q): %v", DriverName, err)
 	}
+	t.Cleanup(func() { _ = db.Close() })
 
-	row := db.QueryRow("select sqlite_version()")
-	if row.Scan(&version) != nil {
-		log.Fatal(err)
+	var version string
+	if err := db.QueryRow("SELECT sqlite_version()").Scan(&version); err != nil {
+		t.Fatalf("QueryRow(sqlite_version): %v", err)
 	}
-
-	t.Log(version)
+	if version == "" {
+		t.Error("sqlite_version() returned empty string")
+	}
 }

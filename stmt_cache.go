@@ -3,6 +3,7 @@ package sqlite
 import (
 	"container/list"
 	"strings"
+	"sync/atomic"
 )
 
 // stmtCacheEntry holds a prepared statement that's been donated back to the
@@ -31,9 +32,13 @@ type stmtCache struct {
 	// Counters exposed via (*Conn).StmtCacheStats. Operators tuning
 	// _stmt_cache_size need a hit-rate signal to decide whether to
 	// grow / shrink the cap; without these the cache is opaque.
-	hits      int64
-	misses    int64
-	evictions int64
+	// Atomic because StmtCacheStats() can be called from any goroutine
+	// (the public *Conn type aliases the unexported conn), so the
+	// "single goroutine per conn" guarantee that the rest of stmtCache
+	// relies on doesn't apply to the stats reader.
+	hits      atomic.Int64
+	misses    atomic.Int64
+	evictions atomic.Int64
 }
 
 // StmtCacheStats is a snapshot of the per-connection prepared-statement
@@ -78,10 +83,10 @@ func (s *stmtCache) take(sql string) *stmtCacheEntry {
 	key := normalize(sql)
 	entry, ok := s.m[key]
 	if !ok {
-		s.misses++
+		s.misses.Add(1)
 		return nil
 	}
-	s.hits++
+	s.hits.Add(1)
 	delete(s.m, key)
 	s.ord.Remove(entry.elem)
 	entry.elem = nil
@@ -115,7 +120,7 @@ func (s *stmtCache) put(sql string, psql, pstmt uintptr) (evicted *stmtCacheEntr
 		oldest := back.Value.(*stmtCacheEntry)
 		s.ord.Remove(back)
 		delete(s.m, oldest.key)
-		s.evictions++
+		s.evictions.Add(1)
 		evicted = oldest
 	}
 	entry := &stmtCacheEntry{key: key, psql: psql, pstmt: pstmt}
@@ -154,13 +159,18 @@ func (s *stmtCache) len() int {
 // `_stmt_cache_size` DSN parameter — a low hit rate is the signal to
 // grow the cap; a high eviction rate means the working set exceeds
 // the current cap.
+//
+// `_stmt_cache_size` sizes each connection's cache independently — a
+// pool of N connections holds N caches, each capped at the DSN value.
+// Aggregate memory scales with pool size, not pool-wide statement
+// count; rebalance the per-conn cap accordingly when the pool grows.
 func (c *conn) StmtCacheStats() StmtCacheStats {
 	if c.stmts == nil || !c.stmts.enabled() {
 		return StmtCacheStats{}
 	}
 	return StmtCacheStats{
-		Hits:      c.stmts.hits,
-		Misses:    c.stmts.misses,
-		Evictions: c.stmts.evictions,
+		Hits:      c.stmts.hits.Load(),
+		Misses:    c.stmts.misses.Load(),
+		Evictions: c.stmts.evictions.Load(),
 	}
 }

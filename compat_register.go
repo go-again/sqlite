@@ -80,6 +80,7 @@ func (c *Conn) RegisterCollation(name string, cmp func(a, b string) int) error {
 		xCollations.mu.Unlock()
 		return err
 	}
+	c.collIDs = append(c.collIDs, id)
 	return nil
 }
 
@@ -112,6 +113,7 @@ func (c *conn) registerScalarFunction(name string, nArg int32, pure bool, fn fun
 		xFuncs.mu.Unlock()
 		return err
 	}
+	c.fnIDs = append(c.fnIDs, id)
 	return nil
 }
 
@@ -144,6 +146,7 @@ func (c *conn) registerAggregateFunction(name string, nArg int32, pure bool, fac
 		xAggregateFactories.mu.Unlock()
 		return err
 	}
+	c.aggIDs = append(c.aggIDs, id)
 	return nil
 }
 

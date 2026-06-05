@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"iter"
 	"strings"
+
+	"github.com/go-again/sqlite/internal/sqlid"
 )
 
 // Attr is a single (key, value) attribute. K is the rowid mapping (typically
@@ -122,6 +124,20 @@ func New[K, V SQLType](ctx context.Context, db *sql.DB, name string, opts Option
 	if !validIdent(name) {
 		return nil, fmt.Errorf("fts.New: %q is not a valid SQL identifier", name)
 	}
+	// External + Contentless are documented as mutually exclusive
+	// (see Options.External / Options.Contentless docstrings) but the
+	// downstream CREATE-VIRTUAL-TABLE SQL would merely error with an
+	// opaque FTS5 message. Fail loud here with the caller's API names
+	// so the bug is obvious.
+	if opts.External != nil && opts.Contentless {
+		return nil, fmt.Errorf("fts.New: External and Contentless are mutually exclusive")
+	}
+	// Columns vs ColumnsRich silently shadow per columnSpecs() (rich
+	// wins); a non-empty bare Columns alongside non-empty ColumnsRich
+	// usually means a mid-edit typo. Error so the caller picks one.
+	if len(opts.Columns) > 0 && len(opts.ColumnsRich) > 0 {
+		return nil, fmt.Errorf("fts.New: set Options.Columns OR Options.ColumnsRich, not both")
+	}
 	specs := opts.columnSpecs()
 	cols := make([]string, len(specs))
 	for i, c := range specs {
@@ -197,16 +213,10 @@ func New[K, V SQLType](ctx context.Context, db *sql.DB, name string, opts Option
 	return idx, nil
 }
 
-// isAlreadyExistsErr reports whether err carries SQLite's "table X
-// already exists" signal. SQLite returns SQLITE_ERROR (no extended
-// code) for this; we string-match the engine's stable message
-// fragment. Lowercased for safety against future-version case changes.
-func isAlreadyExistsErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(strings.ToLower(err.Error()), "already exists")
-}
+// isAlreadyExistsErr is a thin local alias for [internal/sqlid.IsAlreadyExistsErr]
+// — both vec and fts need the same upstream-message-fragment match, so the
+// implementation lives in the shared internal/sqlid helper.
+func isAlreadyExistsErr(err error) bool { return sqlid.IsAlreadyExistsErr(err) }
 
 // Open returns a typed handle to an FTS5 table that already exists. It does
 // not validate the table's schema; the caller asserts that cols matches the

@@ -21,7 +21,7 @@ func BenchmarkRRF2_Small(b *testing.B) {
 	c := buildKeys(10)
 	b.ResetTimer()
 	for b.Loop() {
-		_ = fusion.RRF2(a, c)
+		_, _ = fusion.RRF2(a, c)
 	}
 }
 
@@ -30,7 +30,7 @@ func BenchmarkRRF2_Medium(b *testing.B) {
 	c := buildKeys(100)
 	b.ResetTimer()
 	for b.Loop() {
-		_ = fusion.RRF2(a, c)
+		_, _ = fusion.RRF2(a, c)
 	}
 }
 
@@ -39,7 +39,7 @@ func BenchmarkRRF2_Large(b *testing.B) {
 	c := buildKeys(1000)
 	b.ResetTimer()
 	for b.Loop() {
-		_ = fusion.RRF2(a, c)
+		_, _ = fusion.RRF2(a, c)
 	}
 }
 
@@ -53,6 +53,6 @@ func BenchmarkRRF_5lists(b *testing.B) {
 	}
 	b.ResetTimer()
 	for b.Loop() {
-		_ = fusion.RRF(lists)
+		_, _ = fusion.RRF(lists)
 	}
 }
