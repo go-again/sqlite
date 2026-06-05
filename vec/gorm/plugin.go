@@ -124,7 +124,7 @@ func (p *plugin) registerSchema(db *gorm.DB, model any) (modelMeta, error) {
 			rt.Name(), len(pkFields))
 	}
 	mm.PKField = pkFields[0]
-	if del := stmt.Schema.LookUpField("DeletedAt"); del != nil {
+	if del := findDeletedAtField(stmt.Schema); del != nil {
 		mm.SoftDeleteColumn = del.DBName
 	}
 
@@ -150,7 +150,7 @@ func (p *plugin) registerSchema(db *gorm.DB, model any) (modelMeta, error) {
 				"vecgorm: invalid sidecar table name %q (derived from source table %q); set vec:\"…;table=<name>\" explicitly",
 				m.Table, mm.SourceTable)
 		}
-		m.SoftDelete = stmt.Schema.LookUpField("DeletedAt") != nil
+		m.SoftDelete = findDeletedAtField(stmt.Schema) != nil
 
 		// Mute gorm's own SQL machinery for this field. The plugin
 		// owns its persistence.
@@ -213,6 +213,29 @@ func pluginFrom(db *gorm.DB) (*plugin, error) {
 		return nil, fmt.Errorf("vecgorm: registered plugin %s is %T, not *vecgorm.plugin", pluginName, raw)
 	}
 	return p, nil
+}
+
+// deletedAtType is the concrete type gorm uses for soft-delete columns;
+// we match on it so models that rename the Go field (e.g.
+// `RemovedAt gorm.DeletedAt` or `ArchivedAt gorm.DeletedAt`) still
+// participate in sidecar soft-delete sync. The previous
+// `LookUpField("DeletedAt")` discipline only matched the default field
+// name and silently missed renamed fields.
+var deletedAtType = reflect.TypeFor[gorm.DeletedAt]()
+
+// findDeletedAtField returns the schema's gorm.DeletedAt field
+// regardless of its Go name, or nil if the model has no soft-delete
+// field at all.
+func findDeletedAtField(s *schema.Schema) *schema.Field {
+	if s == nil {
+		return nil
+	}
+	for _, f := range s.Fields {
+		if f.StructField.Type == deletedAtType {
+			return f
+		}
+	}
+	return nil
 }
 
 // indirectType strips pointers and slices so reflect.TypeOf(&[]Doc{}) and

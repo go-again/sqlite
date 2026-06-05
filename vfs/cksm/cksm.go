@@ -135,6 +135,14 @@ func New(opts Options) (name string, fs *FS, err error) {
 		wrappedSzOsFile: defVfs.FszOsFile,
 	}
 	if err := fs.initIoMethods(); err != nil {
+		// initIoMethods allocates an io-methods table via libc.Xmalloc;
+		// failure means the table didn't land, but the cname + cvfs
+		// allocations and the tls handle above are still live. Release
+		// them so a long-running app that retries New() with degraded
+		// memory doesn't leak per failed attempt.
+		libc.Xfree(tls, cvfs)
+		libc.Xfree(tls, cname)
+		tls.Close()
 		return "", nil, err
 	}
 	fs.token = registerFS(fs)
@@ -211,9 +219,9 @@ func isValidPageSize(n int) bool {
 	return n&(n-1) == 0
 }
 
-// compute is the SQLite cksm_vtab Fletcher-style rolling 64-bit
+// compute is the SQLite cksumvfs Fletcher-style rolling 64-bit
 // checksum: two interleaved 32-bit sums over the page's 8-byte
-// little-endian words. Identical algorithm to the upstream cksm_vtab
+// little-endian words. Identical algorithm to the upstream cksumvfs
 // extension; on-disk compatible.
 func compute(a []byte) (cksm [8]byte) {
 	var s1, s2 uint32

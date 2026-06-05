@@ -22,7 +22,7 @@ Status legend:
 | `vfs/cksm` | [ncruces vfs/cksm.go](https://github.com/ncruces/go-sqlite3/blob/main/vfs/cksm.go) | ✓ landed | `cksm.New(Options)` + `(*sqlite.Conn).EnableChecksums(schema)` | `vfs/cksm/cksm_test.go` |
 | `vfs/mvcc` | [ncruces vfs/mvcc](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs/mvcc) | ✓ landed (Go-native re-implementation, no wbt dep) | `mvcc.New(Options)` | `vfs/mvcc/mvcc_test.go` |
 | `vfs/memdb` | [ncruces vfs/memdb](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs/memdb) | ✓ landed | `memdb.New(Options)` | `vfs/memdb/memdb_test.go` |
-| `vfs.NewReader(io.ReaderAt, size)` | [ncruces vfs/readervfs](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs/readervfs) | ✓ landed | `vfs.NewReader(r, n)` | `vfs/vfs_test.go` |
+| `vfs.NewReader(io.ReaderAt, size)` | [ncruces vfs/readervfs](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs/readervfs) | ✓ landed | `vfs.NewReader(r, n)` | `TestVFS_OpenFromReaderAt`, `TestVFS_NewReader_NilRejected`, `TestVFS_NewReader_NegativeSizeRejected` (`vfs/vfs_test.go`) |
 
 `vfs/crypto` covers both ncruces sub-packages: pick between Adiantum
 (default, 32-byte key, length-preserving wide-block cipher) and

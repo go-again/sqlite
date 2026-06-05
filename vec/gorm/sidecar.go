@@ -207,7 +207,7 @@ func isSoftDelete(db *gorm.DB) bool {
 	if db.Statement == nil || db.Statement.Schema == nil {
 		return false
 	}
-	if db.Statement.Schema.LookUpField("DeletedAt") == nil {
+	if findDeletedAtField(db.Statement.Schema) == nil {
 		return false
 	}
 	for _, set := range db.Statement.Clauses {

@@ -74,11 +74,16 @@ func main() {
 					return err
 				}
 				for {
-					done, err := bk.Step(100)
+					// bk.Step returns true while more pages remain; false
+					// means SQLITE_DONE. Using `more` matches the actual
+					// semantics — naming it `done` would invert the
+					// reader's expectation even though the loop logic
+					// works either way.
+					more, err := bk.Step(100)
 					if err != nil {
 						return err
 					}
-					if !done {
+					if !more {
 						break
 					}
 				}

@@ -44,7 +44,10 @@
 //	// Fuse and take the top 20. RRF2 is the convenience for the
 //	// two-slice case; the variadic RRF([][]K{a, b, c, ...}, ...) form
 //	// is there when you have three or more rankers.
-//	merged := fusion.RRF2(vecKeys, ftsKeys, fusion.WithLimit(20))
+//	merged, err := fusion.RRF2(vecKeys, ftsKeys, fusion.WithLimit(20))
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
 //	for _, r := range merged {
 //	    fmt.Println(r.Key, r.Score)
 //	}

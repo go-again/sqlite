@@ -174,7 +174,7 @@
 //     of main DB + journal + WAL + temp files).
 //   - github.com/go-again/sqlite/vfs/cksm — pure-Go page-level checksum
 //     VFS (Fletcher-style 8-byte trailer per page, on-disk compatible
-//     with SQLite's cksum_vtab). Composes beneath vfs/crypto.
+//     with SQLite's cksumvfs). Composes beneath vfs/crypto.
 //   - github.com/go-again/sqlite/vfs/mvcc — in-memory MVCC VFS with
 //     snapshot-isolation reads + atomic publish on commit; shared
 //     (file:/name) and private (file:name) DBs.

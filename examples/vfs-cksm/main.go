@@ -85,8 +85,12 @@ func main() {
 		log.Fatal(err)
 	}
 	defer db2.Close()
-	_, err = db2.Query(`SELECT * FROM t`)
+	rows, err := db2.Query(`SELECT * FROM t`)
 	if err == nil {
+		// Unexpected — the row iterator opened. Close it before
+		// reporting so the example models the cleanup shape consumers
+		// will copy verbatim.
+		_ = rows.Close()
 		fmt.Println("UNEXPECTED: read succeeded on corrupted DB")
 	} else {
 		fmt.Printf("Read failed as expected: %v\n", err)

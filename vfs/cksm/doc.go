@@ -26,7 +26,7 @@
 // Each page's last 8 bytes hold the checksum: 32-bit Fletcher-style
 // rolling sum (s1, s2) over the page's first (pageSize-8) bytes, taken
 // as little-endian 32-bit words. This is the same algorithm the
-// upstream SQLite cksm_vtab extension uses, so a cksm database written
+// upstream SQLite cksumvfs extension uses, so a cksm database written
 // here is on-disk compatible with vanilla SQLite + cksm.
 //
 // SQLite reserves the trailer space via the SQLite header's
@@ -49,8 +49,14 @@
 //	db, _ := sql.Open("sqlite", "/path/to/db?vfs="+name)
 //	defer db.Close()
 //
-//	// First-run setup: enable the trailer on new DBs.
-//	db.Exec(`PRAGMA reserved_bytes = 8`)
+//	// First-run setup: enable the trailer on new DBs. EnableChecksums
+//	// flips PRAGMA reserved_bytes=8 and VACUUMs in a single conn-
+//	// pinned call. See examples/vfs-cksm/main.go for the full recipe.
+//	sc, _ := db.Conn(ctx)
+//	defer sc.Close()
+//	_ = sc.Raw(func(dc any) error {
+//	    return dc.(*sqlite.Conn).EnableChecksums("main")
+//	})
 //
 // # Limitations
 //

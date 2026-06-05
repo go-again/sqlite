@@ -2,6 +2,7 @@ package sqlite // import "github.com/go-again/sqlite"
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"sync"
@@ -84,6 +85,15 @@ func (c *Conn) OpenBlob(schema, table, column string, rowid int64, write bool) (
 	}
 
 	n := sqlite3.Xsqlite3_blob_bytes(c.tls, pBlob)
+	if n < 0 {
+		// sqlite3_blob_bytes returns int32; a value > MaxInt32 (a 2 GiB
+		// blob if the build raised SQLITE_MAX_LENGTH) sign-extends to a
+		// negative int64 here, breaking every bounds check in
+		// ReadAt/WriteAt. We refuse rather than serve a Blob whose size
+		// reads as negative.
+		sqlite3.Xsqlite3_blob_close(c.tls, pBlob)
+		return nil, fmt.Errorf("sqlite: blob size %d overflows int32; use streaming reads", uint32(n))
+	}
 	return &Blob{
 		c:     c,
 		pBlob: pBlob,
@@ -130,7 +140,13 @@ func (b *Blob) Reopen(rowid int64) error {
 	if rc != sqlite3.SQLITE_OK {
 		return b.c.errstr(rc)
 	}
-	b.size = int64(sqlite3.Xsqlite3_blob_bytes(b.c.tls, b.pBlob))
+	n := sqlite3.Xsqlite3_blob_bytes(b.c.tls, b.pBlob)
+	if n < 0 {
+		// Same overflow guard as OpenBlob — refuse to serve a Blob
+		// whose size is unrepresentable as a non-negative int64.
+		return fmt.Errorf("sqlite: blob size %d overflows int32; use streaming reads", uint32(n))
+	}
+	b.size = int64(n)
 	b.offset = 0
 	return nil
 }

@@ -166,8 +166,13 @@ func (o *Observable) KNN(ctx context.Context, query []float32, k int, opts ...Qu
 }
 
 // KNNSlice mirrors Table.KNNSlice with observability. Forwards QueryOptions.
+//
+// The output slice is pre-sized using the same `min(max(k,0), 1024)`
+// clamp as [Table.KNNSlice] so the decorator doesn't silently re-pay
+// the slice-growth overhead the bare Table path avoids.
 func (o *Observable) KNNSlice(ctx context.Context, query []float32, k int, opts ...QueryOption) ([]Neighbor, error) {
-	var out []Neighbor
+	capHint := min(max(k, 0), 1024)
+	out := make([]Neighbor, 0, capHint)
 	for m, err := range o.KNN(ctx, query, k, opts...) {
 		if err != nil {
 			return nil, err

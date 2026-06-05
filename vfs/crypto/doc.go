@@ -72,8 +72,10 @@
 //     integrity (LUKS dm-integrity, ZFS) if active tampering is in
 //     scope.
 //   - Key is the caller's problem. We treat the byte slice as opaque
-//     and derive nothing from it. Use argon2id / scrypt for passphrase
-//     derivation; we don't ship one.
+//     once you hand it to [New]. To turn a passphrase + salt into a
+//     correctly-sized key, use [DeriveKey] (Argon2id with interactive
+//     parameters that match the cipher's required key length); scrypt
+//     is also fine if you prefer.
 //   - PageSize MUST match the database's `PRAGMA page_size`. Mismatch
 //     scrambles every read — SQLite reports "file is not a database"
 //     or similar within ~one query.

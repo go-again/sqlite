@@ -1,6 +1,6 @@
 // vec-search example: typed sqlite-vec API. Blank-importing the vec package
 // auto-registers the sqlite-vec extension on every connection; the typed
-// Table[Encoding, Metric] helpers handle (de)serialization for you.
+// vec.Table helpers handle (de)serialization (JSON or binary) for you.
 package main
 
 import (

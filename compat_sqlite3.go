@@ -52,4 +52,11 @@ type (
 
 	// SQLiteError is an alias for Error.
 	SQLiteError = Error
+
+	// SQLiteContext is an alias for FunctionContext. mattn-go-sqlite3
+	// uses *SQLiteContext as the receiver for user-defined function
+	// callbacks; we use *FunctionContext for the same role. The alias
+	// lets mattn UDF code compile after an import-path swap without
+	// renaming every callback signature.
+	SQLiteContext = FunctionContext
 )

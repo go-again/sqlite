@@ -124,7 +124,7 @@ func (p *plugin) registerSchema(db *gorm.DB, model any) (*modelMeta, error) {
 		mm = &modelMeta{
 			SourceTable: stmt.Schema.Table,
 			PKField:     pkFields[0],
-			SoftDelete:  stmt.Schema.LookUpField("DeletedAt") != nil,
+			SoftDelete:  findDeletedAtField(stmt.Schema) != nil,
 			Table:       tm.Table,
 			Tokenize:    tm.Tokenize,
 			Prefix:      tm.Prefix,
@@ -237,4 +237,26 @@ func activePool(db *gorm.DB) (execPool, error) {
 		return nil, fmt.Errorf("ftsgorm: unable to obtain ConnPool: %w", err)
 	}
 	return sqlDB, nil
+}
+
+// deletedAtType is the concrete type gorm uses for soft-delete columns;
+// we match on it so models that rename the Go field (e.g.
+// `RemovedAt gorm.DeletedAt`) still participate in soft-delete sync.
+// The previous `LookUpField("DeletedAt")` discipline only matched the
+// default field name and silently missed renamed fields.
+var deletedAtType = reflect.TypeFor[gorm.DeletedAt]()
+
+// findDeletedAtField returns the schema's gorm.DeletedAt field
+// regardless of its Go name, or nil if the model has no soft-delete
+// field at all.
+func findDeletedAtField(s *schema.Schema) *schema.Field {
+	if s == nil {
+		return nil
+	}
+	for _, f := range s.Fields {
+		if f.StructField.Type == deletedAtType {
+			return f
+		}
+	}
+	return nil
 }
