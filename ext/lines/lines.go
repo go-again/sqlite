@@ -5,6 +5,9 @@
 //	CREATE VIRTUAL TABLE temp.log USING lines(filename='app.log');
 //	SELECT lineno, line FROM temp.log WHERE line LIKE 'ERROR%';
 //
+// For a typed Go handle that hides the `USING lines(…)` argument string and
+// its quoting — Create / Open / Columns / Rows / Name / Drop — see [Table].
+//
 // # Module parameters
 //
 //   - filename='path' — read from the configured filesystem ([os.Open]

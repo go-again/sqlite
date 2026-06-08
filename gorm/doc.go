@@ -64,6 +64,23 @@
 //     DropTableHook to cascade their sidecar cleanup when callers run
 //     db.Migrator().DropTable(&Model{}). No second helper call needed.
 //
+// # Virtual-table extensions (ext/)
+//
+// The ext/ vtab modules — csv, lines, closure, bloom, spellfix1, array,
+// statement — work through this dialector once they are registered on
+// the pool. Blank-import the module's auto sub-package (or install a
+// Driver.ConnectHook before Open, e.g. for csv.RegisterFS with a
+// sandboxed fs.FS), pin the pool with sqlDB.SetMaxOpenConns(1), then
+// drive the vtab with ordinary gorm calls: db.Exec for the CREATE
+// VIRTUAL TABLE, db.Raw / db.Table(...).Scan / Where for reads. gorm's
+// AutoMigrate can't emit CREATE VIRTUAL TABLE … USING …, so create the
+// vtab out-of-band — raw db.Exec, or the typed csv.Create / lines.Create
+// over db.DB(). There is deliberately no csv/gorm or lines/gorm sidecar:
+// those vtabs are the table, not a companion index, so the bridge-plugin
+// shape used by vec/gorm and fts/gorm does not apply. See
+// examples/gorm-ext-vtabs for csv / lines / closure / bloom / spellfix1
+// each driven through gorm.
+//
 // # Configuration knobs
 //
 //   - sqlitegorm.OpenConfig(sqlite.Config, ...*gorm.Config): the modern

@@ -15,6 +15,9 @@
 //	//   CREATE VIRTUAL TABLE temp.sales USING csv(filename='sales.csv', header=on);
 //	//   SELECT region, SUM(amount) FROM temp.sales GROUP BY region;
 //
+// For a typed Go handle that hides the `USING csv(…)` argument string and
+// its quoting — Create / Open / Columns / Rows / Name / Drop — see [Table].
+//
 // The vtab needs to be created on the same connection that will query it
 // (SQLite virtual tables are per-connection). Either pin a `*sql.Conn`,
 // open with `MaxOpenConns=1`, or install via a `Driver.ConnectHook`.

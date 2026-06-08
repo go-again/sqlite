@@ -15,11 +15,11 @@ Status legend:
 |---|---|---|---|---|---|
 | array | ~250 | [ncruces/ext/array](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/array) | ✓ landed | `ext/array` + `ext/array/auto` | `ext/array/array_test.go` |
 | blobio | ~250 | [ncruces/ext/blobio](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/blobio) | ✓ landed | `ext/blobio` + `ext/blobio/auto` | `ext/blobio/blobio_test.go` |
-| bloom | ~390 | [ncruces/ext/bloom](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/bloom) | ✓ landed | `ext/bloom` + `ext/bloom/auto` | `ext/bloom/bloom_test.go` |
-| closure | ~310 | [ncruces/ext/closure](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/closure) | ✓ landed | `ext/closure` + `ext/closure/auto` | `ext/closure/closure_test.go` |
-| csv | ~430 | [ncruces/ext/csv](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/csv) | ✓ landed | `ext/csv` + `ext/csv/auto` | `ext/csv/csv_test.go` |
+| bloom | ~560 | [ncruces/ext/bloom](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/bloom) | ✓ landed (+ typed `Filter` API) | `ext/bloom` + `ext/bloom/auto` | `ext/bloom/bloom_test.go`, `filter_test.go` |
+| closure | ~480 | [ncruces/ext/closure](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/closure) | ✓ landed (+ typed `Graph` API) | `ext/closure` + `ext/closure/auto` | `ext/closure/closure_test.go`, `graph_test.go` |
+| csv | ~600 | [ncruces/ext/csv](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/csv) | ✓ landed (+ typed `Table` API) | `ext/csv` + `ext/csv/auto` | `ext/csv/csv_test.go`, `table_test.go` |
 | fileio | ~330 | [ncruces/ext/fileio](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/fileio) | ✓ landed | `ext/fileio` + `ext/fileio/auto` | `ext/fileio/fileio_test.go` |
-| lines | ~250 | [ncruces/ext/lines](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/lines) | ✓ landed | `ext/lines` + `ext/lines/auto` | `ext/lines/lines_test.go` |
+| lines | ~370 | [ncruces/ext/lines](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/lines) | ✓ landed (+ typed `Table` API) | `ext/lines` + `ext/lines/auto` | `ext/lines/lines_test.go`, `table_test.go` |
 | pivot | ~340 | [ncruces/ext/pivot](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/pivot) | ✓ landed | `ext/pivot` + `ext/pivot/auto` | `ext/pivot/pivot_test.go` |
 | statement | ~240 | [ncruces/ext/statement](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/statement) | ✓ landed | `ext/statement` + `ext/statement/auto` | `ext/statement/statement_test.go` |
 
@@ -36,6 +36,10 @@ Status legend:
 `fileio` exposes `readfile` / `writefile` / `lsmode` scalars plus the `fsdir` recursive-walk vtab. Use `fileio.Register(c)` for the os-backed mode (read+write of the local filesystem) or `fileio.RegisterFS(c, fs.FS)` for a sandboxed variant; the latter intentionally omits `writefile` since `fs.FS` is read-only.
 
 `blobio` ships `readblob` / `writeblob` scalars over our incremental BLOB API. The openblob() callback form from upstream isn't ported; callers who want long-lived handles can use `(*Conn).OpenBlob` directly from Go.
+
+`csv` adds a typed `csv.Table` handle (`Create` / `Open` / `Columns` / `Rows` / `Name` / `Drop`, with `WithFilename` / `WithData` / `WithHeader` / `WithComma` / `WithComment` / `WithColumns` / `WithIfNotExists`) that hides the `USING csv(…)` argument string and its single-quote escaping the way `sqlite.Open` hides a DSN. Rows are still queried as SQL — joining and filtering a CSV is the vtab's whole point — so the handle covers create/introspect/drop, not a query DSL. It requires the module pool-wide (blank-import `ext/csv/auto`, or `RegisterFS` from a `ConnectHook` for sandboxed file access).
+
+`lines` mirrors the same typed `lines.Table` (`Create` / `Open` / `Columns` / `Rows` / `Name` / `Drop`, with `WithFilename` / `WithData` / `WithIfNotExists`) over the one-row-per-line vtab — `Create` hides the `USING lines(…)` argument string and its quoting, `Rows` returns `lineno, line` in order. Same pool-wide requirement (`ext/lines/auto`, or `RegisterFS` for a sandbox).
 
 ## Scalar UDFs (pure Go)
 

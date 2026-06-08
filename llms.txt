@@ -64,19 +64,20 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [examples/ext-zorder](examples/ext-zorder/main.go): 2D Morton encoding round-trip + locality property demo.
 - [examples/ext-stats](examples/ext-stats/main.go): PostgreSQL-style aggregates (variance, percentile, regr_*, median, mode, every) plus a windowed regr_slope demo over a small employees table.
 - [examples/ext-unicode](examples/ext-unicode/main.go): Unicode-aware case mapping (with locale-tagged forms for Turkish / German), normalize, unaccent, NOCASE_UNICODE / NOCASE_ACCENT preset collations, plus a Swedish-locale collation that sorts `å` after `z`.
-- [examples/ext-csv](examples/ext-csv/main.go): SELECT directly from CSV files via the `ext/csv` vtab. Shows GROUP BY + SUM with type affinity, plus a JOIN across two CSV files sandboxed in an `fstest.MapFS`.
+- [examples/ext-csv](examples/ext-csv/main.go): read CSV files as SQL tables via the typed `csv.Table` API (Create / Columns / Rows / Name) — `Create` hides the `USING csv(…)` argument string and its quoting. Shows GROUP BY + SUM and a JOIN across two CSV files sandboxed in an `fstest.MapFS`.
 - [examples/ext-blobio](examples/ext-blobio/main.go): stream `zeroblob(N)` allocations via `readblob` / `writeblob`, and the same data through the typed `(*Conn).OpenBlob` API.
+- [examples/ext-bloom](examples/ext-bloom/main.go): probabilistic set-membership via the typed `bloom.Filter` API (Create / AddMany / Contains) with a tunable false-positive rate.
 - [examples/ext-fileio](examples/ext-fileio/main.go): walk a sandboxed `fstest.MapFS` via `fsdir`, `readfile`-it through SQL, and confirm `writefile` is unavailable in sandbox mode.
 - [examples/ext-statement](examples/ext-statement/main.go): parametrized views — anonymous `?N` and named `:pat` binds exposed as HIDDEN columns.
 - [examples/ext-pivot](examples/ext-pivot/main.go): three-SELECT cross-tab (rows × columns × cell aggregate) over a small sales table.
-- [examples/ext-closure](examples/ext-closure/main.go): full and depth-bounded graph walks over an org chart via `transitive_closure`.
+- [examples/ext-closure](examples/ext-closure/main.go): parent-child graph walks via the typed `closure.Graph` API — descendants, depth bounds (`WithMaxDepth`), and ancestor walks via `Reversed`.
+- [examples/ext-lines](examples/ext-lines/main.go): read a log file as one-row-per-line via the typed `lines.Table` API (Create / Columns / Rows / Name), then filter ERROR lines and aggregate by severity with plain SQL over the vtab.
 - [examples/vfs-cksm](examples/vfs-cksm/main.go): detect simulated bit-rot via the checksum VFS — corrupt one byte, observe `SQLITE_IOERR_DATA` on read.
 - [examples/vfs-mvcc](examples/vfs-mvcc/main.go): SHARED (`file:/name`) vs PRIVATE (`file:name`) in-memory MVCC databases; reader / writer concurrency demo.
 - [examples/vfs-memdb](examples/vfs-memdb/main.go): same shared / private shape as vfs-mvcc but on the simpler `vfs/memdb` VFS — writes are visible immediately, no snapshot isolation.
 - [examples/hooks](examples/hooks/main.go): install update / authorizer / commit / trace hooks on a pinned connection (MaxOpenConns(1) + db.Conn + sc.Raw idiom).
 - [examples/backup](examples/backup/main.go): `(*Conn).Backup` mattn-compat factory + top-level `sqlite.Serialize` / `sqlite.Deserialize` round-trip.
 - [examples/ext-spellfix1](examples/ext-spellfix1/main.go): fuzzy spell-correction via the typed `spellfix1.Vocab` API (Create / AddMany / Correct / CorrectSQL), Soundex prefilter + Damerau-Levenshtein scoring.
-- `ext/bloom` (persistent via the shadow-blob layout) and `ext/lines` ship without dedicated examples — see `docs/coverage-ext.md` and the per-package doc.go for usage.
 
 ## Feature coverage matrices
 

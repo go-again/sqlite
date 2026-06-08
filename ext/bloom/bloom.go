@@ -37,6 +37,9 @@
 //	INSERT INTO name(word) VALUES (?);                -- add to filter
 //	SELECT present FROM name WHERE word = ?;          -- test membership
 //
+// For a typed Go handle over this vtab — Create / Add / AddMany /
+// Contains / Drop, mirroring vec.Table and fts.Index — see [Filter].
+//
 // # Usage
 //
 //	import (

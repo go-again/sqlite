@@ -9,6 +9,10 @@
 //	SELECT id, depth FROM temp.tc
 //	    WHERE root = 42 AND depth <= 3;
 //
+// For a typed Go handle over this vtab — Create / Descendants (with depth
+// bounds and per-query retarget) / Reversed for ancestor walks — see
+// [Graph].
+//
 // # Schema
 //
 // The vtab exposes:

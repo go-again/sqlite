@@ -105,7 +105,7 @@ doc.go                  package doc (pkg.go.dev landing)
 - `vfs/internal/memio/` — page-overlap copy shared by `vfs/memdb` and `vfs/mvcc`.
 - `ext/` — loadable Go extensions, one sub-package per ext, each with an `auto/` blank-import variant. Inventory + status in `docs/coverage-ext.md`. `ext/internal/filevtab/` holds the file-backed-vtab scaffolding shared by `ext/csv` + `ext/lines`.
 - `tests/sql/` — SQL conformance suite organised by SQLite Language Reference category.
-- `examples/` — one runnable example per feature; smoke-tested by `just examples`. Bloom and Lines ship without dedicated examples (covered in package docs).
+- `examples/` — one runnable example per feature; smoke-tested by `just examples`.
 
 Anything under a dot-prefixed directory at the repo root is local-only
 working state (CI dumps, scratch dirs, maintainer-side reference checkouts).
