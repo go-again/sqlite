@@ -75,7 +75,7 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [examples/vfs-memdb](examples/vfs-memdb/main.go): same shared / private shape as vfs-mvcc but on the simpler `vfs/memdb` VFS — writes are visible immediately, no snapshot isolation.
 - [examples/hooks](examples/hooks/main.go): install update / authorizer / commit / trace hooks on a pinned connection (MaxOpenConns(1) + db.Conn + sc.Raw idiom).
 - [examples/backup](examples/backup/main.go): `(*Conn).Backup` mattn-compat factory + top-level `sqlite.Serialize` / `sqlite.Deserialize` round-trip.
-- [examples/ext-spellfix1](examples/ext-spellfix1/main.go): fuzzy lookup of misspellings (`WHERE word MATCH ?`) with Soundex prefilter + Damerau-Levenshtein scoring + rank boost.
+- [examples/ext-spellfix1](examples/ext-spellfix1/main.go): fuzzy spell-correction via the typed `spellfix1.Vocab` API (Create / AddMany / Correct / CorrectSQL), Soundex prefilter + Damerau-Levenshtein scoring.
 - `ext/bloom` (persistent via the shadow-blob layout) and `ext/lines` ship without dedicated examples — see `docs/coverage-ext.md` and the per-package doc.go for usage.
 
 ## Feature coverage matrices

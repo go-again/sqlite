@@ -62,9 +62,9 @@ Status legend:
 
 | ext | LoC (est) | Upstream | Status | Entry | Test pin |
 |---|---|---|---|---|---|
-| spellfix1 | ~530 | [SQLite spellfix1](https://sqlite.org/spellfix1.html) | ✓ landed (Go-native re-implementation) | `ext/spellfix1` + `ext/spellfix1/auto` | `ext/spellfix1/spellfix1_test.go` |
+| spellfix1 | ~780 | [SQLite spellfix1](https://sqlite.org/spellfix1.html) | ✓ landed (Go-native re-implementation, + typed `Vocab` API) | `ext/spellfix1` + `ext/spellfix1/auto` | `ext/spellfix1/spellfix1_test.go`, `vocab_test.go` |
 
-`spellfix1` is a Go-native re-implementation rather than a transpilation of the C `spellfix1.c` — same SQL surface (`CREATE VIRTUAL TABLE x USING spellfix1`, `INSERT INTO x(word [, rank])`, `SELECT word, distance FROM x WHERE word MATCH ?`), simpler internals. Uses Soundex for phonetic grouping and Damerau-Levenshtein with early-exit for distance ranking. Persists vocabulary in a `<vtab>_storage` shadow table (survives `db.Close()` / reconnect). What's NOT ported: non-Latin transliteration (Cyrillic / Greek), the `editdist3` custom cost-matrix API, the Russian-language phonetic encoder. Users who need full upstream parity should wait for modernc to transpile spellfix1.c or open an issue.
+`spellfix1` is a Go-native re-implementation rather than a transpilation of the C `spellfix1.c` — same SQL surface (`CREATE VIRTUAL TABLE x USING spellfix1`, `INSERT INTO x(word [, rank])`, `SELECT word, distance FROM x WHERE word MATCH ?`), simpler internals. Uses Soundex for phonetic grouping and Damerau-Levenshtein with early-exit for distance ranking. Persists vocabulary in a `<vtab>_storage` shadow table (survives `db.Close()` / reconnect), now `UNIQUE` on `word` so inserts dedupe (`INSERT OR IGNORE`). A typed `spellfix1.Vocab` handle (`Create` / `Open` / `Add` / `AddMany` / `Size` / `Correct` / `CorrectSQL` / `Drop`, with `WithIfNotExists` / `WithMaxDistance` / `WithLimit`) mirrors `vec.Table` and `fts.Index` so callers can avoid hand-written SQL; it requires the module pool-wide (blank-import `ext/spellfix1/auto`). What's NOT ported: non-Latin transliteration (Cyrillic / Greek), the `editdist3` custom cost-matrix API, the Russian-language phonetic encoder. Users who need full upstream parity should wait for modernc to transpile spellfix1.c or open an issue.
 
 ## Skipped (overlap with existing surface)
 

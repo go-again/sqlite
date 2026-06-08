@@ -10,6 +10,10 @@
 //	-- apple   1
 //	-- ... etc.
 //
+// For a typed Go handle over this vtab — Create / Add / AddMany / Size /
+// Correct / CorrectSQL / Drop, mirroring vec.Table and fts.Index — see
+// [Vocab]. The raw SQL above and the typed API are interchangeable.
+//
 // # Schema
 //
 //	word      TEXT     -- the candidate vocabulary entry
@@ -116,6 +120,17 @@ func createCtor(c *sqlite.Conn, _, schema, vtabName string, args []string) (sqli
 		quote(t.schema), quote(t.storage+"_phon"), quote(t.storage)), nil); err != nil {
 		return nil, fmt.Errorf("spellfix1: create index: %w", err)
 	}
+	// UNIQUE on word makes the vocabulary a set: Insert uses INSERT OR
+	// IGNORE so re-adding a word is a no-op rather than a silent duplicate
+	// (which would inflate COUNT(*) and skew ranking). Added only here in
+	// xCreate — existing tables reopened via connectCtor keep their schema,
+	// since adding the index to one that already holds duplicates would
+	// fail.
+	if _, err := c.ExecContext(ctx, fmt.Sprintf(
+		`CREATE UNIQUE INDEX IF NOT EXISTS %s.%s ON %s(word)`,
+		quote(t.schema), quote(t.storage+"_word"), quote(t.storage)), nil); err != nil {
+		return nil, fmt.Errorf("spellfix1: create word index: %w", err)
+	}
 	return t, nil
 }
 
@@ -130,6 +145,13 @@ func connectCtor(c *sqlite.Conn, _, schema, vtabName string, args []string) (sql
 	return t, nil
 }
 
+// storageTable returns the name of the shadow storage table backing a
+// spellfix1 vtab named vtabName. Defined once so the vtab implementation
+// and the typed Vocab.Size (which counts it directly, since the vtab
+// itself rejects a bare SELECT without WHERE word MATCH ?) can't drift on
+// the suffix.
+func storageTable(vtabName string) string { return vtabName + "_storage" }
+
 func newTable(c *sqlite.Conn, schema, vtabName string) *table {
 	if schema == "" {
 		schema = "main"
@@ -137,7 +159,7 @@ func newTable(c *sqlite.Conn, schema, vtabName string) *table {
 	return &table{
 		conn:    c,
 		schema:  schema,
-		storage: vtabName + "_storage",
+		storage: storageTable(vtabName),
 	}
 }
 
@@ -239,7 +261,7 @@ func (t *table) Insert(cols []driver.Value, _ *int64) error {
 	}
 	ph := soundex(word)
 	_, err := t.conn.ExecContext(context.Background(), fmt.Sprintf(
-		`INSERT INTO %s (word, rank, phonetic) VALUES (?, ?, ?)`, t.qualified()),
+		`INSERT OR IGNORE INTO %s (word, rank, phonetic) VALUES (?, ?, ?)`, t.qualified()),
 		sqlid.ToNamedValues([]driver.Value{word, rank, ph}))
 	if err != nil {
 		return fmt.Errorf("spellfix1: insert: %w", err)
