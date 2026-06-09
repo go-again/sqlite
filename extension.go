@@ -63,9 +63,19 @@ func (c *conn) loadExtension(libPath, entry string) error {
 		defer libc.Xfree(c.tls, cEntry)
 	}
 
-	var pErrMsg uintptr
-	rc := sqlite3.Xsqlite3_load_extension(c.tls, c.db, cLib, cEntry, uintptr(unsafe.Pointer(&pErrMsg)))
+	// The output error-message slot must live in C memory, not on the Go
+	// stack — a Go stack address passed as uintptr is untracked and a stack
+	// move would leave sqlite3_load_extension writing through a stale
+	// pointer (same class of bug as conn.prepare's ppStmt, fixed in OpenBlob).
+	ppErrMsg, err := c.malloc(int(ptrSize))
+	if err != nil {
+		return err
+	}
+	defer c.free(ppErrMsg)
+
+	rc := sqlite3.Xsqlite3_load_extension(c.tls, c.db, cLib, cEntry, ppErrMsg)
 	if rc != sqlite3.SQLITE_OK {
+		pErrMsg := *(*uintptr)(unsafe.Pointer(ppErrMsg))
 		msg := ""
 		if pErrMsg != 0 {
 			msg = libc.GoString(pErrMsg)

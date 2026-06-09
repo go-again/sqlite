@@ -68,13 +68,26 @@ func (c *Conn) OpenBlob(schema, table, column string, rowid int64, write bool) (
 		flag = 1
 	}
 
-	var pBlob uintptr
+	// The output blob-handle slot must live in C-managed memory, not on the
+	// Go stack: sqlite3_blob_open writes *ppBlob through the pointer, and a
+	// Go stack address passed as uintptr is not tracked by the runtime, so a
+	// stack move (likely when this runs reentrantly from inside a UDF/vtab
+	// step, deep in the call graph) would leave the write targeting stale
+	// memory and our handle reading as 0. Allocate the slot via c.malloc —
+	// the same idiom conn.prepare uses for ppStmt.
+	ppBlob, err := c.malloc(int(ptrSize))
+	if err != nil {
+		return nil, err
+	}
+	defer c.free(ppBlob)
+
 	rc := sqlite3.Xsqlite3_blob_open(
 		c.tls, c.db,
 		zSchema, zTable, zColumn,
 		rowid, flag,
-		uintptr(unsafe.Pointer(&pBlob)),
+		ppBlob,
 	)
+	pBlob := *(*uintptr)(unsafe.Pointer(ppBlob))
 	if rc != sqlite3.SQLITE_OK {
 		// Per the SQLite docs, sqlite3_blob_open may leave *ppBlob set even
 		// on failure; close defensively before surfacing the error.

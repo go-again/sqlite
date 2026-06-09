@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"testing"
 )
@@ -118,5 +119,49 @@ func TestBLOB_EmptyBLOB(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("empty-BLOB round-trip got %v (len=%d), want zero-length", got, len(got))
+	}
+}
+
+// TestBLOB_ReentrantOpenFromUDF pins the fix for a stack-move bug in
+// OpenBlob. The output blob-handle slot for sqlite3_blob_open used to be the
+// address of a Go stack variable passed as a uintptr; the runtime does not
+// track such a pointer, so when OpenBlob ran reentrantly from inside a UDF —
+// deep in the sqlite3_step call graph, where a Go stack move is likely — the
+// C write could land on stale memory, leaving the handle 0 and Size() == 0.
+// A WriteAt would then fail "write past end of blob". The modernc bump that
+// shipped SQLite 3.53.2 changed the reentrant call depth enough to surface
+// it (first seen via ext/blobio); this pins it at the root where OpenBlob
+// lives. The fix allocates the slot in C memory via conn.malloc.
+func TestBLOB_ReentrantOpenFromUDF(t *testing.T) {
+	_, sc, c := withSQLite3Conn(t, ":memory:")
+	ctx := context.Background()
+
+	// blobsize opens a write handle on the host conn and returns its size —
+	// the reentrant path: OpenBlob is called while the SELECT that invokes
+	// the UDF is being stepped.
+	if err := c.RegisterFunc("blobsize", func(rowid int64) (int64, error) {
+		b, err := c.OpenBlob("main", "blobs", "b", rowid, true)
+		if err != nil {
+			return 0, err
+		}
+		defer func() { _ = b.Close() }()
+		return b.Size(), nil
+	}, false); err != nil {
+		t.Fatalf("RegisterFunc blobsize: %v", err)
+	}
+
+	if _, err := sc.ExecContext(ctx, `CREATE TABLE blobs(b BLOB)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sc.ExecContext(ctx, `INSERT INTO blobs(b) VALUES (zeroblob(?))`, 16); err != nil {
+		t.Fatal(err)
+	}
+
+	var size int64
+	if err := sc.QueryRowContext(ctx, `SELECT blobsize(1)`).Scan(&size); err != nil {
+		t.Fatalf("blobsize: %v", err)
+	}
+	if size != 16 {
+		t.Errorf("reentrant OpenBlob Size() = %d, want 16 (stack-move regression)", size)
 	}
 }
