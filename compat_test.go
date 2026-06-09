@@ -89,6 +89,41 @@ func TestRegisterFunc_Scalar(t *testing.T) {
 	}
 }
 
+// TestRegisterFunc_EmbeddedNUL pins that a TEXT argument carrying an embedded
+// NUL byte reaches the Go function intact, and that a string result with an
+// embedded NUL round-trips. functionArgs used to read text args via
+// libc.GoString, which truncated at the first NUL ("foo\x00bar" → "foo"); the
+// fix reads the explicit byte length after calling the text accessor.
+func TestRegisterFunc_EmbeddedNUL(t *testing.T) {
+	_, sc, c := withSQLite3Conn(t, ":memory:")
+	ctx := context.Background()
+
+	if err := c.RegisterFunc("arglen", func(s string) int64 { return int64(len(s)) }, true); err != nil {
+		t.Fatalf("RegisterFunc arglen: %v", err)
+	}
+	if err := c.RegisterFunc("echo", func(s string) string { return s }, true); err != nil {
+		t.Fatalf("RegisterFunc echo: %v", err)
+	}
+
+	const text = "foo\x00bar" // 7 bytes, embedded NUL in the middle
+
+	var n int64
+	if err := sc.QueryRowContext(ctx, "SELECT arglen(?)", text).Scan(&n); err != nil {
+		t.Fatalf("arglen: %v", err)
+	}
+	if n != int64(len(text)) {
+		t.Errorf("arglen = %d, want %d (TEXT arg truncated at embedded NUL)", n, len(text))
+	}
+
+	var got string
+	if err := sc.QueryRowContext(ctx, "SELECT echo(?)", text).Scan(&got); err != nil {
+		t.Fatalf("echo: %v", err)
+	}
+	if got != text {
+		t.Errorf("echo round-trip = %q, want %q", got, text)
+	}
+}
+
 // TestRegisterFunc_Variadic verifies that variadic Go functions work as SQLite
 // user functions accepting any number of args.
 func TestRegisterFunc_Variadic(t *testing.T) {

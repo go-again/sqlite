@@ -74,6 +74,7 @@ blob.go                 *Blob + (*Conn).OpenBlob — incremental BLOB I/O
 extension.go            LoadExtension / EnableLoadExtension
 limits.go               GetLimit / SetLimit
 hooks.go                RegisterUpdateHook / RegisterAuthorizer / SetTrace (our additions)
+rtree.go                (*Conn).RegisterRTreeGeometry / RegisterRTreeQuery — R-Tree custom geometry/query callbacks (our additions)
 pre_update_hook.go      RegisterPreUpdateHook / Commit / Rollback (modernc-derived)
 fcntl.go                file-control helpers (incl. (*Conn).EnableChecksums)
 vtab.go                 virtual-table trampolines
@@ -395,6 +396,7 @@ let `go mod tidy` resolve the transitive set.
 | Where does encryption-at-rest live? | `vfs/crypto/`, see also `vfs/crypto/doc.go` for the on-disk format + threat model |
 | Where does corruption detection live? | `vfs/cksm/`, see `vfs/cksm/doc.go` for the trailer format. `(*Conn).EnableChecksums(schema)` in `fcntl.go` is the one-call activation recipe. |
 | How does `(*Conn).OpenBlob` work? | `blob.go::OpenBlob` + `*Blob` (io.ReaderAt / WriterAt over `sqlite3_blob_*`) |
+| How do I register a custom R-Tree geometry / query callback? | `rtree.go::(*Conn).RegisterRTreeGeometry` / `RegisterRTreeQuery` (wrap `sqlite3_rtree_geometry_callback` / `query_callback`; static trampolines + id registry, same shape as the scalar UDFs). `ext/rtree` ships a ready-made `circle` geometry on top. The rtree/geopoly vtabs themselves are built into the lib — no registration needed. |
 | Where are stmt introspection helpers (ColumnCount/Name/DeclType, BindCount/BindName)? | `stmt.go::ColumnCount` (added for `ext/statement` + `ext/pivot` to discover output/bind shape from a prepared stmt) |
 | How do I set reserved_bytes from Go? | `fcntl.go::FileControlReserveBytes` (wraps `SQLITE_FCNTL_RESERVE_BYTES`) |
 | How do vtab Go-side loops honor sqlite3_interrupt mid-iteration? | `(*Conn).IsInterrupted()` in `conn.go` polls the SQLite interrupt flag. Used by `ext/closure`, `ext/spellfix1`, `ext/pivot` between BFS / scan iterations so a parent `QueryContext` cancel is observed without waiting for the next SQLite call boundary. |

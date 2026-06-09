@@ -165,8 +165,9 @@ func (d *SQLitePreUpdateData) value(ppValue uintptr, i int, new bool) (any, erro
 	case sqlite3.SQLITE_FLOAT:
 		src = float64(sqlite3.Xsqlite3_value_double(d.tls, ptrValue))
 	case sqlite3.SQLITE_BLOB:
-		size := sqlite3.Xsqlite3_value_bytes(d.tls, ptrValue)
+		// Content accessor before value_bytes (documented-safe order).
 		blobPtr := sqlite3.Xsqlite3_value_blob(d.tls, ptrValue)
+		size := sqlite3.Xsqlite3_value_bytes(d.tls, ptrValue)
 
 		var v []byte
 		if size != 0 {
@@ -175,7 +176,17 @@ func (d *SQLitePreUpdateData) value(ppValue uintptr, i int, new bool) (any, erro
 		}
 		src = v
 	case sqlite3.SQLITE_TEXT:
-		src = libc.GoString(sqlite3.Xsqlite3_value_text(d.tls, ptrValue))
+		// Length-explicit read (text accessor first) so embedded NUL bytes
+		// survive; libc.GoString would truncate at the first NUL.
+		textPtr := sqlite3.Xsqlite3_value_text(d.tls, ptrValue)
+		n := sqlite3.Xsqlite3_value_bytes(d.tls, ptrValue)
+		if n == 0 {
+			src = ""
+		} else {
+			buf := make([]byte, n)
+			copy(buf, (*libc.RawMem)(unsafe.Pointer(textPtr))[:n:n])
+			src = string(buf)
+		}
 	case sqlite3.SQLITE_NULL:
 		src = nil
 	}

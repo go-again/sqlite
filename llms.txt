@@ -34,6 +34,7 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [fusion/doc.go](fusion/doc.go): rank-fusion helpers — combine vec.KNN and fts.Search results via Reciprocal Rank Fusion (Cormack 2009).
 - [ext/README.md](ext/README.md): loadable Go extensions umbrella — opt-in SQL scalar UDFs, table-valued functions, and vtab-based readers. Each sub-package independent; pick by need. Several are Go-native ports of ncruces/go-sqlite3 extensions. See [docs/coverage-ext.md](docs/coverage-ext.md) for the full matrix.
 - [ext/spellfix1/spellfix1.go](ext/spellfix1/spellfix1.go): fuzzy-text vtab — Soundex prefilter + Damerau-Levenshtein edit-distance ranking with persistent vocabulary shadow table. Go-native re-implementation of SQLite's spellfix1 (same SQL surface, simpler internals).
+- [ext/rtree/rtree.go](ext/rtree/rtree.go): R-Tree spatial index — typed `rtree.Table` (Create / Insert / InsertPoint / Search bounding-box / SearchCircle / Delete / Drop) over the built-in `rtree`/`geopoly` vtabs, plus a ready-made `circle(cx, cy, r)` geometry for `WHERE id MATCH circle(…)`. Built on root `(*Conn).RegisterRTreeGeometry` / `RegisterRTreeQuery`, which wrap `sqlite3_rtree_geometry_callback` / `query_callback` for arbitrary Go geometry/query callbacks.
 
 ## Examples (runnable)
 
@@ -72,6 +73,7 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [examples/ext-pivot](examples/ext-pivot/main.go): three-SELECT cross-tab (rows × columns × cell aggregate) over a small sales table.
 - [examples/ext-closure](examples/ext-closure/main.go): parent-child graph walks via the typed `closure.Graph` API — descendants, depth bounds (`WithMaxDepth`), and ancestor walks via `Reversed`.
 - [examples/ext-lines](examples/ext-lines/main.go): read a log file as one-row-per-line via the typed `lines.Table` API (Create / Columns / Rows / Name), then filter ERROR lines and aggregate by severity with plain SQL over the vtab.
+- [examples/ext-rtree](examples/ext-rtree/main.go): spatial index via the typed `rtree.Table` API — Create a 2D R-Tree, InsertPoint several venues, then a bounding-box Search and a SearchCircle radius query (circle geometry wired by blank-importing `ext/rtree/auto`).
 - [examples/vfs-cksm](examples/vfs-cksm/main.go): detect simulated bit-rot via the checksum VFS — corrupt one byte, observe `SQLITE_IOERR_DATA` on read.
 - [examples/vfs-mvcc](examples/vfs-mvcc/main.go): SHARED (`file:/name`) vs PRIVATE (`file:name`) in-memory MVCC databases; reader / writer concurrency demo.
 - [examples/vfs-memdb](examples/vfs-memdb/main.go): same shared / private shape as vfs-mvcc but on the simpler `vfs/memdb` VFS — writes are visible immediately, no snapshot isolation.

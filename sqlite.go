@@ -12,6 +12,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"math"
 	"math/bits"
 	"net/url"
 	"runtime"
@@ -647,7 +648,18 @@ func functionArgs(tls *libc.TLS, argc int32, argv uintptr) *[]driver.Value {
 
 		switch valType := sqlite3.Xsqlite3_value_type(tls, valPtr); valType {
 		case sqlite3.SQLITE_TEXT:
-			args[i] = libc.GoString(sqlite3.Xsqlite3_value_text(tls, valPtr))
+			// Call the text accessor before value_bytes (the documented-safe
+			// order), then copy the explicit byte length so embedded NUL bytes
+			// survive — libc.GoString would truncate "foo\x00bar" to "foo".
+			textPtr := sqlite3.Xsqlite3_value_text(tls, valPtr)
+			n := sqlite3.Xsqlite3_value_bytes(tls, valPtr)
+			if n == 0 {
+				args[i] = ""
+			} else {
+				buf := make([]byte, n)
+				copy(buf, (*libc.RawMem)(unsafe.Pointer(textPtr))[:n:n])
+				args[i] = string(buf)
+			}
 		case sqlite3.SQLITE_INTEGER:
 			args[i] = sqlite3.Xsqlite3_value_int64(tls, valPtr)
 		case sqlite3.SQLITE_FLOAT:
@@ -662,8 +674,9 @@ func functionArgs(tls *libc.TLS, argc int32, argv uintptr) *[]driver.Value {
 				args[i] = v
 			}
 		case sqlite3.SQLITE_BLOB:
-			size := sqlite3.Xsqlite3_value_bytes(tls, valPtr)
+			// Content accessor before value_bytes (documented-safe order).
 			blobPtr := sqlite3.Xsqlite3_value_blob(tls, valPtr)
+			size := sqlite3.Xsqlite3_value_bytes(tls, valPtr)
 			v := make([]byte, size)
 			if size != 0 {
 				copy(v, (*libc.RawMem)(unsafe.Pointer(blobPtr))[:size:size])
@@ -708,6 +721,12 @@ func functionReturnValue(tls *libc.TLS, ctx uintptr, res driver.Value) error {
 		}
 		sqlite3.Xsqlite3_result_int64(tls, ctx, v)
 	case string:
+		// A result longer than int32 max wraps negative when cast for
+		// sqlite3_result_text; report it as too-big rather than corrupt.
+		if len(resTyped) > math.MaxInt32 {
+			sqlite3.Xsqlite3_result_error_toobig(tls, ctx)
+			return nil
+		}
 		size := int32(len(resTyped))
 		cstr, err := libc.CString(resTyped)
 		if err != nil {
@@ -716,6 +735,10 @@ func functionReturnValue(tls *libc.TLS, ctx uintptr, res driver.Value) error {
 		defer libc.Xfree(tls, cstr)
 		sqlite3.Xsqlite3_result_text(tls, ctx, cstr, size, sqlite3.SQLITE_TRANSIENT)
 	case []byte:
+		if len(resTyped) > math.MaxInt32 {
+			sqlite3.Xsqlite3_result_error_toobig(tls, ctx)
+			return nil
+		}
 		size := int32(len(resTyped))
 		if size == 0 {
 			sqlite3.Xsqlite3_result_zeroblob(tls, ctx, 0)

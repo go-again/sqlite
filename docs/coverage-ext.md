@@ -21,6 +21,7 @@ Status legend:
 | fileio | ~330 | [ncruces/ext/fileio](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/fileio) | ✓ landed | `ext/fileio` + `ext/fileio/auto` | `ext/fileio/fileio_test.go` |
 | lines | ~370 | [ncruces/ext/lines](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/lines) | ✓ landed (+ typed `Table` API) | `ext/lines` + `ext/lines/auto` | `ext/lines/lines_test.go`, `table_test.go` |
 | pivot | ~340 | [ncruces/ext/pivot](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/pivot) | ✓ landed | `ext/pivot` + `ext/pivot/auto` | `ext/pivot/pivot_test.go` |
+| rtree | ~280 | [SQLite R-Tree](https://sqlite.org/rtree.html) | ✓ landed (+ typed `Table` API) | `ext/rtree` + `ext/rtree/auto` (+ root `(*Conn).RegisterRTreeGeometry` / `RegisterRTreeQuery`) | `ext/rtree/rtree_test.go`, `table_test.go`, root `rtree_test.go` |
 | statement | ~240 | [ncruces/ext/statement](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/statement) | ✓ landed | `ext/statement` + `ext/statement/auto` | `ext/statement/statement_test.go` |
 
 `array` supports two binding styles: transparent via `sqlite.Pointer(slice)` (preferred — SQLite's destructor releases on stmt finalize, no caller cleanup needed) and explicit `array.Bind(c, slice) → token, release()` for long-lived bindings or int64-sentinel use cases.
@@ -40,6 +41,8 @@ Status legend:
 `csv` adds a typed `csv.Table` handle (`Create` / `Open` / `Columns` / `Rows` / `Name` / `Drop`, with `WithFilename` / `WithData` / `WithHeader` / `WithComma` / `WithComment` / `WithColumns` / `WithIfNotExists`) that hides the `USING csv(…)` argument string and its single-quote escaping the way `sqlite.Open` hides a DSN. Rows are still queried as SQL — joining and filtering a CSV is the vtab's whole point — so the handle covers create/introspect/drop, not a query DSL. It requires the module pool-wide (blank-import `ext/csv/auto`, or `RegisterFS` from a `ConnectHook` for sandboxed file access).
 
 `lines` mirrors the same typed `lines.Table` (`Create` / `Open` / `Columns` / `Rows` / `Name` / `Drop`, with `WithFilename` / `WithData` / `WithIfNotExists`) over the one-row-per-line vtab — `Create` hides the `USING lines(…)` argument string and its quoting, `Rows` returns `lineno, line` in order. Same pool-wide requirement (`ext/lines/auto`, or `RegisterFS` for a sandbox).
+
+`rtree` is structured differently from the other extensions because the `rtree` and `geopoly` virtual tables are compiled into the underlying library — `CREATE VIRTUAL TABLE … USING rtree(…)` works with no registration. What needed adding is **custom geometry/query callbacks** for the R-Tree MATCH operator, which wrap `sqlite3_rtree_geometry_callback` / `sqlite3_rtree_query_callback`. Those need the connection's unexported `tls`/`db` handles, so the primitive lives in the root package as `(*Conn).RegisterRTreeGeometry` (single bounding-box overlap test) and `(*Conn).RegisterRTreeQuery` (the richer second-generation form that classifies each node as not/partly/fully within and assigns a visit-order score) — dispatched through static trampolines + an id registry, the same shape as the scalar-UDF machinery in `sqlite.go`. The `ext/rtree` package is then a convenience layer over that primitive. `Register(c)` installs a ready-made `circle(cx, cy, r)` geometry (`WHERE id MATCH circle(…)`), and `ext/rtree/auto` wires it pool-wide. A typed `rtree.Table` handle (`Create` / `Open` / `Insert` / `InsertPoint` / `Delete` / `Search` bounding-box / `SearchCircle` / `Name` / `Dimensions` / `Drop`, with `WithDimensions` / `WithInt32Coords` / `WithIfNotExists`) hides the `CREATE VIRTUAL TABLE … USING rtree(…)` column list and the overlap-predicate SQL, mirroring `vec.Table` / `csv.Table`. Because the rtree module is built in, the Table needs no pool-wide registration to create, insert, or run a bounding-box `Search` — only `SearchCircle` (the geometry) does. Unlike the ncruces `ext/rtree` (which loads a precompiled WASM module and so has nothing to port to a transpiled-C build), this is a native binding to the built-in C R-Tree.
 
 ## Scalar UDFs (pure Go)
 
@@ -101,4 +104,4 @@ The explicit form is the canonical entry; the blank-import `auto` sub-package is
 5. Add a one-line entry to [`llms.txt`](../llms.txt) under "Per-package overviews" so consumer agents find it.
 6. Optional: drop a runnable example under `examples/ext-<name>/`.
 
-Last reviewed against ncruces/go-sqlite3 main on 2026-05-29.
+Last reviewed against ncruces/go-sqlite3 main on 2026-06-12.
