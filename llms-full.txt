@@ -30,8 +30,12 @@ SQLite engine, with a hand-written wrapper that adds:
   handler, `InvertChangeset` / `ConcatChangesets`) — no other pure-Go
   driver exposes changesets — plus introspection/telemetry
   (`TableColumnMetadata`, `Status` for sqlite3_db_status, `TxnState`,
-  `(*Stmt).Readonly` / `Status`) and R-Tree custom geometry/query
-  callbacks (`RegisterRTreeGeometry` / `RegisterRTreeQuery`).
+  `(*Stmt).Readonly` / `Status`), WAL control (`WALCheckpoint` with
+  returned frame counts, `WALAutoCheckpoint`, `RegisterWALHook`,
+  `GetSnapshot` / `OpenSnapshot`), `SetProgressHandler`, `SetDBConfig`
+  / `QueryDBConfig` (DEFENSIVE / TRUSTED_SCHEMA security flags), and
+  R-Tree custom geometry/query callbacks (`RegisterRTreeGeometry` /
+  `RegisterRTreeQuery`).
 - Typed Go APIs for two extensions: **vec** (sqlite-vec, vector search)
   and **fts** (FTS5, full-text search). Both ship gorm bridges that wire
   the sidecar tables to gorm models via struct tags.
@@ -364,6 +368,7 @@ The full lineup:
 - **`lines`** — line-by-line text-file vtab. `CREATE VIRTUAL TABLE log USING lines(filename='app.log')`, then `SELECT lineno, line FROM log WHERE line LIKE 'ERROR%'`. `lines.Register(c)` opens with `os.Open`; `lines.RegisterFS(c, fsys)` sandboxes.
 - **`pivot`** — cross-tab vtab driven by three SELECT statements: row keys, column keys (value + display name), and a per-cell aggregate. `CREATE VIRTUAL TABLE p USING pivot('SELECT DISTINCT region FROM sales', 'SELECT product, product FROM (SELECT DISTINCT product FROM sales)', 'SELECT SUM(units) FROM sales WHERE region=? AND product=?')`. The cell stmt is cached on the cursor, so a wide pivot doesn't re-prepare per cell.
 - **`rtree`** — R-Tree spatial index. The `rtree` / `geopoly` vtabs are compiled in, so `CREATE VIRTUAL TABLE demo USING rtree(id, minX, maxX, minY, maxY)` works unregistered. The typed `rtree.Table` hides that DDL and the overlap-predicate SQL: `Create(ctx, db, "venues", rtree.WithDimensions(2))`, `InsertPoint(ctx, id, x, y)` / `Insert(ctx, id, min0, max0, …)`, `Search(ctx, box…)` (bounding-box overlap, index-driven), `SearchCircle(ctx, cx, cy, r)`, `Delete`, `Drop`. Because the module is built in, only `SearchCircle` (the geometry) needs registration — `ext/rtree.Register(c)` adds the `circle(cx, cy, r)` geometry, or blank-import `ext/rtree/auto`. For arbitrary geometry call root `(*Conn).RegisterRTreeGeometry` (a Go bounding-box overlap test) or `(*Conn).RegisterRTreeQuery` (the second-generation query callback: classify each node not/partly/fully-within and assign a visit-order score). Unlike the ncruces `ext/rtree`, which loads a WASM module, this binds the transpiled C `sqlite3_rtree_geometry_callback` / `query_callback`.
+- **`series`** — `generate_series(start, stop[, step])` table-valued function: `SELECT value FROM generate_series(1, 10, 2)`. start and stop required (the built-in treats stop as optional/unbounded; this port requires it to avoid a runaway scan), step defaults to 1 and may be negative for a descending series.
 - **`regexp/gorm`** — `regexpgorm.WhereRegex(column, pattern)` returns a `clause.Expression` that combines GLOB prefix optimization with REGEXP. For anchored patterns this lets SQLite's planner do a range scan on the GLOB clause and treat the regex as a residual filter, delivering the documented LIKE-optimization win.
 - **`regexp`** — `regexp_like`, `regexp_count`, `regexp_instr`, `regexp_substr`, `regexp_replace`, and the binary `REGEXP` operator over Go's `regexp` (RE2 syntax).
 - **`spellfix1`** — fuzzy-text vtab. `CREATE VIRTUAL TABLE vocab USING spellfix1`, `INSERT INTO vocab(word [, rank]) VALUES (?, ?)`, then `SELECT word, distance FROM vocab WHERE word MATCH ?` to retrieve the closest matches by Damerau-Levenshtein edit distance, grouped phonetically via Soundex. Persistent vocabulary in a `<vtab>_storage` shadow table; survives `db.Close()` / reconnect. Optional `WHERE scope = N` caps edit distance; `LIMIT N` caps result count. Go-native re-implementation of SQLite's spellfix1 (same SQL surface, simpler algorithm).
@@ -372,6 +377,8 @@ The full lineup:
 - **`hash`** — `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `sha3`, `blake2s`, `blake2b`, `md4`, `ripemd160`. Each function registers only if the underlying `crypto.Hash` is `Available()`. Size variants (`sha256(x, 224)`, `sha3(x, 512)`, etc.) match nalgeon/sqlean.
 - **`ipaddr`** — `ipcontains`, `ipoverlaps`, `ipfamily`, `iphost`, `ipmasklen`, `ipnetwork` over `net/netip`. Fixes the upstream `ipoverlaps` self-referential bug.
 - **`zorder`** — `zorder(d1, …, dN)` / `unzorder(z, N, i)` Morton encoding for a tunable 2–24 dimensions.
+- **`encode`** — `encode(data, format)` / `decode(text, format)` for base64 / base64url / base32 / base32hex / base16 (hex) / ascii85 (base85) / url. The codec half of sqlean `crypto`; the digest half is `ext/hash`.
+- **`text`** — rune-aware string scalars SQLite lacks: `text_reverse`, `text_repeat(s, n)`, `text_lpad(s, n[, pad])`, `text_rpad`, `text_split(s, sep, n)` (1-based nth field). Casing/normalization stay in `ext/unicode`.
 - **`stats`** — variance / stddev / skewness / kurtosis / covariance / correlation / regr_* / percentile / median / mode / every / some, all working as both aggregates and window functions (streaming Welford + Kahan + Terriberry). Plus `cbrt` and `cot` scalars.
 - **`unicode`** — Unicode-aware `upper` / `lower` / `initcap` (with optional locale tag), `casefold`, `normalize` (NFC/NFD/NFKC/NFKD), `unaccent`. Preset collations `NOCASE_UNICODE` and `NOCASE_ACCENT` register automatically; `unicode.RegisterLocaleCollation(c, "sv", "SV")` installs language-tagged collations. The Unicode-aware `LIKE` override is gated on `unicode.RegisterLike = true` — default off, because overriding `LIKE` disables SQLite's LIKE optimization.
 

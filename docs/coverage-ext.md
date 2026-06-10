@@ -22,6 +22,7 @@ Status legend:
 | lines | ~370 | [ncruces/ext/lines](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/lines) | ✓ landed (+ typed `Table` API) | `ext/lines` + `ext/lines/auto` | `ext/lines/lines_test.go`, `table_test.go` |
 | pivot | ~340 | [ncruces/ext/pivot](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/pivot) | ✓ landed | `ext/pivot` + `ext/pivot/auto` | `ext/pivot/pivot_test.go` |
 | rtree | ~280 | [SQLite R-Tree](https://sqlite.org/rtree.html) | ✓ landed (+ typed `Table` API) | `ext/rtree` + `ext/rtree/auto` (+ root `(*Conn).RegisterRTreeGeometry` / `RegisterRTreeQuery`) | `ext/rtree/rtree_test.go`, `table_test.go`, root `rtree_test.go` |
+| series | ~150 | [SQLite series.c](https://sqlite.org/series.html) | ✓ landed | `ext/series` + `ext/series/auto` | `ext/series/series_test.go` |
 | statement | ~240 | [ncruces/ext/statement](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/statement) | ✓ landed | `ext/statement` + `ext/statement/auto` | `ext/statement/statement_test.go` |
 
 `array` supports two binding styles: transparent via `sqlite.Pointer(slice)` (preferred — SQLite's destructor releases on stmt finalize, no caller cleanup needed) and explicit `array.Bind(c, slice) → token, release()` for long-lived bindings or int64-sentinel use cases.
@@ -49,6 +50,8 @@ Status legend:
 | ext | LoC (est) | Upstream | Status | Entry | Test pin |
 |---|---|---|---|---|---|
 | regexp | ~310 | [ncruces/ext/regexp](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/regexp) | ✓ landed | `ext/regexp` + `ext/regexp/auto` | `ext/regexp/regexp_test.go` |
+| encode | ~120 | [sqlean crypto](https://github.com/nalgeon/sqlean) (codec half) | ✓ landed | `ext/encode` + `ext/encode/auto` | `ext/encode/encode_test.go` |
+| text | ~110 | [sqlean text](https://github.com/nalgeon/sqlean) | ✓ landed | `ext/text` + `ext/text/auto` | `ext/text/text_test.go` |
 | uuid | ~330 | [ncruces/ext/uuid](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/uuid) | ⚠ partial | `ext/uuid` + `ext/uuid/auto` | `ext/uuid/uuid_test.go` |
 | hash | ~190 | [ncruces/ext/hash](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/hash) | ✓ landed | `ext/hash` + `ext/hash/auto` | `ext/hash/hash_test.go` |
 | ipaddr | ~150 | [ncruces/ext/ipaddr](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/ipaddr) | ✓ landed | `ext/ipaddr` + `ext/ipaddr/auto` | `ext/ipaddr/ipaddr_test.go` |

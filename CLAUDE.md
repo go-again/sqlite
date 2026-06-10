@@ -78,6 +78,9 @@ rtree.go                (*Conn).RegisterRTreeGeometry / RegisterRTreeQuery — R
 session.go              SESSION extension — (*Conn).CreateSession/ApplyChangeset/Invert/Concat + *Session changeset/patchset (our additions)
 pre_update_hook.go      RegisterPreUpdateHook / Commit / Rollback (modernc-derived)
 fcntl.go                file-control helpers (incl. (*Conn).EnableChecksums)
+wal.go                  WAL control — (*Conn).WALCheckpoint / WALAutoCheckpoint / RegisterWALHook (our additions)
+snapshot.go             WAL snapshot API — (*Conn).GetSnapshot / OpenSnapshot / SnapshotRecover + *Snapshot (our additions)
+control.go              (*Conn).SetProgressHandler + SetDBConfig / QueryDBConfig (security flags via db_config) (our additions)
 vtab.go                 virtual-table trampolines
 module.go               (*Conn).CreateModule / CreateModuleSplit
 pointer.go              sqlite.Pointer for binding Go values into SQL params
@@ -103,6 +106,7 @@ doc.go                  package doc (pkg.go.dev landing)
 - `vec/` — sqlite-vec typed `Table` API; `vec/gorm/` is the tag-driven sidecar plugin.
 - `fts/` — FTS5 typed `Index[K, V]`; `fts/gorm/` is the tag-driven sidecar plugin.
 - `fusion/` — RRF / RRF2 rank-fusion helpers (pure Go, no SQLite dep).
+- `sqlitex/` — ergonomic helpers over `database/sql` (pure Go, no lib coupling): `Save` (deferred savepoint), `Transaction` / `ImmediateTransaction`, `ExecScript`, `ResultInt/Text/Float/Bool`, and `Migrate` (embed.FS migration runner keyed on `PRAGMA user_version`). Named after the zombiezen/crawshaw `sqlitex` lineage.
 - `vfs/` — `vfs.New(fs.FS)` + `vfs.NewReader(io.ReaderAt, size)`; `vfs/crypto/` (encryption-at-rest), `vfs/cksm/` (page-checksum trailer), `vfs/mvcc/` (in-memory snapshot isolation), `vfs/memdb/` (plain in-memory).
 - `internal/` — shared helpers, this module only: `cabi/` (FuncPointer / AsFunc / Registry / PtrMap / UniqueName / CallX*), `sqlid/` (NamedArg / Unquote / QuoteIdent / ValidIdent / ToNamedValues / IsAlreadyExistsErr / AsString / AsInt64 / AsFloat), `gormbridge/` (shared reflect/gorm plumbing for vec/gorm + fts/gorm), `obs/` (slog level-dispatch for the Observable wrappers), `raceskip/` (build-tag-gated `Enabled` bool), `testhelp/` (`OpenPinned`, `RawConn`, `RegisterOn`, `WithConnectHook`).
 - `vfs/internal/memio/` — page-overlap copy shared by `vfs/memdb` and `vfs/mvcc`.
@@ -398,6 +402,7 @@ let `go mod tidy` resolve the transitive set.
 | Where does encryption-at-rest live? | `vfs/crypto/`, see also `vfs/crypto/doc.go` for the on-disk format + threat model |
 | Where does corruption detection live? | `vfs/cksm/`, see `vfs/cksm/doc.go` for the trailer format. `(*Conn).EnableChecksums(schema)` in `fcntl.go` is the one-call activation recipe. |
 | How does `(*Conn).OpenBlob` work? | `blob.go::OpenBlob` + `*Blob` (io.ReaderAt / WriterAt over `sqlite3_blob_*`) |
+| How do I control WAL / snapshots / progress / db_config from Go? | `wal.go` — `(*Conn).WALCheckpoint` (mode + returned frame counts the PRAGMA lacks), `WALAutoCheckpoint`, `RegisterWALHook`. `snapshot.go` — `GetSnapshot`/`OpenSnapshot`/`SnapshotRecover` + `*Snapshot` (WAL point-in-time reads). `control.go` — `SetProgressHandler` (periodic callback, return true to interrupt), `SetDBConfig`/`QueryDBConfig` (security flags DEFENSIVE/TRUSTED_SCHEMA/WRITABLE_SCHEMA, reachable only via `db_config`, built through a `libc.VaList`). |
 | How do I capture / apply changesets (SESSION extension)? | `session.go` — `(*Conn).CreateSession` → `*Session` (`Attach`/`Enable`/`Changeset`/`Patchset`/`Diff`/`Close`); `(*Conn).ApplyChangeset` (with `WithConflictHandler` / `WithTableFilter`), `InvertChangeset`, `ConcatChangesets`. Apply callbacks dispatch via static trampolines + `applyReg` id registry (rtree-style). `SQLITE_ENABLE_SESSION` is compiled into the lib; no other pure-Go driver exposes this. Example: `examples/session`. |
 | How do I register a custom R-Tree geometry / query callback? | `rtree.go::(*Conn).RegisterRTreeGeometry` / `RegisterRTreeQuery` (wrap `sqlite3_rtree_geometry_callback` / `query_callback`; static trampolines + id registry, same shape as the scalar UDFs). `ext/rtree` ships a ready-made `circle` geometry on top. The rtree/geopoly vtabs themselves are built into the lib — no registration needed. |
 | Where are stmt introspection helpers (ColumnCount/Name/DeclType, BindCount/BindName)? | `stmt.go::ColumnCount` (added for `ext/statement` + `ext/pivot` to discover output/bind shape from a prepared stmt) |

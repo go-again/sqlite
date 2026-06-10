@@ -136,7 +136,7 @@ func TestVocab_AddMany_OneTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("db.Conn: %v", err)
 	}
-	var commits int32
+	var commits atomic.Int32
 	if err := sc.Raw(func(dc any) error {
 		c, ok := dc.(*sqlite.Conn)
 		if !ok {
@@ -145,7 +145,7 @@ func TestVocab_AddMany_OneTransaction(t *testing.T) {
 		if err := spellfix1.Register(c); err != nil {
 			return err
 		}
-		c.RegisterCommitHook(func() int32 { atomic.AddInt32(&commits, 1); return 0 })
+		c.RegisterCommitHook(func() int32 { commits.Add(1); return 0 })
 		return nil
 	}); err != nil {
 		_ = sc.Close()
@@ -161,11 +161,11 @@ func TestVocab_AddMany_OneTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	baseline := atomic.LoadInt32(&commits) // CREATE VIRTUAL TABLE autocommits
+	baseline := commits.Load() // CREATE VIRTUAL TABLE autocommits
 	if err := v.AddMany(ctx, []string{"apple", "banana", "cherry", "date", "elderberry"}); err != nil {
 		t.Fatalf("AddMany: %v", err)
 	}
-	if got := atomic.LoadInt32(&commits) - baseline; got != 1 {
+	if got := commits.Load() - baseline; got != 1 {
 		t.Errorf("AddMany fired %d commits, want 1", got)
 	}
 }
