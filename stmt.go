@@ -616,3 +616,39 @@ func (s *stmt) BindName(i int) string {
 	}
 	return libc.GoString(p)
 }
+
+// Readonly reports whether the prepared statement makes no direct changes to
+// the database file — useful for routing reads vs writes. Equivalent to
+// sqlite3_stmt_readonly; a finalized statement is reported read-only.
+func (s *stmt) Readonly() bool {
+	if s.pstmt == 0 {
+		return true
+	}
+	return sqlite3.Xsqlite3_stmt_readonly(s.c.tls, s.pstmt) != 0
+}
+
+// StmtStatus selects a per-statement counter for [Stmt.Status].
+type StmtStatus int32
+
+// Per-prepared-statement counters (sqlite3_stmt_status).
+const (
+	StmtStatusFullscanStep StmtStatus = sqlite3.SQLITE_STMTSTATUS_FULLSCAN_STEP
+	StmtStatusSort         StmtStatus = sqlite3.SQLITE_STMTSTATUS_SORT
+	StmtStatusAutoindex    StmtStatus = sqlite3.SQLITE_STMTSTATUS_AUTOINDEX
+	StmtStatusVMStep       StmtStatus = sqlite3.SQLITE_STMTSTATUS_VM_STEP
+	StmtStatusReprepare    StmtStatus = sqlite3.SQLITE_STMTSTATUS_REPREPARE
+	StmtStatusRun          StmtStatus = sqlite3.SQLITE_STMTSTATUS_RUN
+	StmtStatusFilterMiss   StmtStatus = sqlite3.SQLITE_STMTSTATUS_FILTER_MISS
+	StmtStatusFilterHit    StmtStatus = sqlite3.SQLITE_STMTSTATUS_FILTER_HIT
+	StmtStatusMemUsed      StmtStatus = sqlite3.SQLITE_STMTSTATUS_MEMUSED
+)
+
+// Status returns a per-statement counter (full-scan steps, sorts, autoindex
+// rows, VM steps, …) from sqlite3_stmt_status. Pass reset=true to zero the
+// counter after reading. Returns 0 for a finalized statement.
+func (s *stmt) Status(op StmtStatus, reset bool) int {
+	if s.pstmt == 0 {
+		return 0
+	}
+	return int(sqlite3.Xsqlite3_stmt_status(s.c.tls, s.pstmt, int32(op), libc.Bool32(reset)))
+}

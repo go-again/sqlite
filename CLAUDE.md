@@ -75,6 +75,7 @@ extension.go            LoadExtension / EnableLoadExtension
 limits.go               GetLimit / SetLimit
 hooks.go                RegisterUpdateHook / RegisterAuthorizer / SetTrace (our additions)
 rtree.go                (*Conn).RegisterRTreeGeometry / RegisterRTreeQuery — R-Tree custom geometry/query callbacks (our additions)
+session.go              SESSION extension — (*Conn).CreateSession/ApplyChangeset/Invert/Concat + *Session changeset/patchset (our additions)
 pre_update_hook.go      RegisterPreUpdateHook / Commit / Rollback (modernc-derived)
 fcntl.go                file-control helpers (incl. (*Conn).EnableChecksums)
 vtab.go                 virtual-table trampolines
@@ -88,6 +89,7 @@ compat_sqlite3.go       type aliases (SQLiteDriver = Driver, …) + public Stmt/
 compat_register.go      reflective RegisterFunc / RegisterAggregator
 compat_convert.go       reflection-driven Go ↔ driver.Value conversion
 stmt_cache.go           per-conn prepared-stmt LRU + StmtCacheStats
+introspect.go           (*Conn).TableColumnMetadata / Status / TxnState + (*Stmt).Readonly / Status (our additions)
 internal_alloc.go       libc.CString helpers
 windows.go              Windows-specific helpers (build-tagged)
 config.go               sqlite.Config / Pragmas / Encryption / Cipher
@@ -396,11 +398,13 @@ let `go mod tidy` resolve the transitive set.
 | Where does encryption-at-rest live? | `vfs/crypto/`, see also `vfs/crypto/doc.go` for the on-disk format + threat model |
 | Where does corruption detection live? | `vfs/cksm/`, see `vfs/cksm/doc.go` for the trailer format. `(*Conn).EnableChecksums(schema)` in `fcntl.go` is the one-call activation recipe. |
 | How does `(*Conn).OpenBlob` work? | `blob.go::OpenBlob` + `*Blob` (io.ReaderAt / WriterAt over `sqlite3_blob_*`) |
+| How do I capture / apply changesets (SESSION extension)? | `session.go` — `(*Conn).CreateSession` → `*Session` (`Attach`/`Enable`/`Changeset`/`Patchset`/`Diff`/`Close`); `(*Conn).ApplyChangeset` (with `WithConflictHandler` / `WithTableFilter`), `InvertChangeset`, `ConcatChangesets`. Apply callbacks dispatch via static trampolines + `applyReg` id registry (rtree-style). `SQLITE_ENABLE_SESSION` is compiled into the lib; no other pure-Go driver exposes this. Example: `examples/session`. |
 | How do I register a custom R-Tree geometry / query callback? | `rtree.go::(*Conn).RegisterRTreeGeometry` / `RegisterRTreeQuery` (wrap `sqlite3_rtree_geometry_callback` / `query_callback`; static trampolines + id registry, same shape as the scalar UDFs). `ext/rtree` ships a ready-made `circle` geometry on top. The rtree/geopoly vtabs themselves are built into the lib — no registration needed. |
 | Where are stmt introspection helpers (ColumnCount/Name/DeclType, BindCount/BindName)? | `stmt.go::ColumnCount` (added for `ext/statement` + `ext/pivot` to discover output/bind shape from a prepared stmt) |
 | How do I set reserved_bytes from Go? | `fcntl.go::FileControlReserveBytes` (wraps `SQLITE_FCNTL_RESERVE_BYTES`) |
 | How do vtab Go-side loops honor sqlite3_interrupt mid-iteration? | `(*Conn).IsInterrupted()` in `conn.go` polls the SQLite interrupt flag. Used by `ext/closure`, `ext/spellfix1`, `ext/pivot` between BFS / scan iterations so a parent `QueryContext` cancel is observed without waiting for the next SQLite call boundary. |
 | How do I read prepared-statement cache telemetry? | `(*Conn).StmtCacheStats()` in `stmt_cache.go` returns `{Hits, Misses, Evictions int64}` (monotonic per connection). Operators tune `_stmt_cache_size` against the hit rate. |
+| How do I read column metadata / SQLite runtime stats / txn state from Go? | `introspect.go` — `(*Conn).TableColumnMetadata` (decltype/coll/notnull/pk/autoinc without a SELECT), `(*Conn).Status` (sqlite3_db_status cache/lookaside counters, distinct from the Go-side `StmtCacheStats`), `(*Conn).TxnState` (none/read/write). Per-statement: `(*Stmt).Readonly` + `(*Stmt).Status` (sqlite3_stmt_status VM-step/sort/fullscan counters) in `stmt.go`. |
 | How does cksm/crypto chaining work? | `vfs/crypto/crypto.go::Options.WrapVFS` + per-package `fileMap` (a `cabi.PtrMap[FS]` in each `vfs.go`) maps pFile → owning `*FS`; per-FS `ourIoMethods` + `wrappedSzOsFile`. Both layers store state at their own offset and forward via the captured wrapped methods. Each layer owns its own PtrMap so chained inner/outer instances don't collide. |
 | Where's the vtab xCreate / xConnect split? | `module.go::CreateModuleSplit` (two-callback form). `ext/bloom` and `ext/spellfix1` use it to distinguish first-time shadow-table creation from subsequent reopens. |
 | Where's the shared SQL-identifier toolkit? | `internal/sqlid/sqlid.go` — `NamedArg` / `Unquote` (used by `ext/closure`, `ext/pivot`, `ext/statement`), `QuoteIdent` / `QuoteIdentBacktick` / `ValidIdent` (re-exported by `vec` + `fts`), `ToNamedValues` (named-arg bridge in `ext/pivot`), `IsAlreadyExistsErr` (shared by `vec.Create` + `fts.New` idempotent paths). |

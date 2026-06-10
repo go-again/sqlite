@@ -79,6 +79,7 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [examples/vfs-memdb](examples/vfs-memdb/main.go): same shared / private shape as vfs-mvcc but on the simpler `vfs/memdb` VFS — writes are visible immediately, no snapshot isolation.
 - [examples/hooks](examples/hooks/main.go): install update / authorizer / commit / trace hooks on a pinned connection (MaxOpenConns(1) + db.Conn + sc.Raw idiom).
 - [examples/backup](examples/backup/main.go): `(*Conn).Backup` mattn-compat factory + top-level `sqlite.Serialize` / `sqlite.Deserialize` round-trip.
+- [examples/session](examples/session/main.go): SESSION extension — record changes on a primary database into a changeset (`(*Conn).CreateSession` → `*Session.Changeset`), replay onto a replica with `(*Conn).ApplyChangeset`, then undo via `InvertChangeset`. The offline-sync / replication primitive, pure Go.
 - [examples/ext-spellfix1](examples/ext-spellfix1/main.go): fuzzy spell-correction via the typed `spellfix1.Vocab` API (Create / AddMany / Correct / CorrectSQL), Soundex prefilter + Damerau-Levenshtein scoring.
 
 ## Feature coverage matrices

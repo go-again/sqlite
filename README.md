@@ -29,6 +29,8 @@ The driver itself — CGo-free, mattn-API + glebarez-gorm drop-in, registered un
 - **Loadable Go SQL extensions** under `ext/` — SQL scalars / aggregates / collations (`regexp`, `uuid`, `hash`, `ipaddr`, `zorder`, `stats`, `unicode`), virtual tables (`array`, `csv`, `lines`, `statement`, `closure`, `pivot`, `rtree`), specialised stores (`bloom`, `spellfix1`), I/O (`blobio`, `fileio`) — many also expose a typed Go handle (`csv.Table`, `lines.Table`, `closure.Graph`, `bloom.Filter`, `spellfix1.Vocab`, `rtree.Table`) mirroring `vec.Table` / `fts.Index` so callers skip hand-written DDL. Auto-register per conn or pool-wide via blank-import `/auto`; full inventory + status matrix in [`docs/coverage-ext.md`](docs/coverage-ext.md)
 - **Hooks** — per-conn update / authorizer / commit / rollback / pre-update / trace; conn-pinning idiom documented and shown in `examples/hooks/`
 - **Backup, serialize, deserialize** — mattn-compat `(*Conn).Backup` factory + top-level `sqlite.Serialize` / `Deserialize` for in-memory snapshots
+- **Changesets / patchsets (SESSION extension)** — `(*Conn).CreateSession` records changes; serialize to a changeset/patchset, `InvertChangeset`, `ConcatChangesets`, and `ApplyChangeset` to another database with a Go conflict handler. The foundation for offline sync, audit logs, and lightweight replication — **no other pure-Go SQLite driver exposes this**. See `examples/session/`
+- **Column metadata + runtime telemetry** — `(*Conn).TableColumnMetadata` (decltype/collation/PK/autoinc without a SELECT), `(*Conn).Status` (SQLite cache/lookaside counters), `(*Conn).TxnState`, `(*Stmt).Readonly` / `Status`
 - **Modern Go-typed Config** — `sqlite.Config{Path, Pragmas, Encryption, MaxOpenConns, …}` flows uniformly to both raw `database/sql` and gorm; no DSN-string duplication
 - **Modern Go idioms throughout** — generics, `iter.Seq2`, `log/slog`, `range over int`, `sync.WaitGroup.Go`; `gopls modernize` enforced in CI. Requires one of the two most recent Go releases — see [Supported Go versions](#supported-go-versions)
 
@@ -52,6 +54,7 @@ The Go SQLite landscape has three architectural camps: CGo bindings (mattn, zomb
 | Page-checksum VFS | ✓ | ✗ | ✗ | ✓ | ✗ |
 | In-memory MVCC + direct VFS | ✓ | ✗ | ✗ | ✓ | ✗ |
 | `fs.FS` / `io.ReaderAt` VFS | ✓ | ✗ | ✗ | ✓ | ✗ |
+| Changesets / session sync (offline replication, audit) | ✓ (typed `*Session` + `ApplyChangeset`) | ✗ | ✗ | ✗ | ✗ |
 | Loadable Go SQL extensions | catalog under `ext/`, per-conn or pool-wide | math/regexp via build-tag | ✗ | similar catalog | ✗ |
 | Hot UDF-row throughput | == modernc | fastest (CGo) | baseline | slowest (wazero) | == modernc |
 

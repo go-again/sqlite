@@ -25,7 +25,13 @@ SQLite engine, with a hand-written wrapper that adds:
 - Per-conn helpers absent upstream: `RegisterUpdateHook`,
   `RegisterAuthorizer`, `SetTrace`, `RegisterPreUpdateHook`, `Backup`,
   `Serialize` / `Deserialize`, `FileControl`, `GetLimit`/`SetLimit`,
-  `LoadExtension` / `EnableLoadExtension`.
+  `LoadExtension` / `EnableLoadExtension`, the SESSION extension
+  (`CreateSession` → `*Session`, `ApplyChangeset` with a Go conflict
+  handler, `InvertChangeset` / `ConcatChangesets`) — no other pure-Go
+  driver exposes changesets — plus introspection/telemetry
+  (`TableColumnMetadata`, `Status` for sqlite3_db_status, `TxnState`,
+  `(*Stmt).Readonly` / `Status`) and R-Tree custom geometry/query
+  callbacks (`RegisterRTreeGeometry` / `RegisterRTreeQuery`).
 - Typed Go APIs for two extensions: **vec** (sqlite-vec, vector search)
   and **fts** (FTS5, full-text search). Both ship gorm bridges that wire
   the sidecar tables to gorm models via struct tags.
