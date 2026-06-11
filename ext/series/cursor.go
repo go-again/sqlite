@@ -49,7 +49,16 @@ func (c *seriesCursor) Filter(idxNum int, _ string, args []sqlite.Value) error {
 }
 
 func (c *seriesCursor) Next() error {
-	c.value += c.step
+	next := c.value + c.step
+	// Detect int64 wrap at the boundary: an ascending step that lands below the
+	// current value (or a descending step that lands above) means we've run off
+	// the representable range. Stop instead of looping ~2^63 times — otherwise
+	// a series with a stop near math.MaxInt64 never terminates.
+	if (c.step > 0 && next < c.value) || (c.step < 0 && next > c.value) {
+		c.eof = true
+		return nil
+	}
+	c.value = next
 	if c.desc {
 		c.eof = c.value < c.stop
 	} else {

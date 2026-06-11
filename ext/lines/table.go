@@ -72,10 +72,10 @@ func Create(ctx context.Context, db *sql.DB, name string, opts ...CreateOption) 
 	}
 	var params []string
 	if cfg.filename != "" {
-		params = append(params, "filename="+sqlString(cfg.filename))
+		params = append(params, "filename="+sqlid.QuoteString(cfg.filename))
 	}
 	if cfg.hasData {
-		params = append(params, "data="+sqlString(cfg.data))
+		params = append(params, "data="+sqlid.QuoteString(cfg.data))
 	}
 	ifNotExists := ""
 	if cfg.ifNotExists {
@@ -137,10 +137,4 @@ func (t *Table) Drop(ctx context.Context) error {
 		return fmt.Errorf("lines.Drop: %w", err)
 	}
 	return nil
-}
-
-// sqlString renders s as a single-quoted SQL string literal — the form the
-// lines argument parser unquotes — doubling embedded single quotes.
-func sqlString(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }

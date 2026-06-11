@@ -32,6 +32,31 @@ func openFilterDB(t *testing.T) *sql.DB {
 	return db
 }
 
+func TestFilter_WithHashes(t *testing.T) {
+	db := openFilterDB(t)
+	ctx := context.Background()
+	// A non-default hash count (k=7) must still round-trip without false
+	// negatives, proving WithHashes is wired into the vtab DDL.
+	f, err := bloom.Create(ctx, db, "h", bloom.WithSize(1000), bloom.WithHashes(7))
+	if err != nil {
+		t.Fatalf("Create with WithHashes: %v", err)
+	}
+	for _, k := range []string{"alpha", "bravo", "charlie"} {
+		if err := f.Add(ctx, k); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, k := range []string{"alpha", "bravo", "charlie"} {
+		ok, err := f.Contains(ctx, k)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
+			t.Errorf("WithHashes(7) filter reports added key %q absent (false negative)", k)
+		}
+	}
+}
+
 func TestFilter_AddContains(t *testing.T) {
 	ctx := context.Background()
 	db := openFilterDB(t)

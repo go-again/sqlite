@@ -97,6 +97,36 @@ func TestSeries_Composable(t *testing.T) {
 	}
 }
 
+func TestSeries_FloatArgs(t *testing.T) {
+	db := openDB(t)
+	// REAL arguments exercise the float64 branch of toInt64.
+	got := collect(t, db, `SELECT value FROM generate_series(1.0, 5.0)`)
+	if want := []int64{1, 2, 3, 4, 5}; !eq(got, want) {
+		t.Errorf("generate_series(1.0,5.0) = %v, want %v", got, want)
+	}
+}
+
+func TestSeries_DescendingEmpty(t *testing.T) {
+	db := openDB(t)
+	// start < stop with a negative step yields nothing (the descending
+	// start<stop eof branch).
+	if got := collect(t, db, `SELECT value FROM generate_series(1, 5, -1)`); len(got) != 0 {
+		t.Errorf("generate_series(1,5,-1) = %v, want empty", got)
+	}
+}
+
+func TestSeries_NearMaxNoHang(t *testing.T) {
+	db := openDB(t)
+	// A stop at int64 max with a positive step must terminate (overflow guard)
+	// rather than wrap and loop. Bounded by LIMIT so a regression fails fast
+	// instead of hanging.
+	got := collect(t, db,
+		`SELECT value FROM (SELECT value FROM generate_series(9223372036854775805, 9223372036854775807) LIMIT 100)`)
+	if want := []int64{9223372036854775805, 9223372036854775806, 9223372036854775807}; !eq(got, want) {
+		t.Errorf("near-max series = %v, want 3 terminating values", got)
+	}
+}
+
 func TestSeries_StepZeroErrors(t *testing.T) {
 	db := openDB(t)
 	if _, err := db.QueryContext(context.Background(),

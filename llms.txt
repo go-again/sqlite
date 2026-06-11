@@ -36,6 +36,9 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [ext/README.md](ext/README.md): loadable Go extensions umbrella — opt-in SQL scalar UDFs, table-valued functions, and vtab-based readers. Each sub-package independent; pick by need. Several are Go-native ports of ncruces/go-sqlite3 extensions. See [docs/coverage-ext.md](docs/coverage-ext.md) for the full matrix.
 - [ext/spellfix1/spellfix1.go](ext/spellfix1/spellfix1.go): fuzzy-text vtab — Soundex prefilter + Damerau-Levenshtein edit-distance ranking with persistent vocabulary shadow table. Go-native re-implementation of SQLite's spellfix1 (same SQL surface, simpler internals).
 - [ext/rtree/rtree.go](ext/rtree/rtree.go): R-Tree spatial index — typed `rtree.Table` (Create / Insert / InsertPoint / Search bounding-box / SearchCircle / Delete / Drop) over the built-in `rtree`/`geopoly` vtabs, plus a ready-made `circle(cx, cy, r)` geometry for `WHERE id MATCH circle(…)`. Built on root `(*Conn).RegisterRTreeGeometry` / `RegisterRTreeQuery`, which wrap `sqlite3_rtree_geometry_callback` / `query_callback` for arbitrary Go geometry/query callbacks.
+- [ext/series/series.go](ext/series/series.go): `generate_series(start, stop[, step])` table-valued function — an integer sequence as a SQL table source. start/stop required (stop bounded to avoid a runaway scan), step defaults to 1 and may be negative.
+- [ext/text/text.go](ext/text/text.go): rune-aware string scalars SQLite lacks — `text_reverse`, `text_repeat`, `text_lpad`, `text_rpad`, `text_split` (with overflow-safe output-size guards). Casing/normalization stay in `ext/unicode`.
+- [ext/encode/encode.go](ext/encode/encode.go): `encode(data, format)` / `decode(text, format)` for base64 / base64url / base32 / base16 (hex) / ascii85 / url. The codec half of sqlean `crypto`; digests are `ext/hash`.
 
 ## Examples (runnable)
 

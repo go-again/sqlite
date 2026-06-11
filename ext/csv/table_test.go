@@ -92,6 +92,40 @@ func TestTable_WithComma(t *testing.T) {
 	}
 }
 
+func TestTable_WithComment(t *testing.T) {
+	ctx := context.Background()
+	db := openCSVDB(t, fstest.MapFS{
+		"c.csv": {Data: []byte("# a comment line\nname,age\n# another comment\nalice,30\nbob,25\n")},
+	})
+	tbl, err := csv.Create(ctx, db, "t", csv.WithFilename("c.csv"), csv.WithHeader(), csv.WithComment('#'))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	var n int
+	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM "+tbl.Name()).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Errorf("WithComment row count = %d, want 2 (comment lines skipped)", n)
+	}
+}
+
+func TestTable_WithColumns(t *testing.T) {
+	ctx := context.Background()
+	db := openCSVDB(t, fstest.MapFS{"d.csv": {Data: []byte("1,2,3\n4,5,6\n")}})
+	tbl, err := csv.Create(ctx, db, "t", csv.WithFilename("d.csv"), csv.WithColumns(3))
+	if err != nil {
+		t.Fatalf("Create with WithColumns: %v", err)
+	}
+	cols, err := tbl.Columns(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cols) != 3 {
+		t.Errorf("WithColumns(3) produced %d columns (%v), want 3", len(cols), cols)
+	}
+}
+
 func TestTable_Create_QuotesValues(t *testing.T) {
 	ctx := context.Background()
 	db := openCSVDB(t, fstest.MapFS{})

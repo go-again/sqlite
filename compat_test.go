@@ -124,6 +124,39 @@ func TestRegisterFunc_EmbeddedNUL(t *testing.T) {
 	}
 }
 
+// TestPreUpdateHook_EmbeddedNUL pins the embedded-NUL TEXT fix on the
+// pre-update-hook value path (the sibling of TestRegisterFunc_EmbeddedNUL,
+// which covers the UDF arg path). Both were fixed together; this one was
+// otherwise untested.
+func TestPreUpdateHook_EmbeddedNUL(t *testing.T) {
+	_, sc, c := withSQLite3Conn(t, ":memory:")
+	ctx := context.Background()
+	if _, err := sc.ExecContext(ctx, `CREATE TABLE t(v TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	var got any
+	c.RegisterPreUpdateHook(func(data SQLitePreUpdateData) {
+		if data.Op == SQLITE_INSERT && data.Count() > 0 {
+			vals := make([]any, data.Count())
+			if err := data.New(vals...); err == nil {
+				got = vals[0]
+			}
+		}
+	})
+
+	const text = "foo\x00bar" // 7 bytes, embedded NUL
+	if _, err := sc.ExecContext(ctx, `INSERT INTO t VALUES (?)`, text); err != nil {
+		t.Fatal(err)
+	}
+	s, ok := got.(string)
+	if !ok {
+		t.Fatalf("pre-update value = %T (%v), want string", got, got)
+	}
+	if s != text {
+		t.Errorf("pre-update TEXT = %q, want %q (embedded NUL truncated)", s, text)
+	}
+}
+
 // TestRegisterFunc_Variadic verifies that variadic Go functions work as SQLite
 // user functions accepting any number of args.
 func TestRegisterFunc_Variadic(t *testing.T) {

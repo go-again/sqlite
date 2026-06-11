@@ -31,6 +31,14 @@ func QuoteIdent(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
 }
 
+// QuoteString renders s as a single-quoted SQL string literal, doubling any
+// embedded single quotes — the form a vtab argument-string parser unquotes
+// (e.g. csv(data='…') / lines(filename='…')). Consolidates the byte-identical
+// sqlString helpers that ext/csv and ext/lines each carried.
+func QuoteString(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
 // QuoteIdentBacktick renders s as a backtick-quoted identifier
 // (`…`), doubling any embedded backticks. SQLite accepts this form
 // alongside the canonical double-quoted shape; sqlite-vec's vec0

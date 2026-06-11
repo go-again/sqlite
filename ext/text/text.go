@@ -51,7 +51,9 @@ func textRepeat(s string, n int64) (string, error) {
 	if n <= 0 || s == "" {
 		return "", nil
 	}
-	if int64(len(s))*n > maxResult {
+	// Overflow-safe: s is non-empty here, so len(s) >= 1; division avoids the
+	// int64 wrap that len(s)*n would suffer for a hostile n.
+	if n > maxResult/int64(len(s)) {
 		return "", errors.New("text_repeat: result too large")
 	}
 	return strings.Repeat(s, int(n)), nil
@@ -70,7 +72,10 @@ func pad2(s string, n int64, left bool, pad []string) (string, error) {
 		return s, nil
 	}
 	need := n - cur
-	if int64(len(s))+need*int64(len(p)) > maxResult {
+	// Overflow-safe: p is non-empty here, so len(p) >= 1; the division avoids
+	// the int64 wrap that need*len(p) would suffer for a hostile n (which would
+	// otherwise pass the guard and drive an unbounded allocation loop).
+	if need > (maxResult-int64(len(s)))/int64(len(p)) {
 		return "", errors.New("text_pad: result too large")
 	}
 	padRunes := []rune(p)

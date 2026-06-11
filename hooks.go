@@ -105,15 +105,17 @@ type traceState struct {
 	wantExpandedSQL bool
 }
 
-// dropHookHandlers removes any entries this conn left in the six
-// process-global hook maps (xUpdateHandlers, xAuthorizerHandlers,
-// xTraceHandlers, xPreUpdateHandlers, xCommitHandlers,
-// xRollbackHandlers) and the three UDF/collation/aggregate registries
-// populated by [Conn.RegisterFunc] / [Conn.RegisterCollation] /
-// [Conn.RegisterAggregator]. Called from (*conn).Close; without it
-// captured closures (and their *libc.TLS) would live for the process
-// lifetime, and a stale callback could fire if SQLite later recycled
-// the uintptr handle for a new connection.
+// dropHookHandlers removes every entry this conn left in the process-global
+// callback registries: the per-c.db hook maps (xUpdateHandlers,
+// xAuthorizerHandlers, xTraceHandlers, xPreUpdateHandlers, xCommitHandlers,
+// xRollbackHandlers, xProgressHandlers, xWALHooks) and the id-keyed registries
+// it minted ids in (UDF / collation / aggregate via [Conn.RegisterFunc] /
+// [Conn.RegisterCollation] / [Conn.RegisterAggregator]; rtree geometry/query
+// via [Conn.RegisterRTreeGeometry] / [Conn.RegisterRTreeQuery]). Called from
+// (*conn).Close; without it captured closures (and their *libc.TLS) would live
+// for the process lifetime, and a stale callback could fire if SQLite later
+// recycled the uintptr handle for a new connection. Every new per-conn
+// registry MUST be drained here.
 func (c *conn) dropHookHandlers() {
 	h := c.db
 	xUpdateHandlers.mu.Lock()
@@ -134,6 +136,31 @@ func (c *conn) dropHookHandlers() {
 	xRollbackHandlers.mu.Lock()
 	delete(xRollbackHandlers.m, h)
 	xRollbackHandlers.mu.Unlock()
+	xProgressHandlers.mu.Lock()
+	delete(xProgressHandlers.m, h)
+	xProgressHandlers.mu.Unlock()
+	xWALHooks.mu.Lock()
+	delete(xWALHooks.m, h)
+	xWALHooks.mu.Unlock()
+
+	if len(c.rtreeGeomIDs) > 0 {
+		rtreeGeom.mu.Lock()
+		for _, id := range c.rtreeGeomIDs {
+			delete(rtreeGeom.m, id)
+			rtreeGeom.ids.reclaim(id)
+		}
+		rtreeGeom.mu.Unlock()
+		c.rtreeGeomIDs = nil
+	}
+	if len(c.rtreeQueryIDs) > 0 {
+		rtreeQuery.mu.Lock()
+		for _, id := range c.rtreeQueryIDs {
+			delete(rtreeQuery.m, id)
+			rtreeQuery.ids.reclaim(id)
+		}
+		rtreeQuery.mu.Unlock()
+		c.rtreeQueryIDs = nil
+	}
 
 	if len(c.fnIDs) > 0 {
 		xFuncs.mu.Lock()

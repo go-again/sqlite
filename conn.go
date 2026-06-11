@@ -67,6 +67,11 @@ type conn struct {
 	fnIDs   []uintptr
 	collIDs []uintptr
 	aggIDs  []uintptr
+
+	// rtreeGeomIDs / rtreeQueryIDs hold the ids this conn minted in the
+	// process-global rtree geometry/query registries, drained the same way.
+	rtreeGeomIDs  []uintptr
+	rtreeQueryIDs []uintptr
 }
 
 // defaultStmtCacheSize matches mattn's _stmt_cache_size default. A cache that

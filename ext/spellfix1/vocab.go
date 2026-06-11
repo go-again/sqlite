@@ -155,7 +155,7 @@ func (v *Vocab) Drop(ctx context.Context) error {
 type Match struct {
 	Word     string // the vocabulary entry
 	Distance int    // Damerau-Levenshtein distance from the query term
-	Score    int    // distance - rank (lower is better)
+	Score    int    // distance*1024 - rank (lower is better)
 	MatchLen int    // length of the query prefix consumed
 }
 

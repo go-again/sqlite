@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -64,11 +65,12 @@ func parseMigrationName(base string) (version int, name string, err error) {
 	if digits == "" {
 		return 0, "", fmt.Errorf("missing numeric version prefix")
 	}
-	for _, r := range digits {
-		if r < '0' || r > '9' {
-			return 0, "", fmt.Errorf("non-numeric version prefix %q", digits)
-		}
-		version = version*10 + int(r-'0')
+	// strconv.Atoi rejects both non-numeric prefixes and out-of-range values,
+	// avoiding the silent wrap a hand-rolled digit accumulation would suffer on
+	// an absurd prefix (which would then mis-sort or be skipped).
+	version, err = strconv.Atoi(digits)
+	if err != nil {
+		return 0, "", fmt.Errorf("invalid version prefix %q: %w", digits, err)
 	}
 	return version, name, nil
 }

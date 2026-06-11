@@ -194,6 +194,114 @@ func TestSession_TableFilter(t *testing.T) {
 	}
 }
 
+func TestSession_Diff(t *testing.T) {
+	ctx, srcSC, src := newSessionDB(t) // main.users created
+	if _, err := srcSC.ExecContext(ctx, `INSERT INTO users VALUES (1, 'alice')`); err != nil {
+		t.Fatal(err)
+	}
+	// A second in-memory database 'aux' with the same table but extra data.
+	if _, err := srcSC.ExecContext(ctx, `ATTACH DATABASE ':memory:' AS aux`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srcSC.ExecContext(ctx, `CREATE TABLE aux.users(id INTEGER PRIMARY KEY, name TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srcSC.ExecContext(ctx, `INSERT INTO aux.users VALUES (1, 'alice'), (2, 'bob')`); err != nil {
+		t.Fatal(err)
+	}
+
+	sess, err := src.CreateSession("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if err := sess.Attach("users"); err != nil {
+		t.Fatal(err)
+	}
+	// Diff captures the changes that make aux.users match main.users.
+	if err := sess.Diff("aux", "users"); err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	cs, err := sess.Changeset()
+	if err != nil {
+		t.Fatalf("Changeset after Diff: %v", err)
+	}
+	if len(cs) == 0 {
+		t.Error("Diff of differing tables produced an empty changeset")
+	}
+
+	// Error path: a schema mismatch (different column count) makes Diff fail
+	// with an error message, exercising the pErr branch and its sqlite3_free.
+	if _, err := srcSC.ExecContext(ctx, `CREATE TABLE mism(id INTEGER PRIMARY KEY, a TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srcSC.ExecContext(ctx, `CREATE TABLE aux.mism(id INTEGER PRIMARY KEY, a TEXT, b TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	sess2, err := src.CreateSession("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess2.Close()
+	if err := sess2.Attach("mism"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess2.Diff("aux", "mism"); err == nil {
+		t.Error("Diff between schema-mismatched tables should error")
+	}
+}
+
+func TestSession_Concat(t *testing.T) {
+	ctx, srcSC, src := newSessionDB(t)
+	_, dstSC, dst := newSessionDB(t)
+
+	// First changeset: insert alice.
+	sess1, err := src.CreateSession("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = sess1.Attach("")
+	if _, err := srcSC.ExecContext(ctx, `INSERT INTO users VALUES (1, 'alice')`); err != nil {
+		t.Fatal(err)
+	}
+	cs1, err := sess1.Changeset()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess1.Close()
+
+	// Second changeset: insert bob.
+	sess2, err := src.CreateSession("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = sess2.Attach("")
+	if _, err := srcSC.ExecContext(ctx, `INSERT INTO users VALUES (2, 'bob')`); err != nil {
+		t.Fatal(err)
+	}
+	cs2, err := sess2.Changeset()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess2.Close()
+
+	combined, err := src.ConcatChangesets(cs1, cs2)
+	if err != nil {
+		t.Fatalf("ConcatChangesets: %v", err)
+	}
+	if err := dst.ApplyChangeset(combined); err != nil {
+		t.Fatalf("apply combined: %v", err)
+	}
+	if n := countUsers(t, ctx, dstSC); n != 2 {
+		t.Errorf("after concat+apply, count = %d, want 2", n)
+	}
+
+	// An empty operand is legitimate (not an allocation failure).
+	if _, err := src.ConcatChangesets(cs1, nil); err != nil {
+		t.Errorf("ConcatChangesets with an empty operand: %v", err)
+	}
+}
+
 func TestSession_EnableDisable(t *testing.T) {
 	ctx, srcSC, src := newSessionDB(t)
 

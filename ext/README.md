@@ -39,6 +39,10 @@ Coverage matrix and status (✓ landed / ⚠ partial / ✗ deferred) lives at [`
 | [`pivot`](pivot/) | `pivot_vtab(...)` three-SELECT cross-tab — rows × columns × cell aggregate. Constructs a dynamic schema from the column-key projection and caches the cell-aggregate stmt per cell. |
 | [`spellfix1`](spellfix1/) | `CREATE VIRTUAL TABLE name USING spellfix1` — fuzzy lookup vtab. Soundex prefilter + Damerau-Levenshtein edit-distance ranking, persistent vocabulary shadow table. Go-native re-implementation of SQLite's spellfix1 (same SQL surface, simpler internals). |
 | [`statement`](statement/) | `CREATE VIRTUAL TABLE name USING statement(sql='...')` — parametrised views. `?N` anonymous and `:name` named binds become HIDDEN columns on the vtab; SELECTs `... WHERE :pat=?` drive the underlying prepared stmt. |
+| [`rtree`](rtree/) | R-Tree spatial index: the built-in `rtree`/`geopoly` vtabs plus a typed `rtree.Table` (`Create`/`Insert`/`InsertPoint`/`Search` bounding-box/`SearchCircle`/`Drop`) and a ready-made `circle(cx, cy, r)` geometry. Arbitrary geometry via root `(*Conn).RegisterRTreeGeometry` / `RegisterRTreeQuery`. |
+| [`series`](series/) | `generate_series(start, stop[, step])` table-valued function — an integer sequence usable as a SQL table source. |
+| [`text`](text/) | Rune-aware string scalars SQLite lacks: `text_reverse`, `text_repeat`, `text_lpad`, `text_rpad`, `text_split`. |
+| [`encode`](encode/) | `encode(data, format)` / `decode(text, format)` for base64 / base64url / base32 / base16 / ascii85 / url. The codec half of sqlean `crypto`; digests live in `ext/hash`. |
 | [`regexp/gorm`](regexp/gorm/) | gorm helpers built on `ext/regexp`. `regexpgorm.WhereRegex(db, col, pattern)` adds a `col REGEXP ?` clause without touching the dialect. |
 
 ## Attribution

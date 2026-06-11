@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"errors"
 	"io"
@@ -41,6 +42,39 @@ func TestTableColumnMetadata(t *testing.T) {
 
 	if _, err := c.TableColumnMetadata("main", "t", "nope"); err == nil {
 		t.Error("metadata for an unknown column should error")
+	}
+}
+
+func TestTableColumnMetadata_SpecialModes(t *testing.T) {
+	_, sc, c := withSQLite3Conn(t, ":memory:")
+	ctx := context.Background()
+	if _, err := sc.ExecContext(ctx, `CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+
+	// column="" probes table existence / rowid presence — succeeds for a real
+	// table, errors for a missing one.
+	if _, err := c.TableColumnMetadata("main", "t", ""); err != nil {
+		t.Errorf("rowid-probe of existing table errored: %v", err)
+	}
+	if _, err := c.TableColumnMetadata("main", "missing", ""); err == nil {
+		t.Error("rowid-probe of a missing table should error")
+	}
+
+	// WITHOUT ROWID table — the TEXT PRIMARY KEY column reports PrimaryKey.
+	if _, err := sc.ExecContext(ctx,
+		`CREATE TABLE wr(k TEXT PRIMARY KEY, v TEXT) WITHOUT ROWID`); err != nil {
+		t.Fatal(err)
+	}
+	md, err := c.TableColumnMetadata("main", "wr", "k")
+	if err != nil {
+		t.Fatalf("WITHOUT ROWID metadata: %v", err)
+	}
+	if !md.PrimaryKey {
+		t.Errorf("wr.k should be PrimaryKey: %+v", md)
+	}
+	if md.DeclType != "TEXT" {
+		t.Errorf("wr.k DeclType = %q, want TEXT", md.DeclType)
 	}
 }
 
@@ -97,6 +131,58 @@ func TestConnTxnState(t *testing.T) {
 	}
 	if got := c.TxnState("main"); got != TxnNone {
 		t.Errorf("after rollback TxnState = %v, want none", got)
+	}
+}
+
+func TestConnStatus_Reset(t *testing.T) {
+	_, sc, c := withSQLite3Conn(t, ":memory:")
+	ctx := context.Background()
+	if _, err := sc.ExecContext(ctx, `CREATE TABLE t(x)`); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 64 {
+		if _, err := sc.ExecContext(ctx, `INSERT INTO t VALUES (?)`, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := sc.ExecContext(ctx, `SELECT count(*) FROM t`); err != nil {
+		t.Fatal(err)
+	}
+
+	// LOOKASIDE_USED maintains a high-water mark (unlike CACHE_USED). Reset
+	// collapses it to the current value, so a subsequent read must report
+	// high-water == current.
+	if _, _, err := c.Status(DBStatusLookasideUsed, true); err != nil {
+		t.Fatalf("Status reset: %v", err)
+	}
+	cur, hi, err := c.Status(DBStatusLookasideUsed, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hi != cur {
+		t.Errorf("after reset, high-water = %d, current = %d; want equal", hi, cur)
+	}
+}
+
+func TestConnTxnState_Read(t *testing.T) {
+	_, sc, c := withSQLite3Conn(t, ":memory:")
+	ctx := context.Background()
+	if _, err := sc.ExecContext(ctx, `CREATE TABLE t(x); INSERT INTO t VALUES (1)`); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := sc.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.QueryContext(ctx, `SELECT count(*) FROM t`); err != nil { // start the read
+		t.Fatal(err)
+	}
+	if got := c.TxnState("main"); got != TxnRead {
+		t.Errorf("read-only transaction TxnState = %v, want read", got)
+	}
+	if got := TxnRead.String(); got != "read" {
+		t.Errorf("TxnRead.String() = %q, want read", got)
 	}
 }
 

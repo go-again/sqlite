@@ -1,6 +1,7 @@
 package sqlite // import "github.com/go-again/sqlite"
 
 import (
+	"errors"
 	"fmt"
 	"unsafe"
 
@@ -46,6 +47,9 @@ func (c *Conn) GetSnapshot(schema string) (*Snapshot, error) {
 //
 // https://sqlite.org/c3ref/snapshot_open.html
 func (c *Conn) OpenSnapshot(schema string, snap *Snapshot) error {
+	if snap == nil || snap.ptr == 0 {
+		return errors.New("sqlite: OpenSnapshot: nil or closed snapshot")
+	}
 	if schema == "" {
 		schema = "main"
 	}
@@ -81,10 +85,15 @@ func (c *Conn) SnapshotRecover(schema string) error {
 }
 
 // Cmp reports whether s is older (<0), the same age (0), or newer (>0) than
-// other. Both must be snapshots of the same database.
+// other. Both must be snapshots of the same database. A nil or closed handle
+// on either side compares as 0 (equal) rather than dereferencing a NULL
+// pointer in C.
 //
 // https://sqlite.org/c3ref/snapshot_cmp.html
 func (s *Snapshot) Cmp(other *Snapshot) int {
+	if s == nil || s.ptr == 0 || other == nil || other.ptr == 0 {
+		return 0
+	}
 	return int(sqlite3.Xsqlite3_snapshot_cmp(s.c.tls, s.ptr, other.ptr))
 }
 

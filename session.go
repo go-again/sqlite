@@ -3,6 +3,7 @@ package sqlite // import "github.com/go-again/sqlite"
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"unsafe"
 
@@ -102,24 +103,12 @@ func (s *Session) Patchset() ([]byte, error) {
 	return s.extract(sqlite3.Xsqlite3session_patchset, "Patchset")
 }
 
-// extract runs a (pSession, *pn, **pp) serializer and copies the
-// SQLite-allocated buffer into a Go slice, freeing the C buffer.
+// extract runs a (pSession, *pn, **pp) serializer through the shared
+// changeset-buffer copy-out helper.
 func (s *Session) extract(fn func(*libc.TLS, uintptr, uintptr, uintptr) int32, name string) ([]byte, error) {
-	bp := s.c.tls.Alloc(16) // ppBuf (8) + pnBuf (4), padded
-	defer s.c.tls.Free(16)
-	pp, pn := bp, bp+8
-	if rc := fn(s.c.tls, s.pSession, pn, pp); rc != sqlite3.SQLITE_OK {
-		return nil, fmt.Errorf("sqlite: Session.%s: %w", name, s.c.errstr(rc))
-	}
-	n := *(*int32)(unsafe.Pointer(pn))
-	p := *(*uintptr)(unsafe.Pointer(pp))
-	if p == 0 || n <= 0 {
-		return nil, nil
-	}
-	defer sqlite3.Xsqlite3_free(s.c.tls, p)
-	out := make([]byte, n)
-	copy(out, unsafe.Slice((*byte)(unsafe.Pointer(p)), n))
-	return out, nil
+	return s.c.transformChangeset("Session."+name, func(pn, pp uintptr) int32 {
+		return fn(s.c.tls, s.pSession, pn, pp)
+	})
 }
 
 // Diff records, into this session, the differences between the same-named
@@ -172,9 +161,12 @@ func (s *Session) Close() error {
 // cannot be inverted. The connection is used only for its allocator; the
 // database is not touched.
 func (c *Conn) InvertChangeset(changeset []byte) ([]byte, error) {
+	in, n, free, err := c.cBytes(changeset)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: InvertChangeset: %w", err)
+	}
+	defer free()
 	return c.transformChangeset("InvertChangeset", func(pn, pp uintptr) int32 {
-		in, n, free := c.cBytes(changeset)
-		defer free()
 		return sqlite3.Xsqlite3changeset_invert(c.tls, n, in, pn, pp)
 	})
 }
@@ -182,11 +174,17 @@ func (c *Conn) InvertChangeset(changeset []byte) ([]byte, error) {
 // ConcatChangesets returns a single changeset equivalent to applying a then b.
 // The connection is used only for its allocator; the database is not touched.
 func (c *Conn) ConcatChangesets(a, b []byte) ([]byte, error) {
+	pa, na, freeA, err := c.cBytes(a)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: ConcatChangesets: %w", err)
+	}
+	defer freeA()
+	pb, nb, freeB, err := c.cBytes(b)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: ConcatChangesets: %w", err)
+	}
+	defer freeB()
 	return c.transformChangeset("ConcatChangesets", func(pn, pp uintptr) int32 {
-		pa, na, freeA := c.cBytes(a)
-		defer freeA()
-		pb, nb, freeB := c.cBytes(b)
-		defer freeB()
 		return sqlite3.Xsqlite3changeset_concat(c.tls, na, pa, nb, pb, pn, pp)
 	})
 }
@@ -212,18 +210,25 @@ func (c *Conn) transformChangeset(name string, run func(pn, pp uintptr) int32) (
 }
 
 // cBytes copies a Go slice into a C buffer for passing to a changeset C
-// function, returning the pointer, length, and a free func. An empty slice
-// yields (0, 0, no-op).
-func (c *Conn) cBytes(b []byte) (ptr uintptr, n int32, free func()) {
+// function. An empty slice yields (0, 0, no-op, nil). It errors when the slice
+// exceeds the int32 length the C API uses — a >2GB blob would otherwise wrap
+// negative and corrupt the changeset parser's bounds checks on untrusted input
+// — and when allocation fails, so callers can't mistake a failed alloc for an
+// empty changeset.
+func (c *Conn) cBytes(b []byte) (ptr uintptr, n int32, free func(), err error) {
+	noop := func() {}
 	if len(b) == 0 {
-		return 0, 0, func() {}
+		return 0, 0, noop, nil
 	}
-	p, err := c.malloc(len(b))
-	if err != nil || p == 0 {
-		return 0, 0, func() {}
+	if len(b) > math.MaxInt32 {
+		return 0, 0, noop, fmt.Errorf("changeset too large: %d bytes exceeds int32", len(b))
+	}
+	p, merr := c.malloc(len(b))
+	if merr != nil || p == 0 {
+		return 0, 0, noop, errors.New("failed to allocate changeset buffer")
 	}
 	copy(unsafe.Slice((*byte)(unsafe.Pointer(p)), len(b)), b)
-	return p, int32(len(b)), func() { c.free(p) }
+	return p, int32(len(b)), func() { c.free(p) }, nil
 }
 
 // ConflictType classifies why applying a change conflicted with the target
@@ -335,11 +340,11 @@ func (c *Conn) ApplyChangeset(changeset []byte, opts ...ApplyOption) error {
 		applyReg.mu.Unlock()
 	}()
 
-	pData, n, free := c.cBytes(changeset)
-	defer free()
-	if pData == 0 {
-		return errors.New("sqlite: ApplyChangeset: failed to allocate changeset buffer")
+	pData, n, free, err := c.cBytes(changeset)
+	if err != nil {
+		return fmt.Errorf("sqlite: ApplyChangeset: %w", err)
 	}
+	defer free()
 
 	rc := sqlite3.Xsqlite3changeset_apply_v2(c.tls, c.db, n, pData,
 		cFuncPointer(applyFilterTrampoline), cFuncPointer(applyConflictTrampoline),

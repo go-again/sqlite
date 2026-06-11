@@ -67,4 +67,18 @@ func TestEncode_UnknownFormat(t *testing.T) {
 	}
 }
 
+func TestDecode_Malformed(t *testing.T) {
+	ctx, db := openDB(t)
+	for _, c := range []struct{ text, format string }{
+		{"@@@ not base64 @@@", "base64"},
+		{"xyz", "hex"}, // odd length, non-hex
+		{"8888888", "base32"},
+	} {
+		var got []byte
+		if err := db.QueryRowContext(ctx, `SELECT decode(?, ?)`, c.text, c.format).Scan(&got); err == nil {
+			t.Errorf("decode(%q, %q) should error on malformed input", c.text, c.format)
+		}
+	}
+}
+
 var _ func(*sqlite.Conn) error = encode.Register

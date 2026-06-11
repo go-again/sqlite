@@ -122,6 +122,10 @@ func (c *Conn) RegisterRTreeGeometry(name string, fn RTreeGeometryFunc) error {
 		rtreeGeom.mu.Unlock()
 		return c.errstr(rc)
 	}
+	// Track the id so (*conn).Close reclaims it; otherwise the closure and its
+	// captured *libc.TLS leak for the process lifetime (and the registry grows
+	// unboundedly under per-connection ConnectHook registration).
+	c.rtreeGeomIDs = append(c.rtreeGeomIDs, id)
 	return nil
 }
 
@@ -155,6 +159,8 @@ func (c *Conn) RegisterRTreeQuery(name string, fn RTreeQueryFunc) error {
 		rtreeQuery.mu.Unlock()
 		return c.errstr(rc)
 	}
+	// Track the id so (*conn).Close reclaims it (see RegisterRTreeGeometry).
+	c.rtreeQueryIDs = append(c.rtreeQueryIDs, id)
 	return nil
 }
 

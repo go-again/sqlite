@@ -19,7 +19,7 @@
 //	word      TEXT     -- the candidate vocabulary entry
 //	rank      INTEGER  -- caller-supplied frequency score (0 if not given)
 //	distance  INTEGER  -- Damerau-Levenshtein distance from the query
-//	score     INTEGER  -- distance - rank (lower is better)
+//	score     INTEGER  -- distance*1024 - rank (lower is better)
 //	matchlen  INTEGER  -- length of the query prefix consumed
 //	phonetic  HIDDEN   -- the Soundex key (4-char A-Z)
 //	top       HIDDEN   -- caller-supplied LIMIT override

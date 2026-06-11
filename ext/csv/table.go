@@ -88,19 +88,19 @@ func Create(ctx context.Context, db *sql.DB, name string, opts ...CreateOption) 
 	}
 	var params []string
 	if cfg.filename != "" {
-		params = append(params, "filename="+sqlString(cfg.filename))
+		params = append(params, "filename="+sqlid.QuoteString(cfg.filename))
 	}
 	if cfg.hasData {
-		params = append(params, "data="+sqlString(cfg.data))
+		params = append(params, "data="+sqlid.QuoteString(cfg.data))
 	}
 	if cfg.header {
 		params = append(params, "header=on")
 	}
 	if cfg.comma != 0 {
-		params = append(params, "comma="+sqlString(string(cfg.comma)))
+		params = append(params, "comma="+sqlid.QuoteString(string(cfg.comma)))
 	}
 	if cfg.comment != 0 {
-		params = append(params, "comment="+sqlString(string(cfg.comment)))
+		params = append(params, "comment="+sqlid.QuoteString(string(cfg.comment)))
 	}
 	if cfg.columns > 0 {
 		params = append(params, fmt.Sprintf("columns=%d", cfg.columns))
@@ -165,10 +165,4 @@ func (t *Table) Drop(ctx context.Context) error {
 		return fmt.Errorf("csv.Drop: %w", err)
 	}
 	return nil
-}
-
-// sqlString renders s as a single-quoted SQL string literal — the form the
-// csv argument parser unquotes — doubling embedded single quotes.
-func sqlString(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
