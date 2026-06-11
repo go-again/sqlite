@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/go-again/sqlite/internal/sqlid"
+	"github.com/go-again/sqlite/internal/vtabx"
 )
 
 // Table is a typed handle to a SQLite R-Tree virtual table — a spatial index
@@ -55,9 +56,6 @@ var ErrAlreadyExists = errors.New("rtree: virtual table already exists")
 // Create runs CREATE VIRTUAL TABLE name USING rtree(id, min0, max0, …) with
 // two coordinate columns per dimension and returns a handle.
 func Create(ctx context.Context, db *sql.DB, name string, opts ...CreateOption) (*Table, error) {
-	if !sqlid.ValidIdent(name) {
-		return nil, fmt.Errorf("rtree.Create: %q is not a valid SQL identifier", name)
-	}
 	cfg := &createConfig{dims: 2}
 	for _, opt := range opts {
 		opt(cfg)
@@ -74,17 +72,8 @@ func Create(ctx context.Context, db *sql.DB, name string, opts ...CreateOption) 
 	if cfg.int32Coords {
 		module = "rtree_i32"
 	}
-	ifNotExists := ""
-	if cfg.ifNotExists {
-		ifNotExists = "IF NOT EXISTS "
-	}
-	stmt := fmt.Sprintf("CREATE VIRTUAL TABLE %s%s USING %s(%s)",
-		ifNotExists, sqlid.QuoteIdent(name), module, strings.Join(cols, ", "))
-	if _, err := db.ExecContext(ctx, stmt); err != nil {
-		if sqlid.IsAlreadyExistsErr(err) {
-			return nil, fmt.Errorf("rtree.Create %q: %w", name, ErrAlreadyExists)
-		}
-		return nil, fmt.Errorf("rtree.Create %q: %w", name, err)
+	if err := vtabx.Create(ctx, db, name, module, cols, cfg.ifNotExists, ErrAlreadyExists); err != nil {
+		return nil, err
 	}
 	return &Table{db: db, name: name, dims: cfg.dims}, nil
 }
@@ -214,8 +203,5 @@ func (t *Table) queryIDs(ctx context.Context, stmt string, args ...any) ([]int64
 
 // Drop removes the vtab and its backing shadow tables.
 func (t *Table) Drop(ctx context.Context) error {
-	if _, err := t.db.ExecContext(ctx, "DROP TABLE IF EXISTS "+sqlid.QuoteIdent(t.name)); err != nil {
-		return fmt.Errorf("rtree.Drop: %w", err)
-	}
-	return nil
+	return vtabx.Drop(ctx, t.db, t.name)
 }

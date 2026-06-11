@@ -143,24 +143,14 @@ func (c *conn) dropHookHandlers() {
 	delete(xWALHooks.m, h)
 	xWALHooks.mu.Unlock()
 
-	if len(c.rtreeGeomIDs) > 0 {
-		rtreeGeom.mu.Lock()
-		for _, id := range c.rtreeGeomIDs {
-			delete(rtreeGeom.m, id)
-			rtreeGeom.ids.reclaim(id)
-		}
-		rtreeGeom.mu.Unlock()
-		c.rtreeGeomIDs = nil
+	for _, id := range c.rtreeGeomIDs {
+		rtreeGeom.drop(id)
 	}
-	if len(c.rtreeQueryIDs) > 0 {
-		rtreeQuery.mu.Lock()
-		for _, id := range c.rtreeQueryIDs {
-			delete(rtreeQuery.m, id)
-			rtreeQuery.ids.reclaim(id)
-		}
-		rtreeQuery.mu.Unlock()
-		c.rtreeQueryIDs = nil
+	c.rtreeGeomIDs = nil
+	for _, id := range c.rtreeQueryIDs {
+		rtreeQuery.drop(id)
 	}
+	c.rtreeQueryIDs = nil
 
 	if len(c.fnIDs) > 0 {
 		xFuncs.mu.Lock()

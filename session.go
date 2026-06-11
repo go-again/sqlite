@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"sync"
 	"unsafe"
 
 	"modernc.org/libc"
@@ -308,11 +307,7 @@ func WithTableFilter(filter TableFilter) ApplyOption {
 	return func(c *applyConfig) { c.filter = filter }
 }
 
-var applyReg = struct {
-	mu  sync.RWMutex
-	m   map[uintptr]*applyConfig
-	ids idGen
-}{m: make(map[uintptr]*applyConfig)}
+var applyReg = newCallbackTable[*applyConfig]()
 
 // ApplyChangeset applies a changeset (or patchset) to this connection's
 // database inside a savepoint. Conflicts are resolved by a [ConflictHandler]
@@ -329,16 +324,8 @@ func (c *Conn) ApplyChangeset(changeset []byte, opts ...ApplyOption) error {
 		opt(cfg)
 	}
 
-	applyReg.mu.Lock()
-	id := applyReg.ids.next()
-	applyReg.m[id] = cfg
-	applyReg.mu.Unlock()
-	defer func() {
-		applyReg.mu.Lock()
-		delete(applyReg.m, id)
-		applyReg.ids.reclaim(id)
-		applyReg.mu.Unlock()
-	}()
+	id := applyReg.register(cfg)
+	defer applyReg.drop(id)
 
 	pData, n, free, err := c.cBytes(changeset)
 	if err != nil {
@@ -358,10 +345,8 @@ func (c *Conn) ApplyChangeset(changeset []byte, opts ...ApplyOption) error {
 // applyFilterTrampoline is the C entry point for the apply table filter.
 // Signature: int (*)(void *pCtx, const char *zTab).
 func applyFilterTrampoline(tls *libc.TLS, pCtx uintptr, zTab uintptr) int32 {
-	applyReg.mu.RLock()
-	cfg := applyReg.m[pCtx]
-	applyReg.mu.RUnlock()
-	if cfg == nil || cfg.filter == nil {
+	cfg, ok := applyReg.lookup(pCtx)
+	if !ok || cfg.filter == nil {
 		return 1 // apply every table
 	}
 	if cfg.filter(libc.GoString(zTab)) {
@@ -373,10 +358,8 @@ func applyFilterTrampoline(tls *libc.TLS, pCtx uintptr, zTab uintptr) int32 {
 // applyConflictTrampoline is the C entry point for the apply conflict handler.
 // Signature: int (*)(void *pCtx, int eConflict, sqlite3_changeset_iter*).
 func applyConflictTrampoline(tls *libc.TLS, pCtx uintptr, eConflict int32, _ uintptr) int32 {
-	applyReg.mu.RLock()
-	cfg := applyReg.m[pCtx]
-	applyReg.mu.RUnlock()
-	if cfg == nil || cfg.conflict == nil {
+	cfg, ok := applyReg.lookup(pCtx)
+	if !ok || cfg.conflict == nil {
 		return int32(ChangesetAbort)
 	}
 	return int32(cfg.conflict(ConflictType(eConflict)))

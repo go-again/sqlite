@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/go-again/sqlite/internal/sqlid"
+	"github.com/go-again/sqlite/internal/vtabx"
 )
 
 // Graph is a typed handle to a transitive_closure virtual table — a
@@ -70,9 +71,6 @@ var ErrAlreadyExists = errors.New("closure: virtual table already exists")
 //
 // The module must be registered on db's connections — see the [Graph] doc.
 func Create(ctx context.Context, db *sql.DB, name string, over Over, opts ...CreateOption) (*Graph, error) {
-	if !sqlid.ValidIdent(name) {
-		return nil, fmt.Errorf("closure.Create: %q is not a valid SQL identifier", name)
-	}
 	cfg := &createConfig{}
 	for _, opt := range opts {
 		opt(cfg)
@@ -91,20 +89,8 @@ func Create(ctx context.Context, db *sql.DB, name string, over Over, opts ...Cre
 		}
 		params = append(params, p.key+"="+p.val)
 	}
-	using := ModuleName
-	if len(params) > 0 {
-		using = fmt.Sprintf("%s(%s)", ModuleName, strings.Join(params, ", "))
-	}
-	ifNotExists := ""
-	if cfg.ifNotExists {
-		ifNotExists = "IF NOT EXISTS "
-	}
-	stmt := fmt.Sprintf("CREATE VIRTUAL TABLE %s%s USING %s", ifNotExists, quote(name), using)
-	if _, err := db.ExecContext(ctx, stmt); err != nil {
-		if sqlid.IsAlreadyExistsErr(err) {
-			return nil, fmt.Errorf("closure.Create %q: %w", name, ErrAlreadyExists)
-		}
-		return nil, fmt.Errorf("closure.Create %q: %w", name, err)
+	if err := vtabx.Create(ctx, db, name, ModuleName, params, cfg.ifNotExists, ErrAlreadyExists); err != nil {
+		return nil, err
 	}
 	return &Graph{db: db, name: name}, nil
 }
@@ -217,8 +203,5 @@ func (g *Graph) Descendants(ctx context.Context, root int64, opts ...WalkOption)
 // Drop removes the vtab. The underlying edge table is untouched (the vtab
 // is only a view). The handle is unusable afterward.
 func (g *Graph) Drop(ctx context.Context) error {
-	if _, err := g.db.ExecContext(ctx, "DROP TABLE IF EXISTS "+quote(g.name)); err != nil {
-		return fmt.Errorf("closure.Drop: %w", err)
-	}
-	return nil
+	return vtabx.Drop(ctx, g.db, g.name)
 }

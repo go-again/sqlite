@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/go-again/sqlite/internal/sqlid"
+	"github.com/go-again/sqlite/internal/vtabx"
 )
 
 // Filter is a typed handle to a bloom virtual table — a probabilistic
@@ -72,9 +72,6 @@ var ErrAlreadyExists = errors.New("bloom: virtual table already exists")
 // The bloom module must be registered on db's connections — see the
 // [Filter] doc.
 func Create(ctx context.Context, db *sql.DB, name string, opts ...CreateOption) (*Filter, error) {
-	if !sqlid.ValidIdent(name) {
-		return nil, fmt.Errorf("bloom.Create: %q is not a valid SQL identifier", name)
-	}
 	cfg := &createConfig{}
 	for _, opt := range opts {
 		opt(cfg)
@@ -89,20 +86,8 @@ func Create(ctx context.Context, db *sql.DB, name string, opts ...CreateOption) 
 	if cfg.k > 0 {
 		params = append(params, fmt.Sprintf("k=%d", cfg.k))
 	}
-	using := ModuleName
-	if len(params) > 0 {
-		using = fmt.Sprintf("%s(%s)", ModuleName, strings.Join(params, ", "))
-	}
-	ifNotExists := ""
-	if cfg.ifNotExists {
-		ifNotExists = "IF NOT EXISTS "
-	}
-	stmt := fmt.Sprintf("CREATE VIRTUAL TABLE %s%s USING %s", ifNotExists, quote(name), using)
-	if _, err := db.ExecContext(ctx, stmt); err != nil {
-		if sqlid.IsAlreadyExistsErr(err) {
-			return nil, fmt.Errorf("bloom.Create %q: %w", name, ErrAlreadyExists)
-		}
-		return nil, fmt.Errorf("bloom.Create %q: %w", name, err)
+	if err := vtabx.Create(ctx, db, name, ModuleName, params, cfg.ifNotExists, ErrAlreadyExists); err != nil {
+		return nil, err
 	}
 	return &Filter{db: db, name: name}, nil
 }
@@ -181,8 +166,5 @@ func (f *Filter) Contains(ctx context.Context, key string) (bool, error) {
 // Drop removes the vtab and its shadow storage. The handle is unusable
 // afterward.
 func (f *Filter) Drop(ctx context.Context) error {
-	if _, err := f.db.ExecContext(ctx, "DROP TABLE IF EXISTS "+quote(f.name)); err != nil {
-		return fmt.Errorf("bloom.Drop: %w", err)
-	}
-	return nil
+	return vtabx.Drop(ctx, f.db, f.name)
 }

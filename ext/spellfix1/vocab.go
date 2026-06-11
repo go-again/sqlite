@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/go-again/sqlite/internal/sqlid"
+	"github.com/go-again/sqlite/internal/vtabx"
 )
 
 // Vocab is a typed handle to a spellfix1 virtual table — the fuzzy-lookup
@@ -54,23 +55,12 @@ var ErrAlreadyExists = errors.New("spellfix1: virtual table already exists")
 // The spellfix1 module must be registered on db's connections — see the
 // [Vocab] doc.
 func Create(ctx context.Context, db *sql.DB, name string, opts ...CreateOption) (*Vocab, error) {
-	if !sqlid.ValidIdent(name) {
-		return nil, fmt.Errorf("spellfix1.Create: %q is not a valid SQL identifier", name)
-	}
 	cfg := &createConfig{}
 	for _, opt := range opts {
 		opt(cfg)
 	}
-	ifNotExists := ""
-	if cfg.ifNotExists {
-		ifNotExists = "IF NOT EXISTS "
-	}
-	stmt := fmt.Sprintf("CREATE VIRTUAL TABLE %s%s USING %s", ifNotExists, quote(name), ModuleName)
-	if _, err := db.ExecContext(ctx, stmt); err != nil {
-		if sqlid.IsAlreadyExistsErr(err) {
-			return nil, fmt.Errorf("spellfix1.Create %q: %w", name, ErrAlreadyExists)
-		}
-		return nil, fmt.Errorf("spellfix1.Create %q: %w", name, err)
+	if err := vtabx.Create(ctx, db, name, ModuleName, nil, cfg.ifNotExists, ErrAlreadyExists); err != nil {
+		return nil, err
 	}
 	return &Vocab{db: db, name: name}, nil
 }
@@ -145,10 +135,7 @@ func (v *Vocab) Size(ctx context.Context) (int64, error) {
 // Drop removes the vtab and its shadow storage. The handle is unusable
 // afterward.
 func (v *Vocab) Drop(ctx context.Context) error {
-	if _, err := v.db.ExecContext(ctx, "DROP TABLE IF EXISTS "+quote(v.name)); err != nil {
-		return fmt.Errorf("spellfix1.Drop: %w", err)
-	}
-	return nil
+	return vtabx.Drop(ctx, v.db, v.name)
 }
 
 // Match is a single hit returned by [Vocab.Correct].

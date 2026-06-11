@@ -2,7 +2,6 @@ package sqlite // import "github.com/go-again/sqlite"
 
 import (
 	"errors"
-	"sync"
 	"unsafe"
 
 	"modernc.org/libc"
@@ -80,17 +79,8 @@ func (q *RTreeQueryInfo) Leaf() bool { return q.Level == 0 }
 type RTreeQueryFunc func(info *RTreeQueryInfo) (within RTreeWithin, score float64, err error)
 
 var (
-	rtreeGeom = struct {
-		mu  sync.RWMutex
-		m   map[uintptr]RTreeGeometryFunc
-		ids idGen
-	}{m: make(map[uintptr]RTreeGeometryFunc)}
-
-	rtreeQuery = struct {
-		mu  sync.RWMutex
-		m   map[uintptr]RTreeQueryFunc
-		ids idGen
-	}{m: make(map[uintptr]RTreeQueryFunc)}
+	rtreeGeom  = newCallbackTable[RTreeGeometryFunc]()
+	rtreeQuery = newCallbackTable[RTreeQueryFunc]()
 )
 
 // RegisterRTreeGeometry registers fn as a custom R-Tree geometry function
@@ -109,17 +99,10 @@ func (c *Conn) RegisterRTreeGeometry(name string, fn RTreeGeometryFunc) error {
 	}
 	defer libc.Xfree(c.tls, cName)
 
-	rtreeGeom.mu.Lock()
-	id := rtreeGeom.ids.next()
-	rtreeGeom.m[id] = fn
-	rtreeGeom.mu.Unlock()
-
+	id := rtreeGeom.register(fn)
 	rc := sqlite3.Xsqlite3_rtree_geometry_callback(c.tls, c.db, cName, cFuncPointer(rtreeGeomTrampoline), id)
 	if rc != sqlite3.SQLITE_OK {
-		rtreeGeom.mu.Lock()
-		delete(rtreeGeom.m, id)
-		rtreeGeom.ids.reclaim(id)
-		rtreeGeom.mu.Unlock()
+		rtreeGeom.drop(id)
 		return c.errstr(rc)
 	}
 	// Track the id so (*conn).Close reclaims it; otherwise the closure and its
@@ -146,17 +129,10 @@ func (c *Conn) RegisterRTreeQuery(name string, fn RTreeQueryFunc) error {
 	}
 	defer libc.Xfree(c.tls, cName)
 
-	rtreeQuery.mu.Lock()
-	id := rtreeQuery.ids.next()
-	rtreeQuery.m[id] = fn
-	rtreeQuery.mu.Unlock()
-
+	id := rtreeQuery.register(fn)
 	rc := sqlite3.Xsqlite3_rtree_query_callback(c.tls, c.db, cName, cFuncPointer(rtreeQueryTrampoline), id, 0)
 	if rc != sqlite3.SQLITE_OK {
-		rtreeQuery.mu.Lock()
-		delete(rtreeQuery.m, id)
-		rtreeQuery.ids.reclaim(id)
-		rtreeQuery.mu.Unlock()
+		rtreeQuery.drop(id)
 		return c.errstr(rc)
 	}
 	// Track the id so (*conn).Close reclaims it (see RegisterRTreeGeometry).
@@ -174,10 +150,8 @@ func (c *Conn) RegisterRTreeQuery(name string, fn RTreeQueryFunc) error {
 //	int (*)(sqlite3_rtree_geometry*, int nCoord, sqlite3_rtree_dbl *aCoord, int *pRes)
 func rtreeGeomTrampoline(tls *libc.TLS, pGeom uintptr, nCoord int32, aCoord uintptr, pRes uintptr) int32 {
 	g := (*sqlite3.Tsqlite3_rtree_geometry)(unsafe.Pointer(pGeom))
-	rtreeGeom.mu.RLock()
-	fn := rtreeGeom.m[g.FpContext]
-	rtreeGeom.mu.RUnlock()
-	if fn == nil {
+	fn, ok := rtreeGeom.lookup(g.FpContext)
+	if !ok {
 		return int32(sqlite3.SQLITE_ERROR)
 	}
 	overlap, err := fn(copyCDoubles(aCoord, int(nCoord)), copyCDoubles(g.FaParam, int(g.FnParam)))
@@ -198,10 +172,8 @@ func rtreeGeomTrampoline(tls *libc.TLS, pGeom uintptr, nCoord int32, aCoord uint
 //	int (*)(sqlite3_rtree_query_info*)
 func rtreeQueryTrampoline(tls *libc.TLS, pInfo uintptr) int32 {
 	qi := (*sqlite3.Tsqlite3_rtree_query_info)(unsafe.Pointer(pInfo))
-	rtreeQuery.mu.RLock()
-	fn := rtreeQuery.m[qi.FpContext]
-	rtreeQuery.mu.RUnlock()
-	if fn == nil {
+	fn, ok := rtreeQuery.lookup(qi.FpContext)
+	if !ok {
 		return int32(sqlite3.SQLITE_ERROR)
 	}
 	info := &RTreeQueryInfo{

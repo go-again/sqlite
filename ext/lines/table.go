@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/go-again/sqlite/internal/sqlid"
+	"github.com/go-again/sqlite/internal/vtabx"
 )
 
 // Table is a typed handle to a lines virtual table — a text file (or
@@ -60,9 +60,6 @@ var ErrAlreadyExists = errors.New("lines: virtual table already exists")
 // options, properly quoting each value, and returns a handle. Exactly one
 // of WithFilename / WithData is required.
 func Create(ctx context.Context, db *sql.DB, name string, opts ...CreateOption) (*Table, error) {
-	if !sqlid.ValidIdent(name) {
-		return nil, fmt.Errorf("lines.Create: %q is not a valid SQL identifier", name)
-	}
 	cfg := &createConfig{}
 	for _, opt := range opts {
 		opt(cfg)
@@ -77,17 +74,8 @@ func Create(ctx context.Context, db *sql.DB, name string, opts ...CreateOption) 
 	if cfg.hasData {
 		params = append(params, "data="+sqlid.QuoteString(cfg.data))
 	}
-	ifNotExists := ""
-	if cfg.ifNotExists {
-		ifNotExists = "IF NOT EXISTS "
-	}
-	stmt := fmt.Sprintf("CREATE VIRTUAL TABLE %s%s USING %s(%s)",
-		ifNotExists, sqlid.QuoteIdent(name), ModuleName, strings.Join(params, ", "))
-	if _, err := db.ExecContext(ctx, stmt); err != nil {
-		if sqlid.IsAlreadyExistsErr(err) {
-			return nil, fmt.Errorf("lines.Create %q: %w", name, ErrAlreadyExists)
-		}
-		return nil, fmt.Errorf("lines.Create %q: %w", name, err)
+	if err := vtabx.Create(ctx, db, name, ModuleName, params, cfg.ifNotExists, ErrAlreadyExists); err != nil {
+		return nil, err
 	}
 	return &Table{db: db, name: name}, nil
 }
@@ -133,8 +121,5 @@ func (t *Table) Rows(ctx context.Context) (*sql.Rows, error) {
 
 // Drop removes the vtab. The underlying file is untouched.
 func (t *Table) Drop(ctx context.Context) error {
-	if _, err := t.db.ExecContext(ctx, "DROP TABLE IF EXISTS "+sqlid.QuoteIdent(t.name)); err != nil {
-		return fmt.Errorf("lines.Drop: %w", err)
-	}
-	return nil
+	return vtabx.Drop(ctx, t.db, t.name)
 }
