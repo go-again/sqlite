@@ -82,4 +82,18 @@ func TestLoadMigrations_Errors(t *testing.T) {
 	}); err == nil {
 		t.Error("non-numeric prefix should error")
 	}
+	// A leading sign must be rejected (strconv.Atoi would otherwise accept it,
+	// yielding a negative or aliased version).
+	for _, name := range []string{"-1_x.sql", "+5_x.sql"} {
+		if _, err := sqlitex.LoadMigrations(fstest.MapFS{name: {Data: []byte(`SELECT 1;`)}}); err == nil {
+			t.Errorf("signed version prefix %q should error", name)
+		}
+	}
+	// A prefix exceeding user_version's 32-bit range must be rejected (it would
+	// truncate on round-trip and break idempotency).
+	if _, err := sqlitex.LoadMigrations(fstest.MapFS{
+		"9999999999_x.sql": {Data: []byte(`SELECT 1;`)},
+	}); err == nil {
+		t.Error("over-int32 version prefix should error")
+	}
 }

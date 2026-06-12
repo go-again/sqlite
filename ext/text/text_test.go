@@ -91,6 +91,19 @@ func TestText_OverflowGuards(t *testing.T) {
 	if got := str(t, ctx, db, `SELECT text_repeat('ab', 1000)`); len(got) != 2000 {
 		t.Errorf("text_repeat('ab',1000) len = %d, want 2000", len(got))
 	}
+	// The pad path has its own (different) guard formula; a wide-but-legal pad
+	// must succeed and produce exactly the requested width, proving that guard
+	// is not over-tightened either.
+	if got := str(t, ctx, db, `SELECT text_lpad('x', 5000, 'ab')`); len(got) != 5000 {
+		t.Errorf("text_lpad('x',5000,'ab') len = %d, want 5000", len(got))
+	} else if got[len(got)-1] != 'x' {
+		t.Errorf("text_lpad result should end with the original 'x', ends %q", got[len(got)-4:])
+	}
+	if got := str(t, ctx, db, `SELECT text_rpad('x', 5000, 'ab')`); len(got) != 5000 {
+		t.Errorf("text_rpad('x',5000,'ab') len = %d, want 5000", len(got))
+	} else if got[0] != 'x' {
+		t.Errorf("text_rpad result should start with the original 'x', starts %q", got[:4])
+	}
 }
 
 func TestText_Split(t *testing.T) {

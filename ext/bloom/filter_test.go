@@ -35,25 +35,26 @@ func openFilterDB(t *testing.T) *sql.DB {
 func TestFilter_WithHashes(t *testing.T) {
 	db := openFilterDB(t)
 	ctx := context.Background()
-	// A non-default hash count (k=7) must still round-trip without false
-	// negatives, proving WithHashes is wired into the vtab DDL.
-	f, err := bloom.Create(ctx, db, "h", bloom.WithSize(1000), bloom.WithHashes(7))
+	// WithHashes must actually reach the vtab. k=3 differs from the default
+	// (which for size=1000, p=0.01 is 7), so reading the persisted k from the
+	// shadow table proves the option was honored — a no-op would leave k=7.
+	f, err := bloom.Create(ctx, db, "h", bloom.WithSize(1000), bloom.WithHashes(3))
 	if err != nil {
 		t.Fatalf("Create with WithHashes: %v", err)
 	}
-	for _, k := range []string{"alpha", "bravo", "charlie"} {
-		if err := f.Add(ctx, k); err != nil {
-			t.Fatal(err)
-		}
+	var k int
+	if err := db.QueryRowContext(ctx, `SELECT k FROM h_storage`).Scan(&k); err != nil {
+		t.Fatalf("read persisted k: %v", err)
 	}
-	for _, k := range []string{"alpha", "bravo", "charlie"} {
-		ok, err := f.Contains(ctx, k)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !ok {
-			t.Errorf("WithHashes(7) filter reports added key %q absent (false negative)", k)
-		}
+	if k != 3 {
+		t.Errorf("persisted k = %d, want 3 (WithHashes(3) not honored)", k)
+	}
+	// And the filter still round-trips without false negatives.
+	if err := f.Add(ctx, "alpha"); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := f.Contains(ctx, "alpha"); err != nil || !ok {
+		t.Errorf("Contains(alpha) = %v, %v; want true, nil", ok, err)
 	}
 }
 

@@ -113,7 +113,10 @@ func TestTable_WithComment(t *testing.T) {
 func TestTable_WithColumns(t *testing.T) {
 	ctx := context.Background()
 	db := openCSVDB(t, fstest.MapFS{"d.csv": {Data: []byte("1,2,3\n4,5,6\n")}})
-	tbl, err := csv.Create(ctx, db, "t", csv.WithFilename("d.csv"), csv.WithColumns(3))
+	// The CSV is naturally 3 columns wide; WithColumns(5) must override that
+	// and pad two extra columns, so a count of 5 (not 3) proves the option
+	// actually reached the vtab rather than the schema being auto-detected.
+	tbl, err := csv.Create(ctx, db, "t", csv.WithFilename("d.csv"), csv.WithColumns(5))
 	if err != nil {
 		t.Fatalf("Create with WithColumns: %v", err)
 	}
@@ -121,8 +124,8 @@ func TestTable_WithColumns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cols) != 3 {
-		t.Errorf("WithColumns(3) produced %d columns (%v), want 3", len(cols), cols)
+	if len(cols) != 5 {
+		t.Errorf("WithColumns(5) produced %d columns (%v), want 5 (override + pad)", len(cols), cols)
 	}
 }
 

@@ -14,10 +14,10 @@ The API lives in the root package because it needs the connection's unexported h
 | Empty check | `(*Session).IsEmpty` | `sqlite3session_isempty` | ✓ | `TestSession_EnableDisable` |
 | Serialize changeset | `(*Session).Changeset()` | `sqlite3session_changeset` | ✓ | `TestSession_CaptureAndApply` |
 | Serialize patchset | `(*Session).Patchset()` | `sqlite3session_patchset` | ✓ | `TestSession_Patchset` |
-| Diff two databases | `(*Session).Diff(fromSchema, table)` | `sqlite3session_diff` | ✓ (shipped; integration test deferred) | — |
+| Diff two databases | `(*Session).Diff(fromSchema, table)` | `sqlite3session_diff` | ✓ | `TestSession_Diff` |
 | Close | `(*Session).Close()` | `sqlite3session_delete` | ✓ | all |
 | Invert | `(*Conn).InvertChangeset(cs)` | `sqlite3changeset_invert` | ✓ | `TestSession_Invert` |
-| Concat | `(*Conn).ConcatChangesets(a, b)` | `sqlite3changeset_concat` | ✓ | — |
+| Concat | `(*Conn).ConcatChangesets(a, b)` | `sqlite3changeset_concat` | ✓ | `TestSession_Concat` |
 | Apply (+ conflict handler, table filter) | `(*Conn).ApplyChangeset(cs, opts…)` | `sqlite3changeset_apply_v2` | ✓ | `TestSession_CaptureAndApply` / `ConflictReplace` / `ConflictAbortByDefault` / `TableFilter` |
 
 Conflict types (`ConflictData` / `NotFound` / `Conflict` / `Constraint` / `ForeignKey`) and actions (`ChangesetOmit` / `Replace` / `Abort`) are typed. With no `WithConflictHandler`, conflicts abort and roll back (the safe default).

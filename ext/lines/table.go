@@ -74,7 +74,7 @@ func Create(ctx context.Context, db *sql.DB, name string, opts ...CreateOption) 
 	if cfg.hasData {
 		params = append(params, "data="+sqlid.QuoteString(cfg.data))
 	}
-	if err := vtabx.Create(ctx, db, name, ModuleName, params, cfg.ifNotExists, ErrAlreadyExists); err != nil {
+	if err := vtabx.Create(ctx, db, name, "lines", ModuleName, params, cfg.ifNotExists, ErrAlreadyExists); err != nil {
 		return nil, err
 	}
 	return &Table{db: db, name: name}, nil
@@ -121,5 +121,5 @@ func (t *Table) Rows(ctx context.Context) (*sql.Rows, error) {
 
 // Drop removes the vtab. The underlying file is untouched.
 func (t *Table) Drop(ctx context.Context) error {
-	return vtabx.Drop(ctx, t.db, t.name)
+	return vtabx.Drop(ctx, t.db, "lines", t.name)
 }

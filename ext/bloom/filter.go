@@ -86,7 +86,7 @@ func Create(ctx context.Context, db *sql.DB, name string, opts ...CreateOption) 
 	if cfg.k > 0 {
 		params = append(params, fmt.Sprintf("k=%d", cfg.k))
 	}
-	if err := vtabx.Create(ctx, db, name, ModuleName, params, cfg.ifNotExists, ErrAlreadyExists); err != nil {
+	if err := vtabx.Create(ctx, db, name, "bloom", ModuleName, params, cfg.ifNotExists, ErrAlreadyExists); err != nil {
 		return nil, err
 	}
 	return &Filter{db: db, name: name}, nil
@@ -166,5 +166,5 @@ func (f *Filter) Contains(ctx context.Context, key string) (bool, error) {
 // Drop removes the vtab and its shadow storage. The handle is unusable
 // afterward.
 func (f *Filter) Drop(ctx context.Context) error {
-	return vtabx.Drop(ctx, f.db, f.name)
+	return vtabx.Drop(ctx, f.db, "bloom", f.name)
 }

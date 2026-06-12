@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"io/fs"
+	"math"
 	"path"
 	"sort"
 	"strconv"
@@ -65,12 +66,21 @@ func parseMigrationName(base string) (version int, name string, err error) {
 	if digits == "" {
 		return 0, "", fmt.Errorf("missing numeric version prefix")
 	}
-	// strconv.Atoi rejects both non-numeric prefixes and out-of-range values,
-	// avoiding the silent wrap a hand-rolled digit accumulation would suffer on
-	// an absurd prefix (which would then mis-sort or be skipped).
+	// Require a strictly-digit prefix: strconv.Atoi would otherwise accept a
+	// leading '+'/'-', so "-5_x.sql" / "+5_x.sql" would parse to a negative or
+	// aliased version that silently mis-sorts or gets skipped.
+	if digits[0] < '0' || digits[0] > '9' {
+		return 0, "", fmt.Errorf("non-numeric version prefix %q", digits)
+	}
 	version, err = strconv.Atoi(digits)
 	if err != nil {
 		return 0, "", fmt.Errorf("invalid version prefix %q: %w", digits, err)
+	}
+	// Bound to user_version's 32-bit signed range so the parsed version equals
+	// what PRAGMA user_version persists — a truncated round-trip would make
+	// Migrate re-apply the migration on every run.
+	if version > math.MaxInt32 {
+		return 0, "", fmt.Errorf("version prefix %q exceeds the 32-bit user_version range", digits)
 	}
 	return version, name, nil
 }

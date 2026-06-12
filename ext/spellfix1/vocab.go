@@ -59,7 +59,7 @@ func Create(ctx context.Context, db *sql.DB, name string, opts ...CreateOption) 
 	for _, opt := range opts {
 		opt(cfg)
 	}
-	if err := vtabx.Create(ctx, db, name, ModuleName, nil, cfg.ifNotExists, ErrAlreadyExists); err != nil {
+	if err := vtabx.Create(ctx, db, name, "spellfix1", ModuleName, nil, cfg.ifNotExists, ErrAlreadyExists); err != nil {
 		return nil, err
 	}
 	return &Vocab{db: db, name: name}, nil
@@ -135,7 +135,7 @@ func (v *Vocab) Size(ctx context.Context) (int64, error) {
 // Drop removes the vtab and its shadow storage. The handle is unusable
 // afterward.
 func (v *Vocab) Drop(ctx context.Context) error {
-	return vtabx.Drop(ctx, v.db, v.name)
+	return vtabx.Drop(ctx, v.db, "spellfix1", v.name)
 }
 
 // Match is a single hit returned by [Vocab.Correct].

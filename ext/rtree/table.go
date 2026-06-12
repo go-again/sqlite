@@ -72,7 +72,7 @@ func Create(ctx context.Context, db *sql.DB, name string, opts ...CreateOption) 
 	if cfg.int32Coords {
 		module = "rtree_i32"
 	}
-	if err := vtabx.Create(ctx, db, name, module, cols, cfg.ifNotExists, ErrAlreadyExists); err != nil {
+	if err := vtabx.Create(ctx, db, name, "rtree", module, cols, cfg.ifNotExists, ErrAlreadyExists); err != nil {
 		return nil, err
 	}
 	return &Table{db: db, name: name, dims: cfg.dims}, nil
@@ -203,5 +203,5 @@ func (t *Table) queryIDs(ctx context.Context, stmt string, args ...any) ([]int64
 
 // Drop removes the vtab and its backing shadow tables.
 func (t *Table) Drop(ctx context.Context) error {
-	return vtabx.Drop(ctx, t.db, t.name)
+	return vtabx.Drop(ctx, t.db, "rtree", t.name)
 }

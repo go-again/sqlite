@@ -170,6 +170,37 @@ func TestDBConfig_Effect(t *testing.T) {
 	}
 }
 
+// TestDBConfig_WritableSchemaEffect verifies a security-sensitive db_config
+// flag — DBConfigWritableSchema, gating direct writes to sqlite_schema — has
+// its real semantic effect, the class of flag the audit's M10 finding wanted
+// exercised. A mis-mapped op constant would read back fine but not flip this.
+func TestDBConfig_WritableSchemaEffect(t *testing.T) {
+	_, sc, c := withSQLite3Conn(t, ":memory:")
+	ctx := context.Background()
+	if _, err := sc.ExecContext(ctx, `CREATE TABLE t(x)`); err != nil {
+		t.Fatal(err)
+	}
+	// A no-op-valued write to sqlite_schema: rejected unless writable_schema
+	// is on, so its success/failure isolates the flag's effect.
+	const schemaWrite = `UPDATE sqlite_schema SET sql = sql WHERE type = 'table'`
+
+	// Default (writable_schema OFF): the write is rejected.
+	if _, err := c.SetDBConfig(DBConfigWritableSchema, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sc.ExecContext(ctx, schemaWrite); err == nil {
+		t.Error("with writable_schema off, a direct sqlite_schema write should be rejected")
+	}
+
+	// writable_schema ON: the same write is now permitted.
+	if _, err := c.SetDBConfig(DBConfigWritableSchema, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sc.ExecContext(ctx, schemaWrite); err != nil {
+		t.Errorf("with writable_schema on, a direct sqlite_schema write should succeed: %v", err)
+	}
+}
+
 func TestWALHook_Error(t *testing.T) {
 	ctx, sc, c := walDB(t)
 	if _, err := sc.ExecContext(ctx, `CREATE TABLE t(x)`); err != nil {
@@ -283,18 +314,42 @@ func TestSnapshot_OpenAndRecover(t *testing.T) {
 	if _, err := sc.ExecContext(ctx, `INSERT INTO t VALUES (1)`); err != nil {
 		t.Fatal(err)
 	}
-	snap := captureSnapshot(t, ctx, sc, c)
+	snap := captureSnapshot(t, ctx, sc, c) // anchors at the one-row state
 	defer snap.Close()
 
-	// Exercise SnapshotRecover (makes historical snapshots reachable) and
-	// OpenSnapshot (replay a captured state) — the load-bearing C calls that
-	// were previously uncovered. Their preconditions are environment-sensitive,
-	// so a failure here is tolerated rather than fatal; the point is that the
-	// wrappers run without crashing and round-trip the handle into C correctly.
-	if err := c.SnapshotRecover("main"); err != nil {
-		t.Logf("SnapshotRecover: %v (tolerated)", err)
+	// Advance the database past the snapshot: a second row the replayed
+	// snapshot must NOT see.
+	if _, err := sc.ExecContext(ctx, `INSERT INTO t VALUES (2)`); err != nil {
+		t.Fatal(err)
 	}
+
+	// SnapshotRecover must run with no open transaction; it keeps historical
+	// snapshots reachable across checkpoints.
+	if err := c.SnapshotRecover("main"); err != nil {
+		t.Fatalf("SnapshotRecover: %v", err)
+	}
+
+	// Replay: open a fresh deferred transaction (BEGIN, no read yet) then
+	// anchor it at the snapshot with OpenSnapshot. The follow-up SELECT must
+	// see exactly the single row that existed when the snapshot was taken —
+	// proving the wrapper round-trips the handle into C and that the read is
+	// anchored at the historical state, not the current two-row database.
+	tx, err := sc.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
 	if err := c.OpenSnapshot("main", snap); err != nil {
-		t.Logf("OpenSnapshot: %v (tolerated)", err)
+		// snapshot_open's preconditions (no checkpoint has overwritten the
+		// snapshot, WAL still holds the frames) are environment-sensitive;
+		// skip explicitly rather than silently tolerating a failure.
+		t.Skipf("OpenSnapshot unavailable in this environment: %v", err)
+	}
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM t`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("snapshot replay sees %d rows, want 1 (historical state, before the 2nd insert)", n)
 	}
 }

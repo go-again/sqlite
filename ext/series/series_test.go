@@ -104,6 +104,13 @@ func TestSeries_FloatArgs(t *testing.T) {
 	if want := []int64{1, 2, 3, 4, 5}; !eq(got, want) {
 		t.Errorf("generate_series(1.0,5.0) = %v, want %v", got, want)
 	}
+	// Non-integer REAL bounds must truncate toward zero (1.9 → 1, 5.9 → 5),
+	// proving the float branch converts rather than rounds — the integer-valued
+	// 1.0/5.0 case above would pass even if the branch rounded.
+	frac := collect(t, db, `SELECT value FROM generate_series(1.9, 5.9)`)
+	if want := []int64{1, 2, 3, 4, 5}; !eq(frac, want) {
+		t.Errorf("generate_series(1.9,5.9) = %v, want %v (truncated bounds)", frac, want)
+	}
 }
 
 func TestSeries_DescendingEmpty(t *testing.T) {

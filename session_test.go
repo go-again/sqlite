@@ -3,6 +3,8 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"strings"
 	"testing"
 )
 
@@ -246,8 +248,16 @@ func TestSession_Diff(t *testing.T) {
 	if err := sess2.Attach("mism"); err != nil {
 		t.Fatal(err)
 	}
-	if err := sess2.Diff("aux", "mism"); err == nil {
-		t.Error("Diff between schema-mismatched tables should error")
+	// The pErr branch must surface a *sqlite.Error carrying SQLite's own
+	// diagnostic (copied out of the C pzErrMsg buffer before sqlite3_free),
+	// not a generic result-code error.
+	err = sess2.Diff("aux", "mism")
+	var serr *Error
+	if !errors.As(err, &serr) {
+		t.Fatalf("Diff between schema-mismatched tables: error = %v (%T), want *sqlite.Error", err, err)
+	}
+	if !strings.Contains(serr.Error(), "table schemas do not match") {
+		t.Errorf("Diff mismatch error = %q, want it to mention %q", serr.Error(), "table schemas do not match")
 	}
 }
 
@@ -296,9 +306,19 @@ func TestSession_Concat(t *testing.T) {
 		t.Errorf("after concat+apply, count = %d, want 2", n)
 	}
 
-	// An empty operand is legitimate (not an allocation failure).
-	if _, err := src.ConcatChangesets(cs1, nil); err != nil {
-		t.Errorf("ConcatChangesets with an empty operand: %v", err)
+	// An empty operand is legitimate: concat(cs1, nil) must yield exactly cs1's
+	// effect. Applying it to a fresh database inserts the single row, proving
+	// the non-empty operand survives rather than being silently dropped.
+	onlyCS1, err := src.ConcatChangesets(cs1, nil)
+	if err != nil {
+		t.Fatalf("ConcatChangesets with an empty operand: %v", err)
+	}
+	_, freshSC, fresh := newSessionDB(t)
+	if err := fresh.ApplyChangeset(onlyCS1); err != nil {
+		t.Fatalf("apply concat(cs1, nil): %v", err)
+	}
+	if n := countUsers(t, ctx, freshSC); n != 1 {
+		t.Errorf("after concat(cs1,nil)+apply, count = %d, want 1", n)
 	}
 }
 

@@ -89,7 +89,7 @@ func Create(ctx context.Context, db *sql.DB, name string, over Over, opts ...Cre
 		}
 		params = append(params, p.key+"="+p.val)
 	}
-	if err := vtabx.Create(ctx, db, name, ModuleName, params, cfg.ifNotExists, ErrAlreadyExists); err != nil {
+	if err := vtabx.Create(ctx, db, name, "closure", ModuleName, params, cfg.ifNotExists, ErrAlreadyExists); err != nil {
 		return nil, err
 	}
 	return &Graph{db: db, name: name}, nil
@@ -203,5 +203,5 @@ func (g *Graph) Descendants(ctx context.Context, root int64, opts ...WalkOption)
 // Drop removes the vtab. The underlying edge table is untouched (the vtab
 // is only a view). The handle is unusable afterward.
 func (g *Graph) Drop(ctx context.Context) error {
-	return vtabx.Drop(ctx, g.db, g.name)
+	return vtabx.Drop(ctx, g.db, "closure", g.name)
 }
