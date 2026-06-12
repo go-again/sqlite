@@ -27,6 +27,12 @@ import (
 // ext/* sub-packages mean by "quote identifier" — every loadable
 // extension that builds SQL strings against shadow tables had its own
 // byte-identical copy until this helper consolidated them.
+//
+// Precondition: s must not contain a NUL byte. The rendered SQL crosses into
+// C via libc.CString, which terminates at the first NUL, so a NUL would
+// silently truncate the statement rather than be escaped. Callers handling
+// untrusted input should gate it through [ValidIdent] (which rejects NUL) or
+// reject NUL explicitly before quoting.
 func QuoteIdent(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
 }
@@ -35,6 +41,9 @@ func QuoteIdent(s string) string {
 // embedded single quotes — the form a vtab argument-string parser unquotes
 // (e.g. csv(data='…') / lines(filename='…')). Consolidates the byte-identical
 // sqlString helpers that ext/csv and ext/lines each carried.
+//
+// Precondition: s must not contain a NUL byte — see [QuoteIdent]; a NUL
+// truncates the rendered SQL at the C-string boundary.
 func QuoteString(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
@@ -45,6 +54,9 @@ func QuoteString(s string) string {
 // CREATE VIRTUAL TABLE constructor and FTS5's fts5 constructor both
 // expect bare identifiers, so vec / fts pass arguments through this
 // helper outside the constructor and rely on ValidIdent inside it.
+//
+// Precondition: s must not contain a NUL byte — see [QuoteIdent]; a NUL
+// truncates the rendered SQL at the C-string boundary.
 func QuoteIdentBacktick(s string) string {
 	return "`" + strings.ReplaceAll(s, "`", "``") + "`"
 }

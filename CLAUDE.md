@@ -158,12 +158,17 @@ repair if it ever moves.
 
 The same coupling extends to `vfs/crypto/` and `vfs/cksm/`, which reach
 into `lib/`'s exported `Tsqlite3_vfs` / `Tsqlite3_io_methods` structs via
-field-by-field copies — never memcpy — so a modernc bump that reorders
-fields fails to compile rather than scrambling layout. `blob.go` follows
-the same convention for the `sqlite3_blob_*` family. When `just bump-modernc`
-runs, all four file groups (`conn.go`, `vtab.go`, `hooks.go`,
-`pre_update_hook.go`, `blob.go`, `vfs/crypto/crypto.go`, `vfs/cksm/cksm.go`)
-are the places that may need fixing.
+**named-field struct literals** — never memcpy. Be precise about what that
+buys: a field these literals reference that upstream **renames or removes**
+fails to compile (the real guard), but a field upstream **adds or reorders**
+does *not* — named fields bind by name, and an unlisted new field is left
+zero. Safety against additions comes from hard-coding `FiVersion` (and the
+io-methods iVersion) below any field we don't forward, so SQLite never reads
+the zero field. `blob.go` follows the same convention for the
+`sqlite3_blob_*` family. When `just bump-modernc` runs, re-check the field
+lists by hand — `conn.go`, `vtab.go`, `hooks.go`, `pre_update_hook.go`,
+`blob.go`, `vfs/crypto/crypto.go`, `vfs/cksm/cksm.go` are the places that may
+need fixing.
 
 ### 4. database/sql connection pool semantics
 

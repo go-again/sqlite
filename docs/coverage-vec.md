@@ -29,7 +29,7 @@ The core construct. `CREATE VIRTUAL TABLE name USING vec0(...)`.
 | `vec.Create(ctx, db, name, dim, opts)` | ✓ typed | `TestTyped_CreateInsertKNN_JSON` | Errors with `ErrAlreadyExists` (wrapped) when the table already exists. |
 | `vec.Create(..., vec.WithIfNotExists())` idempotent | ✓ typed | `TestCreate_WithIfNotExists_Succeeds`, `TestCreate_WithIfNotExists_DimMismatchUndetected` | Schema mismatch is NOT validated under WithIfNotExists. |
 | `vec.ErrAlreadyExists` sentinel for `errors.Is` | ✓ typed | `TestCreate_DefaultFailsOnSecondCall` |
-| `vec.Open` for an existing table | ✓ typed | `TestTyped_OpenExistingTable` | Strict schema match (caller asserts dim / metric). |
+| `vec.Open` for an existing table | ✓ typed | `TestTyped_Open_OnExistingTable` | Strict schema match (caller asserts dim / metric). |
 
 ### Column options
 

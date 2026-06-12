@@ -20,7 +20,10 @@ func buildSchema(header bool, columns int, row []string) string {
 	sep := ""
 	for i, f := range row {
 		b.WriteString(sep)
-		if header && f != "" {
+		// A NUL in a header cell would truncate the generated DDL at the
+		// libc.CString boundary (a malformed CREATE TABLE); fall back to the
+		// positional name instead, same as an empty cell.
+		if header && f != "" && strings.IndexByte(f, 0) < 0 {
 			b.WriteString(quoteIdent(f))
 		} else {
 			b.WriteByte('c')

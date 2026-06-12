@@ -247,6 +247,10 @@ func vtabCreateTrampoline(tls *libc.TLS, db uintptr, pAux uintptr, argc int32, a
 	sz := unsafe.Sizeof(sqlite3.Sqlite3_vtab{})
 	p := sqlite3.Xsqlite3_malloc(tls, int32(sz))
 	if p == 0 {
+		// Create succeeded and may have allocated shadow tables / handles; on the
+		// NOMEM bail SQLite never gets a vtab to drive xDestroy against, so release
+		// the Go Table here (Create pairs with xDestroy) rather than leak it.
+		_ = tbl.Destroy()
 		setVtabError(tls, pzErr, "vtab: out of memory")
 		return sqlite3.SQLITE_NOMEM
 	}
@@ -295,6 +299,9 @@ func vtabConnectTrampoline(tls *libc.TLS, db uintptr, pAux uintptr, argc int32, 
 	sz := unsafe.Sizeof(sqlite3.Sqlite3_vtab{})
 	p := sqlite3.Xsqlite3_malloc(tls, int32(sz))
 	if p == 0 {
+		// Connect succeeded; release the Go Table (Connect pairs with
+		// xDisconnect) before bailing rather than leak its handles.
+		_ = tbl.Disconnect()
 		setVtabError(tls, pzErr, "vtab: out of memory")
 		return sqlite3.SQLITE_NOMEM
 	}

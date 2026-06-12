@@ -132,6 +132,14 @@ func New[K, V SQLType](ctx context.Context, db *sql.DB, name string, opts Option
 	if opts.External != nil && opts.Contentless {
 		return nil, fmt.Errorf("fts.New: External and Contentless are mutually exclusive")
 	}
+	// Tokenizer args are escaped for the SQL literal (wrapTokenize), but a NUL
+	// would still truncate the generated SQL at the C-string boundary, so refuse
+	// it here where we still have an error channel.
+	if opts.Tokenizer != nil {
+		if err := validateTokenizer(opts.Tokenizer); err != nil {
+			return nil, fmt.Errorf("fts.New: %w", err)
+		}
+	}
 	// Columns vs ColumnsRich silently shadow per columnSpecs() (rich
 	// wins); a non-empty bare Columns alongside non-empty ColumnsRich
 	// usually means a mid-edit typo. Error so the caller picks one.

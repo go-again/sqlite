@@ -54,7 +54,7 @@ func (u Unicode61) encode() string {
 	if u.Separators != "" {
 		args = append(args, "separators", quoteFTSArg(u.Separators))
 	}
-	return "'" + strings.Join(args, " ") + "'"
+	return wrapTokenize(strings.Join(args, " "))
 }
 
 // Ascii is FTS5's plain-ASCII tokenizer. Equivalent to unicode61 with
@@ -76,7 +76,7 @@ func (a Ascii) encode() string {
 	if a.Separators != "" {
 		args = append(args, "separators", quoteFTSArg(a.Separators))
 	}
-	return "'" + strings.Join(args, " ") + "'"
+	return wrapTokenize(strings.Join(args, " "))
 }
 
 // Porter wraps a base tokenizer with Porter stemming so that "running",
@@ -94,8 +94,10 @@ func (p Porter) encode() string {
 		return "'porter'"
 	}
 	// FTS5 expects "porter <inner-tokenize-config>" with the inner config
-	// inlined — i.e. without the outer quotes that the standalone form
-	// produces. Strip them off.
+	// inlined — i.e. without the outer single-quote delimiters that the
+	// standalone form produces. Strip only those two delimiter bytes; any
+	// interior '' that wrapTokenize doubled stays doubled, which is exactly
+	// what the re-wrap below needs (the result is one valid SQL literal).
 	inner := p.Base.encode()
 	inner = strings.TrimPrefix(strings.TrimSuffix(inner, "'"), "'")
 	return "'porter " + inner + "'"
@@ -125,4 +127,53 @@ func (tg Trigram) encode() string {
 // embedded double-quote by doubling it (SQL convention).
 func quoteFTSArg(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+}
+
+// wrapTokenize renders an assembled FTS5 tokenizer spec as the SQL single-
+// quoted string literal the tokenize= option requires. It doubles any
+// embedded single quote so a quote inside a caller-supplied tokenchars /
+// separators / categories value cannot terminate the literal early — the
+// string-literal breakout this closes. quoteFTSArg only handles the inner
+// double-quote delimiter; this handles the outer one.
+func wrapTokenize(spec string) string {
+	return "'" + strings.ReplaceAll(spec, "'", "''") + "'"
+}
+
+// validateTokenizer rejects caller-supplied tokenizer arguments that contain a
+// NUL byte. wrapTokenize neutralizes the single-quote breakout, but a NUL
+// still truncates the generated SQL at the libc.CString boundary (SQLite reads
+// it as a C string), so it must be refused up front rather than silently
+// corrupting the CREATE VIRTUAL TABLE. The tokenizer set is closed, so a type
+// switch covers every free-form field. Control bytes other than NUL are left
+// alone — e.g. a tab is a legitimate separator.
+func validateTokenizer(t Tokenizer) error {
+	check := func(field, v string) error {
+		if strings.IndexByte(v, 0) >= 0 {
+			return fmt.Errorf("tokenizer %s value contains a NUL byte", field)
+		}
+		return nil
+	}
+	switch tk := t.(type) {
+	case Unicode61:
+		for _, f := range []struct{ name, val string }{
+			{"categories", tk.Categories}, {"tokenchars", tk.Tokenchars}, {"separators", tk.Separators},
+		} {
+			if err := check(f.name, f.val); err != nil {
+				return err
+			}
+		}
+	case Ascii:
+		for _, f := range []struct{ name, val string }{
+			{"tokenchars", tk.Tokenchars}, {"separators", tk.Separators},
+		} {
+			if err := check(f.name, f.val); err != nil {
+				return err
+			}
+		}
+	case Porter:
+		if tk.Base != nil {
+			return validateTokenizer(tk.Base)
+		}
+	}
+	return nil
 }

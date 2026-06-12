@@ -152,13 +152,26 @@ func mallocValue(tls *libc.TLS) (uintptr, error) {
 }
 
 func (d *SQLitePreUpdateData) value(ppValue uintptr, i int, new bool) (any, error) {
-	var src any
+	// mallocValue uses Xmalloc, which does not zero the slot. The accessor may
+	// leave the slot untouched on error (out-of-range column, wrong-phase call),
+	// so zero it first and honor the return code instead of dereferencing an
+	// uninitialized heap word.
+	*(*uintptr)(unsafe.Pointer(ppValue)) = 0
+	var rc int32
 	if new {
-		sqlite3.Xsqlite3_preupdate_new(d.tls, d.pCsr, int32(i), ppValue)
+		rc = sqlite3.Xsqlite3_preupdate_new(d.tls, d.pCsr, int32(i), ppValue)
 	} else {
-		sqlite3.Xsqlite3_preupdate_old(d.tls, d.pCsr, int32(i), ppValue)
+		rc = sqlite3.Xsqlite3_preupdate_old(d.tls, d.pCsr, int32(i), ppValue)
+	}
+	if rc != sqlite3.SQLITE_OK {
+		return nil, fmt.Errorf("sqlite: preupdate value(col=%d): rc=%d", i, rc)
 	}
 	ptrValue := *(*uintptr)(unsafe.Pointer(ppValue))
+	if ptrValue == 0 {
+		// No value available for this column (e.g. an absent OLD/NEW slot).
+		return nil, nil
+	}
+	var src any
 	switch sqlite3.Xsqlite3_value_type(d.tls, ptrValue) {
 	case sqlite3.SQLITE_INTEGER:
 		src = int64(sqlite3.Xsqlite3_value_int64(d.tls, ptrValue))

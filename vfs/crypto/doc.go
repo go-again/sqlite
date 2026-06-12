@@ -83,13 +83,25 @@
 // # Drift discipline
 //
 // This package reaches into modernc.org/sqlite/lib's exported
-// Tsqlite3_vfs / Tsqlite3_io_methods struct types via field-by-field
-// copies (never memcpy) so a future modernc bump that reorders fields
-// fails to compile rather than silently scrambling layout. The same
-// libc-version-pin discipline that CLAUDE.md describes for conn.go,
-// vtab.go, etc. applies here: bumping modernc.org/sqlite without re-
-// transpiling may require fixing field assignments in crypto.go's
-// [New].
+// Tsqlite3_vfs / Tsqlite3_io_methods struct types via named-field struct
+// literals (never memcpy). The protection that gives is precise, so it is
+// worth stating exactly rather than overclaiming:
+//
+//   - A field this package references by name that upstream RENAMES or
+//     REMOVES fails to compile — the literal no longer resolves. That is
+//     the real compile-time guard.
+//   - A field upstream ADDS or REORDERS does not fail to compile: named
+//     fields bind by name regardless of order, and an unlisted new field
+//     is simply left zero. Safety in that case comes from hard-coding
+//     FiVersion (and the io-methods iVersion) below any field we do not
+//     forward — SQLite only reads fields valid for the version we declare,
+//     so a higher-version field left zero is never consulted.
+//
+// So a bump cannot silently scramble the fields we copy, but it also will
+// not flag a benign addition. The same libc-version-pin discipline that
+// CLAUDE.md describes for conn.go, vtab.go, etc. applies: when you bump
+// modernc.org/sqlite, re-check the field lists in crypto.go's [New] (and
+// the io-methods table) by hand against the new struct definitions.
 //
 // # On-disk format
 //
