@@ -123,3 +123,40 @@ func (c *conn) fileControl(dbName string, op int, pArg uintptr) error {
 
 	return nil
 }
+
+// SetFileControlInt issues a file-control op whose argument is a single int,
+// returning the value SQLite leaves in the slot (many such ops are
+// read-modify-write — e.g. SQLITE_FCNTL_CHUNK_SIZE, SQLITE_FCNTL_PERSIST_WAL,
+// SQLITE_FCNTL_POWERSAFE_OVERWRITE). schema="" means "main". It is the generic
+// escape hatch over sqlite3_file_control for the int-argument ops this package
+// does not wrap individually.
+//
+// https://sqlite.org/c3ref/file_control.html
+func (c *Conn) SetFileControlInt(schema string, op, val int) (int, error) {
+	if schema == "" {
+		schema = "main"
+	}
+	p, err := c.malloc(4)
+	if err != nil {
+		return 0, err
+	}
+	defer libc.Xfree(c.tls, p)
+	*(*int32)(unsafe.Pointer(p)) = int32(val)
+	if err := c.fileControl(schema, op, p); err != nil {
+		return 0, err
+	}
+	return int(*(*int32)(unsafe.Pointer(p))), nil
+}
+
+// ResetCache discards this connection's page cache for schema
+// (SQLITE_FCNTL_RESET_CACHE), forcing subsequent reads to re-fetch from the VFS.
+// Use it after a lower layer (a wrapping VFS, an external process) has changed
+// the database file out from under SQLite. schema="" means "main".
+//
+// https://sqlite.org/c3ref/c_fcntl_begin_atomic_write.html
+func (c *Conn) ResetCache(schema string) error {
+	if schema == "" {
+		schema = "main"
+	}
+	return c.fileControl(schema, sqlite3.SQLITE_FCNTL_RESET_CACHE, 0)
+}

@@ -11,6 +11,23 @@ Typed `(*Conn)` / `(*Stmt)` methods that bind SQLite C-API surface beyond the `d
 | `(*Conn).TxnState` | `sqlite3_txn_state` | none / read / write | `TestConnTxnState`, `TestConnTxnState_Read` |
 | `(*Stmt).Readonly` | `sqlite3_stmt_readonly` | does the stmt write? (read/write routing) | `TestStmtReadonly` |
 | `(*Stmt).Status` | `sqlite3_stmt_status` | per-stmt VM-step / sort / fullscan counters | `TestStmtStatus` |
+| `(*Conn).Filename` | `sqlite3_db_filename` | on-disk path of a schema ("" for in-memory/temp) | `TestConn_FilenameAndAutoCommit` |
+| `(*Conn).AutoCommit` | `sqlite3_get_autocommit` | true at rest, false inside a transaction | `TestConn_FilenameAndAutoCommit` |
+| `(*Conn).ErrorOffset` | `sqlite3_error_offset` | byte offset of the last parse error's token (-1 if none) | `TestConn_ErrorOffset` |
+| `(*Conn).CacheFlush` | `sqlite3_db_cacheflush` | flush dirty pages mid-transaction (no PRAGMA equivalent) | `TestConn_CacheFlushAndFileControl` |
+| `(*Conn).SetFileControlInt` / `ResetCache` | `sqlite3_file_control` (int ops / `RESET_CACHE`) | generic int file-control escape hatch; drop page cache | `TestConn_CacheFlushAndFileControl` |
+
+### Package-level C-API helpers — [`runtime.go`](../runtime.go)
+
+Process-global, connection-independent (serialized through one mutex-guarded TLS).
+
+| Function | C symbol | Notes | Test |
+|---|---|---|---|
+| `KeywordCount` / `KeywordName` / `IsKeyword` | `sqlite3_keyword_count` / `_name` / `_check` | the build's reserved-word set (authoritative for identifier quoting) | `TestRuntime_Keywords` |
+| `CompileOptionUsed` / `CompileOptionGet` | `sqlite3_compileoption_used` / `_get` | probe the build's feature flags | `TestRuntime_CompileOptions` |
+| `StrGlob` / `StrLike` / `Complete` | `sqlite3_strglob` / `_strlike` / `_complete` | exact GLOB/LIKE without a query; statement-boundary check | `TestRuntime_StringUtils` |
+
+Not wrapped: `sqlite3_memory_used` / heap-limit / `status64` — modernc disables SQLite's memstat (they return 0); use Go's `runtime/metrics` instead.
 
 ## WAL control — [`wal.go`](../wal.go)
 

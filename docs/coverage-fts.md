@@ -71,6 +71,8 @@ direct string assertions for each builder live in `fts/query_test.go`.
 | `NOT` (binary) | ✓ typed | `TestBuild_Not_Single`, `TestBuild_Not_MultipleNegatives`, `TestQuery_Not` |
 | `NEAR(t1 t2, N)` | ✓ typed | `TestBuild_Near` |
 | Column-scoped (`col: query`) | ✓ typed | `TestBuild_Column`, `TestIndex_MultiColumn` |
+| Column-set (`{col1 col2} : query`) | ✓ typed | `TestQuery_ColumnSetBuild` (`ColumnSet`) |
+| Initial-token (`^token`) | ✓ typed | `TestQuery_InitialToken` (`InitialToken`) |
 | Raw passthrough | ✓ typed | `TestBuild_Raw` |
 | Adversarial-input quoting (embedded quotes, operator keywords) | ✓ typed | `TestBuild_Term`, `TestBuild_Phrase` |
 
@@ -114,10 +116,22 @@ Idiomatic FTS5 invocation: `INSERT INTO fts(fts) VALUES('command')`.
 | `'rebuild'` | ✓ typed | `TestExternal_ContentTable`, `TestContentless_*` (rebuild populates external/contentless indexes) |
 | `'optimize'` | ✓ typed | `TestIndex_OptimizeAndMerge` |
 | `'merge'`, with `rank` set to page count | ✓ typed | `TestIndex_OptimizeAndMerge` |
-| `'delete-all'` | ✓ raw | `TestRaw_ContentlessDeleteAll` | Clears contentless table; not in typed API. |
-| `'integrity-check'` | ✓ raw | `TestRaw_IntegrityCheck` | Validates internal FTS5 invariants. Useful for diagnosing corruption. |
+| `'delete-all'` | ✓ typed | `TestIndex_MaintenanceExtras` (`DeleteAll`; errors on non-contentless) | Clears a contentless / external-content index. |
+| `'integrity-check'` | ✓ typed | `TestIndex_MaintenanceExtras` (`IntegrityCheck`) | Validates internal FTS5 invariants; surfaces corruption as an error. |
+| `'rank'` (set default rank function) | ✓ typed | `TestIndex_MaintenanceExtras` (`SetRank`) | e.g. `SetRank(ctx, "bm25(10.0, 5.0)")`. |
 | `'integrity-check', 1` (full check) | ✓ raw | `TestRaw_IntegrityCheck` | Same test covers both the default and rank-coded forms. |
 | `'pgsz'`, `'crisismerge'`, `'automerge'` (tuning knobs) | ✓ raw | `TestRaw_PgszTuning`, `TestRaw_AutomergeAndCrisismerge` | Performance tuning. Raw SQL only. `usermerge` is accepted but not exercised here. |
+
+## Vocabulary tables (fts5vocab)
+
+Typed `fts.Vocab` over `CREATE VIRTUAL TABLE … USING fts5vocab(index, kind)` — a read-only view of the index's term dictionary for term-frequency analytics and autocomplete. Mirrors `spellfix1.Vocab`.
+
+| Kind | Rows | Typed API | Test |
+|---|---|---|---|
+| `row` | term, document count, total occurrences | `NewVocab(…, VocabRow)` → `Terms` / `TopTerms` → `[]VocabTerm` | `TestVocab_RowAndTop` |
+| `col` | per-term per-column counts | `VocabCol` → `Terms` (fills `Column`) | `TestVocab_ColAndInstance` |
+| `instance` | one row per token occurrence (term, doc, col, offset) | `VocabInstance` → `Instances` → `[]Occurrence` | `TestVocab_ColAndInstance` |
+| Idempotent create + Drop | — | `WithVocabIfNotExists`, `ErrVocabAlreadyExists`, `Drop` | `TestVocab_IdempotentAndDrop` |
 
 ## Insert / delete
 

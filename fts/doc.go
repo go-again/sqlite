@@ -22,6 +22,21 @@
 // V is the column type for the indexed text; string is the canonical
 // choice but []byte also works for raw-bytes columns.
 //
+// # Vocabulary tables
+//
+// [NewVocab] builds an fts5vocab view of an index's term dictionary for
+// term-frequency analytics and autocomplete — [Vocab.Terms] / [Vocab.TopTerms]
+// (per-term document and occurrence counts) and [Vocab.Instances] (per-token
+// occurrences). Mirrors spellfix1.Vocab.
+//
+// # Maintenance and query operators
+//
+// Beyond [Index.Rebuild] / [Index.Optimize] / [Index.Merge], the index exposes
+// [Index.IntegrityCheck], [Index.DeleteAll] (contentless / external-content),
+// and [Index.SetRank] (default rank function). The query builder adds
+// [ColumnSet] (`{a b} : query`) and [InitialToken] (`^token`) alongside Term /
+// Phrase / Prefix / And / Or / Not / Near / Column.
+//
 // # Quick start
 //
 //	db, _ := sql.Open("sqlite3", ":memory:")

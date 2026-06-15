@@ -131,3 +131,17 @@ func (c *Conn) dbConfigBool(op DBConfigOp, onoff int32) (bool, error) {
 	}
 	return *(*int32)(unsafe.Pointer(pOut)) != 0, nil
 }
+
+// CacheFlush flushes any dirty pages in this connection's page cache to disk
+// without committing the open transaction, bounding the dirty-page footprint
+// mid-transaction (useful in long bulk-load transactions). There is no PRAGMA
+// equivalent. It is an error to call this while another connection holds a lock
+// that would block the writes.
+//
+// https://sqlite.org/c3ref/db_cacheflush.html
+func (c *Conn) CacheFlush() error {
+	if rc := sqlite3.Xsqlite3_db_cacheflush(c.tls, c.db); rc != sqlite3.SQLITE_OK {
+		return fmt.Errorf("sqlite: CacheFlush: %w", c.errstr(rc))
+	}
+	return nil
+}

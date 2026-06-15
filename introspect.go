@@ -165,3 +165,42 @@ func (c *Conn) TxnState(schema string) TxnState {
 	}
 	return TxnState(sqlite3.Xsqlite3_txn_state(c.tls, c.db, zSchema))
 }
+
+// Filename returns the on-disk path SQLite associates with the given schema
+// ("main", "temp", or an ATTACHed name; "" means "main"). It returns "" for an
+// in-memory or temporary database, and "" if the schema is unknown.
+//
+// https://sqlite.org/c3ref/db_filename.html
+func (c *Conn) Filename(schema string) string {
+	if schema == "" {
+		schema = "main"
+	}
+	z, err := libc.CString(schema)
+	if err != nil {
+		return ""
+	}
+	defer libc.Xfree(c.tls, z)
+	p := sqlite3.Xsqlite3_db_filename(c.tls, c.db, z)
+	if p == 0 {
+		return ""
+	}
+	return libc.GoString(p)
+}
+
+// AutoCommit reports whether the connection is in autocommit mode — true at rest,
+// false while an explicit transaction (BEGIN, or an implicit one held open by a
+// failed COMMIT) is in progress. Useful for savepoint/transaction-nesting logic.
+//
+// https://sqlite.org/c3ref/get_autocommit.html
+func (c *Conn) AutoCommit() bool {
+	return sqlite3.Xsqlite3_get_autocommit(c.tls, c.db) != 0
+}
+
+// ErrorOffset returns the byte offset into the most recently prepared SQL text
+// of the token associated with the most recent error, or -1 if the error is not
+// tied to a specific token. Pair it with a caret-pointed diagnostic.
+//
+// https://sqlite.org/c3ref/error_offset.html
+func (c *Conn) ErrorOffset() int {
+	return int(sqlite3.Xsqlite3_error_offset(c.tls, c.db))
+}

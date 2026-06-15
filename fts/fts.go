@@ -340,6 +340,32 @@ func (i *Index[K, V]) Merge(ctx context.Context, pages int) error {
 	return err
 }
 
+// IntegrityCheck runs FTS5's internal consistency check over the index,
+// returning a non-nil error if it is corrupt (the index and its content disagree,
+// or a shadow table is damaged).
+func (i *Index[K, V]) IntegrityCheck(ctx context.Context) error {
+	_, err := i.db.ExecContext(ctx, fmt.Sprintf("INSERT INTO %s(%s) VALUES('integrity-check')", quote(i.name), quote(i.name)))
+	return err
+}
+
+// DeleteAll removes every entry from the index. It is valid ONLY for contentless
+// and external-content tables (where a plain DELETE is unavailable); on an
+// ordinary FTS5 table FTS5 returns "'delete-all' may only be used with a
+// contentless or external content fts5 table".
+func (i *Index[K, V]) DeleteAll(ctx context.Context) error {
+	_, err := i.db.ExecContext(ctx, fmt.Sprintf("INSERT INTO %s(%s) VALUES('delete-all')", quote(i.name), quote(i.name)))
+	return err
+}
+
+// SetRank sets the index's default rank function — the expression a bare
+// `ORDER BY rank` then uses, e.g. "bm25(10.0, 5.0)" to weight the first column
+// higher. The expression is bound as a parameter.
+func (i *Index[K, V]) SetRank(ctx context.Context, expr string) error {
+	stmt := fmt.Sprintf("INSERT INTO %s(%s, rank) VALUES('rank', ?)", quote(i.name), quote(i.name))
+	_, err := i.db.ExecContext(ctx, stmt, expr)
+	return err
+}
+
 // Drop removes the FTS5 virtual table. The Index handle is invalid after Drop
 // returns.
 func (i *Index[K, V]) Drop(ctx context.Context) error {

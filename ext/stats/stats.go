@@ -219,7 +219,12 @@ func (fn *covariance) Inverse(_ *sqlite.FunctionContext, args []driver.Value) er
 	return nil
 }
 
-func (fn *covariance) Value(*sqlite.FunctionContext) (driver.Value, error) {
+// jsonSubtype is SQLite's JSON1 subtype tag ('J', 0x4A). Tagging a TEXT result
+// with it lets json_extract / -> / ->> treat the value as already-parsed JSON,
+// skipping a re-parse.
+const jsonSubtype = 74
+
+func (fn *covariance) Value(ctx *sqlite.FunctionContext) (driver.Value, error) {
 	if fn.kind == regrCount {
 		return fn.regrCount(), nil
 	}
@@ -254,6 +259,9 @@ func (fn *covariance) Value(*sqlite.FunctionContext) (driver.Value, error) {
 	case regrIntercept:
 		return fn.regrIntercept(), nil
 	case regrJSON:
+		if ctx != nil {
+			ctx.ResultSubtype(jsonSubtype)
+		}
 		return fn.regrJSONString(), nil
 	}
 	return nil, nil

@@ -285,6 +285,25 @@ type FunctionImpl struct {
 	// for more details.
 	Deterministic bool
 
+	// Innocuous marks the function as harmless — no side effects, no access to
+	// the filesystem or environment, output depends only on its arguments. Such
+	// functions remain usable from triggers, views, and partial indexes when
+	// SetDBConfig(DBConfigDefensive, true) or trusted_schema=OFF is in effect,
+	// where non-innocuous application functions are rejected.
+	Innocuous bool
+
+	// DirectOnly forbids the function from being invoked indirectly via
+	// triggers, views, or schema-embedded SQL — only from top-level SQL the
+	// application submits. The conservative default for functions with side
+	// effects, blocking a malicious schema from invoking them. Mutually
+	// exclusive in spirit with Innocuous.
+	DirectOnly bool
+
+	// Subtype declares that the function reads the subtype of one or more of its
+	// arguments via FunctionContext.ValueSubtype. SQLite uses this to keep the
+	// subtype information flowing through the expression.
+	Subtype bool
+
 	// Scalar is called when a scalar function is invoked in SQL. The
 	// argument Values are not valid past the return of the function.
 	Scalar func(ctx *FunctionContext, args []driver.Value) (driver.Value, error)
@@ -548,6 +567,15 @@ func registerFunction(
 
 	if impl.Deterministic {
 		textrep |= sqlite3.SQLITE_DETERMINISTIC
+	}
+	if impl.Innocuous {
+		textrep |= sqlite3.SQLITE_INNOCUOUS
+	}
+	if impl.DirectOnly {
+		textrep |= sqlite3.SQLITE_DIRECTONLY
+	}
+	if impl.Subtype {
+		textrep |= sqlite3.SQLITE_SUBTYPE
 	}
 
 	udf := &userDefinedFunction{

@@ -107,6 +107,17 @@ func TestStats_RegrJSON(t *testing.T) {
 	if !nearly(obj["slope"], 2.0) || !nearly(obj["count"], 5) {
 		t.Errorf("regr_json = %q, want slope=2 count=5", got)
 	}
+
+	// The result is tagged with the JSON subtype, so json_extract / ->> consume
+	// it directly as a JSON object (no re-parse needed) and return the field.
+	var slope float64
+	if err := sc.QueryRowContext(context.Background(),
+		`SELECT json_extract(regr_json(y, x), '$.slope') FROM samples`).Scan(&slope); err != nil {
+		t.Fatalf("json_extract over regr_json: %v", err)
+	}
+	if !nearly(slope, 2.0) {
+		t.Errorf("json_extract($.slope) = %v, want 2.0", slope)
+	}
 }
 
 func TestStats_Median(t *testing.T) {

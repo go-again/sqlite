@@ -167,6 +167,33 @@ func (c columnQ) Build() string {
 	return c.col + ": (" + c.q.Build() + ")"
 }
 
+// ColumnSet scopes a sub-query to a SET of columns — FTS5's `{col1 col2} : query`
+// syntax, the multi-column form of [Column]. Like Column, the names are
+// interpolated unquoted (FTS5's column-filter syntax rejects quoted
+// identifiers); validate names from untrusted input with [ValidIdent].
+func ColumnSet(cols []string, q Query) Query {
+	return columnSetQ{cols: cols, q: q}
+}
+
+type columnSetQ struct {
+	cols []string
+	q    Query
+}
+
+func (c columnSetQ) Build() string {
+	return "{" + strings.Join(c.cols, " ") + "} : (" + c.q.Build() + ")"
+}
+
+// InitialToken matches s only when it is the FIRST token of a column — FTS5's
+// `^token` syntax. Use it for anchored "column starts with" matches.
+func InitialToken(s string) Query { return initialQ(s) }
+
+type initialQ string
+
+func (t initialQ) Build() string {
+	return "^" + ftsQuoteTerm(string(t))
+}
+
 // ftsQuoteTerm wraps a term in double-quotes for FTS5, doubling any embedded
 // double-quote characters. This lets us pass arbitrary user input without
 // worrying about FTS5 operator keywords getting interpreted.
