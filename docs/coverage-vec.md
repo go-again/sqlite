@@ -36,14 +36,16 @@ The core construct. `CREATE VIRTUAL TABLE name USING vec0(...)`.
 | Feature | Status | Test | Notes |
 |---|---|---|---|
 | `embedding float[N]` (fixed dim float32 column) | ✓ typed | `TestTyped_CreateInsertKNN_JSON`, `TestRaw_SqliteVecSample` | `vec.Create(ctx, db, name, dim, opts)`. |
-| `embedding bit[N]` (bit-packed vector) | ✓ raw | `TestRaw_BitVec_HammingKNN` | Reach via raw SQL with `vec_bit(BLOB)` constructor. Hamming distance asserted. No typed wrapper. |
-| `embedding int8[N]` (int8-packed vector) | ✓ raw | `TestRaw_Int8Vec` | Reach via raw SQL with `vec_int8(BLOB)` constructor. No typed wrapper. |
+| `embedding bit[N]` (bit-packed vector) | ✓ typed | `TestTyped_BitEncoding` | `vec.Options{Encoding: vec.Bit}`; quantized via `vec_quantize_binary` at the SQL layer, ranks by Hamming (forced). |
+| `embedding int8[N]` (int8-packed vector) | ✓ typed | `TestTyped_Int8Encoding` | `vec.Options{Encoding: vec.Int8}`; quantized via `vec_quantize_int8(?, 'unit')` (assumes [-1, 1] range). 4× smaller than float32. |
 | `distance=l1` | ✓ typed | `TestTyped_DotMetric` | Exposed as `vec.Dot` metric (legacy name; semantically L1). |
 | `distance=l2` (default) | ✓ typed | `TestTyped_CreateInsertKNN_JSON` | Exposed as `vec.L2`. |
 | `distance=cosine` | ✓ typed | `TestTyped_CosineMetric` | Exposed as `vec.Cosine`. |
-| Auxiliary columns (`+col TYPE`) | ✓ raw | `TestRaw_AuxColumn` | sqlite-vec supports `+aux_col TYPE` for non-indexed columns. Not in typed API. |
-| Metadata columns (`col TYPE`) | ✓ raw | `TestRaw_MetadataColumn_FilteredKNN` | Indexed metadata for filtered KNN. Not in typed API. |
-| Partition columns | ✓ raw | `TestRaw_PartitionKey` | sqlite-vec partitions vectors by a discriminator column. Not in typed API. |
+| `bit[N]` Hamming | ✓ typed | `TestTyped_BitEncoding` | Exposed as `vec.Hamming`; implicit for bit columns (no `distance=` clause emitted). |
+| Auxiliary columns (`+col TYPE`) | ✓ typed | `TestTyped_AuxColumnRetrieval` | `vec.Column{Kind: vec.Auxiliary}`; carried via `Row.Values`, read back via `WithSelect` + `KNNSQL`. |
+| Metadata columns (`col TYPE`) | ✓ typed | `TestTyped_MetadataPartitionFilter` | `vec.Column{Kind: vec.Metadata}`; filterable in KNN via `WithFilter`. |
+| Partition columns | ✓ typed | `TestTyped_MetadataPartitionFilter` | `vec.Column{Kind: vec.Partition}`; partition-key shard, also filterable via `WithFilter`. |
+| `chunk_size=N` table option | ✓ typed | `TestTyped_MetadataPartitionFilter` | `Options.ChunkSize`. |
 | Per-column `distance_metric=cosine`/`l1` | ✓ raw | `TestRaw_DistanceMetric_Cosine` | Documented vec0 column option; mirrored at the typed level via `Options.Metric`. |
 
 ### Insert / update / delete
@@ -76,6 +78,8 @@ The core construct. `CREATE VIRTUAL TABLE name USING vec0(...)`.
 |---|---|---|
 | JSON text `[v0, v1, ...]` | ✓ typed | `TestTyped_CreateInsertKNN_JSON` (default) |
 | Binary little-endian float32 BLOB (wrapped in `vec_f32(?)` bind) | ✓ typed | `TestTyped_BinaryEncoding` (parity check vs JSON) |
+| Int8-quantized (`vec.Int8`; `vec_quantize_int8(?, 'unit')`) | ✓ typed | `TestTyped_Int8Encoding` |
+| Bit-quantized (`vec.Bit`; `vec_quantize_binary(?)`, Hamming) | ✓ typed | `TestTyped_BitEncoding` |
 | Cross-encoding round-trip | ✓ typed | `TestTyped_BinaryEncoding` asserts ranking matches the JSON baseline. |
 | `vec.Encode(v, enc)` raw-bind helper (placeholder + value) | ✓ typed | `TestEncode_JSON_RoundTrip`, `TestEncode_Binary_RoundTrip`, `TestEncode_PlaceholderShape` |
 
@@ -125,14 +129,9 @@ authoritative.
 
 ## Known gaps worth flagging
 
-- **No typed API for auxiliary / metadata / partition columns.** These are
-  sqlite-vec's mechanism for filtering and partitioning. Reachable today
-  via raw SQL (`TestRaw_AuxColumn`, `TestRaw_MetadataColumn_FilteredKNN`,
-  `TestRaw_PartitionKey`) but no typed wrapper. Adding one is a deliberate
-  API expansion; deferred until there's user pressure.
-- **No bit-vector or int8-vector typed API.** sqlite-vec supports
-  `bit[N]` and `int8[N]` storage. Reachable via raw SQL
-  (`TestRaw_BitVec_HammingKNN`, `TestRaw_Int8Vec`); no typed API.
+- **No typed change of metadata column values after insert.** `Table.Update`
+  rewrites only the embedding; to change a metadata/partition/auxiliary value,
+  use a raw `UPDATE` or delete-and-reinsert via `InsertRow`.
 - **No matrix / streaming KNN iteration beyond `iter.Seq2`.** If you need
   to stream millions of rows out of a single query, the iterator handles
   it but you cannot pre-emptively cancel partway through except by

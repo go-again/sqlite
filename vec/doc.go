@@ -37,9 +37,24 @@
 // # Typed Go API (option b)
 //
 // See Create, Open, and the Table type for an iter.Seq2-based KNN cursor and
-// typed Insert/BatchInsert/Delete helpers that handle JSON vs. binary
-// encoding for you. The typed API is built strictly on top of the raw SQL
-// layer above — anything you can do in SQL you can do in Go.
+// typed Insert/BatchInsert/Delete helpers that handle the wire encoding for
+// you. The Encoding option selects both the column storage type and the bind
+// form: JSON or Binary (float[N]), Int8 (int8[N], 4× smaller — quantized via
+// vec_quantize_int8 assuming unit [-1, 1] range), or Bit (bit[N], 32× smaller,
+// ranked by the Hamming metric Create forces). The typed API is built strictly
+// on top of the raw SQL layer above — anything you can do in SQL you can do in
+// Go.
+//
+// # Metadata, partition, and auxiliary columns
+//
+// Declare non-embedding columns via Options.Columns to filter, partition, and
+// carry payloads on a vec0 table. A [Column] is Metadata (indexed, filterable),
+// Partition (a partition-key shard, also filterable), or Auxiliary (an
+// unindexed `+col` payload returned but not filterable). Set per-row values via
+// [Row.Values] on [Table.InsertRow] / [Table.BatchInsert]; filter on metadata /
+// partition columns in KNN with [WithFilter]; read metadata / auxiliary columns
+// back with [WithSelect] + [Table.KNNSQL]. Options.ChunkSize sets vec0's
+// chunk_size=.
 //
 // # Filtered KNN
 //

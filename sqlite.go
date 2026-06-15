@@ -415,9 +415,22 @@ type ConnectionHookFn func(
 
 // FunctionContext represents the context user defined functions execute in.
 // Fields and/or methods of this type may get addedd in the future.
+//
+// Beyond identifying the invocation it exposes the SQLite function-context
+// substrate: result/argument subtypes ([FunctionContext.ResultSubtype] /
+// [FunctionContext.ValueSubtype]) and per-argument auxiliary-data caching
+// ([FunctionContext.SetAuxData] / [FunctionContext.GetAuxData]). See
+// function_context.go.
 type FunctionContext struct {
-	tls *libc.TLS
-	ctx uintptr
+	tls  *libc.TLS
+	ctx  uintptr
+	argc int32   // number of arguments (0 for window Value/Final contexts)
+	argv uintptr // C array of sqlite3_value* for ValueSubtype; 0 when argc==0
+
+	// resultSubtype is applied by the trampoline after the result value is
+	// set, so ResultSubtype may be called anywhere in the function body.
+	resultSubtype    uint
+	hasResultSubtype bool
 }
 
 const sqliteValPtrSize = unsafe.Sizeof(&sqlite3.Sqlite3_value{})
@@ -900,7 +913,8 @@ func funcTrampoline(tls *libc.TLS, ctx uintptr, argc int32, argv uintptr) {
 	setErrorResult := errorResultFunction(tls, ctx)
 	sp := functionArgs(tls, argc, argv)
 	defer releaseUDFArgs(sp)
-	res, err := xFunc(&FunctionContext{}, *sp)
+	fc := &FunctionContext{tls: tls, ctx: ctx, argc: argc, argv: argv}
+	res, err := xFunc(fc, *sp)
 
 	if err != nil {
 		setErrorResult(err)
@@ -910,7 +924,9 @@ func funcTrampoline(tls *libc.TLS, ctx uintptr, argc int32, argv uintptr) {
 	err = functionReturnValue(tls, ctx, res)
 	if err != nil {
 		setErrorResult(err)
+		return
 	}
+	fc.applyResultSubtype()
 }
 
 // sqlite3AllocCString allocates a NUL-terminated copy of s using SQLite's
@@ -937,7 +953,7 @@ func stepTrampoline(tls *libc.TLS, ctx uintptr, argc int32, argv uintptr) {
 	setErrorResult := errorResultFunction(tls, ctx)
 	sp := functionArgs(tls, argc, argv)
 	defer releaseUDFArgs(sp)
-	err := impl.Step(&FunctionContext{}, *sp)
+	err := impl.Step(&FunctionContext{tls: tls, ctx: ctx, argc: argc, argv: argv}, *sp)
 	if err != nil {
 		setErrorResult(err)
 	}
@@ -952,7 +968,7 @@ func inverseTrampoline(tls *libc.TLS, ctx uintptr, argc int32, argv uintptr) {
 	setErrorResult := errorResultFunction(tls, ctx)
 	sp := functionArgs(tls, argc, argv)
 	defer releaseUDFArgs(sp)
-	err := impl.WindowInverse(&FunctionContext{}, *sp)
+	err := impl.WindowInverse(&FunctionContext{tls: tls, ctx: ctx, argc: argc, argv: argv}, *sp)
 	if err != nil {
 		setErrorResult(err)
 	}
@@ -965,14 +981,14 @@ func valueTrampoline(tls *libc.TLS, ctx uintptr) {
 	}
 
 	setErrorResult := errorResultFunction(tls, ctx)
-	res, err := impl.WindowValue(&FunctionContext{})
+	fc := &FunctionContext{tls: tls, ctx: ctx}
+	res, err := impl.WindowValue(fc)
 	if err != nil {
 		setErrorResult(err)
+	} else if err = functionReturnValue(tls, ctx, res); err != nil {
+		setErrorResult(err)
 	} else {
-		err = functionReturnValue(tls, ctx, res)
-		if err != nil {
-			setErrorResult(err)
-		}
+		fc.applyResultSubtype()
 	}
 }
 
@@ -983,16 +999,16 @@ func finalTrampoline(tls *libc.TLS, ctx uintptr) {
 	}
 
 	setErrorResult := errorResultFunction(tls, ctx)
-	res, err := impl.WindowValue(&FunctionContext{})
+	fc := &FunctionContext{tls: tls, ctx: ctx}
+	res, err := impl.WindowValue(fc)
 	if err != nil {
 		setErrorResult(err)
+	} else if err = functionReturnValue(tls, ctx, res); err != nil {
+		setErrorResult(err)
 	} else {
-		err = functionReturnValue(tls, ctx, res)
-		if err != nil {
-			setErrorResult(err)
-		}
+		fc.applyResultSubtype()
 	}
-	impl.Final(&FunctionContext{})
+	impl.Final(&FunctionContext{tls: tls, ctx: ctx})
 
 	xAggregateContext.mu.Lock()
 	defer xAggregateContext.mu.Unlock()

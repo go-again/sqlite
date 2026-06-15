@@ -72,6 +72,10 @@ type conn struct {
 	// process-global rtree geometry/query registries, drained the same way.
 	rtreeGeomIDs  []uintptr
 	rtreeQueryIDs []uintptr
+
+	// collationNeededIDs holds the ids this conn minted in the process-global
+	// collation-needed registry (one per CollationNeeded call), drained on close.
+	collationNeededIDs []uintptr
 }
 
 // defaultStmtCacheSize matches mattn's _stmt_cache_size default. A cache that

@@ -36,6 +36,23 @@ Typed `(*Conn)` / `(*Stmt)` methods that bind SQLite C-API surface beyond the `d
 | `(*Conn).SetProgressHandler` | `sqlite3_progress_handler` | periodic VM-instruction callback; return true to interrupt | `TestProgressHandler` |
 | `(*Conn).SetDBConfig` / `QueryDBConfig` | `sqlite3_db_config` | boolean flags incl. security-only DEFENSIVE / TRUSTED_SCHEMA / WRITABLE_SCHEMA (no PRAGMA equivalent), via `libc.VaList` | `TestDBConfig`, `TestDBConfig_Effect` |
 
-All per-connection callbacks (WAL hook, progress handler, rtree geometry/query) are stored in process-global registries keyed by `c.db` / a minted id and drained in `(*conn).dropHookHandlers` on Close — see [`hooks.go`](../hooks.go).
+## Lazy collation registration — [`collation_needed.go`](../collation_needed.go)
 
-Last reviewed against the transpiled SQLite conn-method surface on 2026-06-12.
+| Method | C symbol | Notes | Test |
+|---|---|---|---|
+| `(*Conn).CollationNeeded` | `sqlite3_collation_needed` | fires when a statement references an undefined collation; handler defines it on demand (typically via `RegisterCollation`) | `TestCollationNeeded_Custom` |
+| `(*Conn).AnyCollationNeeded` | (built on the above) | defines every unknown collation as byte-wise/BINARY so foreign schemas open/ATTACH/restore without "no such collation sequence" | `TestCollationNeeded_AnyFakesBinary`, `TestCollationNeeded_DrainOnClose` |
+
+## UDF function-context substrate — [`function_context.go`](../function_context.go)
+
+Methods on `*FunctionContext` (the value passed to scalar / aggregate / window callbacks).
+
+| Method | C symbol | What it does | Test |
+|---|---|---|---|
+| `(*FunctionContext).ResultSubtype` | `sqlite3_result_subtype` | tag the result value's subtype (applied after the result is set) | `TestFunctionContext_Subtype` |
+| `(*FunctionContext).ValueSubtype` | `sqlite3_value_subtype` | read an argument's subtype | `TestFunctionContext_Subtype` |
+| `(*FunctionContext).SetAuxData` / `GetAuxData` | `sqlite3_set_auxdata` / `sqlite3_get_auxdata` | cache a Go value against a constant argument and reuse it across rows; auto-released (destructor drains the registry) on finalize | `TestFunctionContext_AuxData` |
+
+All per-connection callbacks (WAL hook, progress handler, rtree geometry/query, collation-needed) are stored in process-global registries keyed by `c.db` / a minted id and drained in `(*conn).dropHookHandlers` on Close — see [`hooks.go`](../hooks.go).
+
+Last reviewed against the transpiled SQLite conn-method surface on 2026-06-13.

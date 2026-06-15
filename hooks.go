@@ -151,6 +151,10 @@ func (c *conn) dropHookHandlers() {
 		rtreeQuery.drop(id)
 	}
 	c.rtreeQueryIDs = nil
+	for _, id := range c.collationNeededIDs {
+		collationNeeded.drop(id)
+	}
+	c.collationNeededIDs = nil
 
 	if len(c.fnIDs) > 0 {
 		xFuncs.mu.Lock()

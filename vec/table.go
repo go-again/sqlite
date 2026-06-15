@@ -25,10 +25,11 @@ type Table struct {
 	dim       int
 	metric    Metric
 	encoding  Encoding
+	columns   []Column // declared metadata / partition / auxiliary columns
 
 	// Pre-rendered SQL strings for the per-row Insert / Update /
-	// Delete paths. They depend only on (name, embedding, encoding)
-	// which are immutable after Create / Open, so caching at
+	// Delete paths. They depend only on (name, embedding, encoding,
+	// columns) which are immutable after Create / Open, so caching at
 	// construction avoids re-running fmt.Sprintf on every call.
 	insertSQL string
 	updateSQL string
@@ -36,17 +37,58 @@ type Table struct {
 }
 
 // buildSQL prepares the cached SQL strings; called from Create and
-// Open after every Table field is populated.
+// Open after every Table field is populated. When the table declares extra
+// columns (metadata / partition / auxiliary), the INSERT carries them after
+// the embedding; UPDATE still touches only the embedding (change column values
+// with a raw UPDATE or delete+insert).
 func (t *Table) buildSQL() {
+	cols := []string{"rowid", quote(t.embedding)}
+	phs := []string{"?", t.encoding.Placeholder()}
+	for _, c := range t.columns {
+		cols = append(cols, quote(c.Name))
+		phs = append(phs, "?")
+	}
 	t.insertSQL = fmt.Sprintf(
-		"INSERT INTO %s (rowid, %s) VALUES (?, %s)",
-		quote(t.name), quote(t.embedding), t.encoding.Placeholder(),
+		"INSERT INTO %s (%s) VALUES (%s)",
+		quote(t.name), strings.Join(cols, ", "), strings.Join(phs, ", "),
 	)
 	t.updateSQL = fmt.Sprintf(
 		"UPDATE %s SET %s = %s WHERE rowid = ?",
 		quote(t.name), quote(t.embedding), t.encoding.Placeholder(),
 	)
 	t.deleteSQL = fmt.Sprintf("DELETE FROM %s WHERE rowid = ?", quote(t.name))
+}
+
+// insertArgs builds the positional bind args for insertSQL: rowid, the encoded
+// embedding, then each declared column's value from values (nil when absent, so
+// the simple Insert path can pass a nil map).
+func (t *Table) insertArgs(rowid int64, embedding []float32, values map[string]any) []any {
+	args := make([]any, 0, 2+len(t.columns))
+	args = append(args, rowid, t.encoding.Encode(embedding))
+	for _, c := range t.columns {
+		args = append(args, values[c.Name])
+	}
+	return args
+}
+
+// columnDDL renders the vec0 column-declaration fragment for c (validating the
+// name). Partition keys get the "partition key" suffix; auxiliary columns the
+// "+" prefix; metadata columns are bare "name type".
+func columnDDL(c Column) (string, error) {
+	if !validIdent(c.Name) {
+		return "", fmt.Errorf("vec.Create: column %q is not a valid SQL identifier", c.Name)
+	}
+	if !validIdent(c.Type) {
+		return "", fmt.Errorf("vec.Create: column %q has invalid type %q", c.Name, c.Type)
+	}
+	switch c.Kind {
+	case Partition:
+		return fmt.Sprintf("%s %s partition key", c.Name, c.Type), nil
+	case Auxiliary:
+		return fmt.Sprintf("+%s %s", c.Name, c.Type), nil
+	default:
+		return fmt.Sprintf("%s %s", c.Name, c.Type), nil
+	}
 }
 
 // QuoteIdent returns name in backticks, escaping any embedded backticks.
@@ -128,18 +170,42 @@ func Create(ctx context.Context, db *sql.DB, name string, dim int, opts Options,
 		opt(cfg)
 	}
 	col := "embedding"
+	// The Bit encoding (bit[N] column) ranks by Hamming distance only; force
+	// it so a stray L2/Cosine default doesn't produce an invalid DDL.
+	metric := opts.Metric
+	if opts.Encoding == Bit {
+		metric = Hamming
+	}
 	// vec0's column-argument parser is strict: bare identifiers only, with
 	// options space-separated. We assemble the column declaration without
 	// backticks; the table name itself goes through quote() because the
-	// surrounding CREATE VIRTUAL TABLE keyword accepts quoted identifiers.
+	// surrounding CREATE VIRTUAL TABLE keyword accepts quoted identifiers. The
+	// column storage type (float / int8 / bit) comes from the encoding.
 	ifNotExists := ""
 	if cfg.ifNotExists {
 		ifNotExists = "IF NOT EXISTS "
 	}
-	stmt := fmt.Sprintf(
-		"CREATE VIRTUAL TABLE %s%s USING vec0(%s float[%d] distance=%s)",
-		ifNotExists, quote(name), col, dim, opts.Metric.Keyword(),
-	)
+	// bit[N] columns rank by Hamming implicitly and reject a distance= clause;
+	// every other column type takes the explicit metric keyword.
+	colDecl := fmt.Sprintf("%s %s[%d]", col, opts.Encoding.columnType(), dim)
+	if opts.Encoding != Bit {
+		colDecl += " distance=" + metric.Keyword()
+	}
+	// Assemble the column list: embedding first, then declared metadata /
+	// partition / auxiliary columns, then chunk_size (verified to parse in this
+	// order against sqlite-vec).
+	specs := []string{colDecl}
+	for _, c := range opts.Columns {
+		decl, err := columnDDL(c)
+		if err != nil {
+			return nil, err
+		}
+		specs = append(specs, decl)
+	}
+	if opts.ChunkSize > 0 {
+		specs = append(specs, fmt.Sprintf("chunk_size=%d", opts.ChunkSize))
+	}
+	stmt := fmt.Sprintf("CREATE VIRTUAL TABLE %s%s USING vec0(%s)", ifNotExists, quote(name), strings.Join(specs, ", "))
 	if _, err := db.ExecContext(ctx, stmt); err != nil {
 		if isAlreadyExistsErr(err) {
 			return nil, fmt.Errorf("vec.Create %q: %w", name, ErrAlreadyExists)
@@ -151,8 +217,9 @@ func Create(ctx context.Context, db *sql.DB, name string, dim int, opts Options,
 		name:      name,
 		embedding: col,
 		dim:       dim,
-		metric:    opts.Metric,
+		metric:    metric,
 		encoding:  opts.Encoding,
+		columns:   opts.Columns,
 	}
 	t.buildSQL()
 	return t, nil
@@ -178,13 +245,18 @@ func Open(db *sql.DB, name string, dim int, opts Options) (*Table, error) {
 	if !validIdent(name) {
 		return nil, fmt.Errorf("vec.Open: %q is not a valid SQL identifier", name)
 	}
+	metric := opts.Metric
+	if opts.Encoding == Bit {
+		metric = Hamming
+	}
 	t := &Table{
 		db:        db,
 		name:      name,
 		embedding: "embedding",
 		dim:       dim,
-		metric:    opts.Metric,
+		metric:    metric,
 		encoding:  opts.Encoding,
+		columns:   opts.Columns,
 	}
 	t.buildSQL()
 	return t, nil
@@ -218,14 +290,31 @@ func (t *Table) Insert(ctx context.Context, rowid int64, embedding []float32) er
 	if len(embedding) != t.dim {
 		return fmt.Errorf("vec.Insert: embedding length %d != dim %d", len(embedding), t.dim)
 	}
-	_, err := t.db.ExecContext(ctx, t.insertSQL, rowid, t.encoding.Encode(embedding))
+	// nil values map: declared columns (if any) bind NULL. Use InsertRow /
+	// BatchInsert with Row.Values to set them.
+	_, err := t.db.ExecContext(ctx, t.insertSQL, t.insertArgs(rowid, embedding, nil)...)
 	return err
 }
 
-// Row is a single (rowid, embedding) pair consumed by BatchInsert.
+// Row is a single (rowid, embedding) pair consumed by BatchInsert and
+// InsertRow. Values supplies the declared metadata / partition / auxiliary
+// column values keyed by column name; a column absent from the map binds NULL.
 type Row struct {
 	Rowid     int64
 	Embedding []float32
+	Values    map[string]any
+}
+
+// InsertRow inserts a single row including its declared column values (Row.Values).
+// Use it instead of Insert when the table has metadata / partition / auxiliary
+// columns. Like Insert, a duplicate rowid is an error (vec0 INSERT ignores
+// OR REPLACE).
+func (t *Table) InsertRow(ctx context.Context, row Row) error {
+	if len(row.Embedding) != t.dim {
+		return fmt.Errorf("vec.InsertRow: embedding length %d != dim %d", len(row.Embedding), t.dim)
+	}
+	_, err := t.db.ExecContext(ctx, t.insertSQL, t.insertArgs(row.Rowid, row.Embedding, row.Values)...)
+	return err
 }
 
 // BatchInsert inserts every item in a single transaction. Each rowid must be
@@ -248,7 +337,7 @@ func (t *Table) BatchInsert(ctx context.Context, items []Row) error {
 				tx.Rollback(),
 			)
 		}
-		if _, err := stmt.ExecContext(ctx, it.Rowid, t.encoding.Encode(it.Embedding)); err != nil {
+		if _, err := stmt.ExecContext(ctx, t.insertArgs(it.Rowid, it.Embedding, it.Values)...); err != nil {
 			return errors.Join(fmt.Errorf("vec.BatchInsert[%d]: %w", i, err), tx.Rollback())
 		}
 	}
@@ -424,13 +513,13 @@ func (t *Table) buildKNNSQL(query []float32, k int, cfg *queryConfig) (string, [
 	b.WriteString(quote(t.embedding))
 	b.WriteString(" MATCH ")
 	b.WriteString(t.encoding.Placeholder())
-	// k = N is required when there's a JOIN — sqlite-vec's planner can't
-	// extract a `LIMIT N` constraint through a join boundary, but the
-	// `k = N` predicate is a vec0-recognized vtab hint that survives.
-	// When no join is in play, `LIMIT N` is fine (and produces simpler
-	// EXPLAIN output).
-	joining := cfg.joinClause != "" || cfg.selectExtra != ""
-	if joining {
+	// k = N is required ONLY when there's a JOIN: the LIMIT then bounds the
+	// outer (post-join) result, so the vtab still needs the vec0-recognized
+	// `k = N` hint to bound its KNN. On a direct vtab scan (no join — even with
+	// WithSelect adding projection columns) emitting both k= and LIMIT is
+	// rejected by sqlite-vec ("Only LIMIT or 'k =?' can be provided, not
+	// both"), so we rely on LIMIT alone there.
+	if cfg.joinClause != "" {
 		fmt.Fprintf(&b, " AND k = %d", k)
 	}
 	emitWhereArgs := false

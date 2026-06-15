@@ -40,8 +40,10 @@ func encodeBinary(v []float32) []byte {
 }
 
 // Encode serializes a []float32 into a value suitable for sql.DB.Exec
-// bindings. JSON yields a string; Binary yields a []byte. Both forms are
-// accepted by sqlite-vec's vec0 module.
+// bindings. Binary yields a packed float32 []byte; every other encoding yields
+// the JSON-array string. For Int8 / Bit the float vector is sent as JSON text
+// and sqlite-vec quantizes it at the SQL layer (see Placeholder), so the Go
+// side stays float32 throughout.
 func (e Encoding) Encode(v []float32) any {
 	switch e {
 	case Binary:
@@ -51,15 +53,25 @@ func (e Encoding) Encode(v []float32) any {
 	}
 }
 
-// Placeholder returns the SQL fragment used to bind a vector argument
-// on the right-hand side of MATCH. JSON needs no wrapping ("?"); Binary
-// needs to be run through sqlite-vec's vec_f32 constructor ("vec_f32(?)")
-// so the BLOB is interpreted correctly.
+// Placeholder returns the SQL fragment that binds a vector argument on the
+// right-hand side of MATCH (and in INSERT / UPDATE):
+//   - JSON: "?" — the text JSON array is parsed directly.
+//   - Binary: "vec_f32(?)" — the packed float32 BLOB is reconstructed.
+//   - Int8: "vec_quantize_int8(?, 'unit')" — the JSON float vector is quantized
+//     to int8 assuming unit ([-1, 1]) range.
+//   - Bit: "vec_quantize_binary(?)" — the JSON float vector is quantized to a
+//     1-bit-per-dimension sign vector.
 func (e Encoding) Placeholder() string {
-	if e == Binary {
+	switch e {
+	case Binary:
 		return "vec_f32(?)"
+	case Int8:
+		return "vec_quantize_int8(?, 'unit')"
+	case Bit:
+		return "vec_quantize_binary(?)"
+	default:
+		return "?"
 	}
-	return "?"
 }
 
 // Encode is the package-function form of [Encoding.Placeholder] +
