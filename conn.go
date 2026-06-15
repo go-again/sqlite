@@ -76,6 +76,11 @@ type conn struct {
 	// collationNeededIDs holds the ids this conn minted in the process-global
 	// collation-needed registry (one per CollationNeeded call), drained on close.
 	collationNeededIDs []uintptr
+
+	// ftsTokFactoryIDs holds the ids this conn minted in the process-global
+	// FTS5 tokenizer-factory registry (one per RegisterFTS5Tokenizer), drained
+	// on close.
+	ftsTokFactoryIDs []uintptr
 }
 
 // defaultStmtCacheSize matches mattn's _stmt_cache_size default. A cache that

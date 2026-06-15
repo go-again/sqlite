@@ -40,6 +40,53 @@ func TestTyped_Int8Encoding(t *testing.T) {
 	if matches[0].Distance > 1.0 {
 		t.Errorf("self-match distance = %f, want ~0", matches[0].Distance)
 	}
+	// The runner-up distance must be on the int8 scale (squared int8 deltas →
+	// tens/hundreds), not the float L2 scale (~2.x for unit vectors). This is
+	// what makes the test int8-specific rather than passing for a float
+	// passthrough.
+	if len(matches) > 1 && matches[1].Distance < 10 {
+		t.Errorf("non-self distance = %f, want int8-scale (>10); looks like a float passthrough", matches[1].Distance)
+	}
+}
+
+// TestTyped_Int8OutOfRange pins the documented footgun: 'unit' quantization
+// saturates out-of-[-1,1] components rather than erroring, so an over-range
+// insert + query still self-matches at distance 0 (silently lossy).
+func TestTyped_Int8OutOfRange(t *testing.T) {
+	db := openDB(t)
+	ctx := context.Background()
+	tbl, err := vec.Create(ctx, db, "docs", 4, vec.Options{Encoding: vec.Int8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	over := []float32{5, -5, 3, -3} // all outside [-1, 1]
+	if err := tbl.Insert(ctx, 1, over); err != nil {
+		t.Fatalf("over-range insert should succeed (saturating), got: %v", err)
+	}
+	matches, err := tbl.KNNSlice(ctx, over, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 || matches[0].Rowid != 1 {
+		t.Errorf("over-range self-match = %+v, want rowid 1", matches)
+	}
+}
+
+// TestTyped_BitDimGuard / chunk-size guard: Create rejects an invalid bit dim or
+// chunk_size up front with a clear typed error.
+func TestTyped_BitDimGuard(t *testing.T) {
+	db := openDB(t)
+	ctx := context.Background()
+	if _, err := vec.Create(ctx, db, "docs", 10, vec.Options{Encoding: vec.Bit}); err == nil {
+		t.Error("bit[10] (not a multiple of 8) should be rejected at Create")
+	}
+	if _, err := vec.Create(ctx, db, "docs", 4, vec.Options{ChunkSize: 7}); err == nil {
+		t.Error("ChunkSize=7 (not a multiple of 8) should be rejected at Create")
+	}
+	// The valid forms still succeed.
+	if _, err := vec.Create(ctx, db, "bits", 8, vec.Options{Encoding: vec.Bit}); err != nil {
+		t.Errorf("bit[8] should succeed: %v", err)
+	}
 }
 
 // TestTyped_BitEncoding: a bit[N] column quantizes to one sign-bit per dimension

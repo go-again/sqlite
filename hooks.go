@@ -155,6 +155,10 @@ func (c *conn) dropHookHandlers() {
 		collationNeeded.drop(id)
 	}
 	c.collationNeededIDs = nil
+	for _, id := range c.ftsTokFactoryIDs {
+		ftsTokFactories.drop(id)
+	}
+	c.ftsTokFactoryIDs = nil
 
 	if len(c.fnIDs) > 0 {
 		xFuncs.mu.Lock()

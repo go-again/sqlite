@@ -18,8 +18,8 @@ Existing mattn / glebarez / ncruces code keeps working after the import swap; th
 
 The driver itself — CGo-free, mattn-API + glebarez-gorm drop-in, registered under both `"sqlite"` and `"sqlite3"` names — is just the floor. Stacked on top, in the same module:
 
-- **Vector search** — typed `vec.Table` over [sqlite-vec](https://github.com/asg017/sqlite-vec): L2 / Cosine / Dot metrics, JSON + binary encoding, streaming `iter.Seq2` KNN, `WithFilter` predicate pushdown, `KNNSQL` escape hatch
-- **Full-text search** — typed `fts.Index[K, V]` over FTS5: Porter / Unicode61 / Trigram tokenizers, Go query builder, BM25 ranking, snippet + highlight, external-content / in-table / contentless modes
+- **Vector search** — typed `vec.Table` over [sqlite-vec](https://github.com/asg017/sqlite-vec): L2 / Cosine / Dot / Hamming metrics, JSON + binary + quantized `int8` / `bit` encodings, metadata / partition-key / auxiliary columns + `chunk_size`, streaming `iter.Seq2` KNN, `WithFilter` predicate pushdown, `KNNSQL` escape hatch
+- **Full-text search** — typed `fts.Index[K, V]` over FTS5: Porter / Unicode61 / Trigram tokenizers (plus **custom Go tokenizers** via `(*Conn).RegisterFTS5Tokenizer`), Go query builder, BM25 ranking, snippet + highlight, external-content / in-table / contentless modes
 - **Tag-driven gorm bridges** — `vec/gorm` and `fts/gorm` maintain vector + FTS5 sidecars from a single field tag on your gorm models, with cascading `DropTable`, soft-delete awareness, typed `KNN[T]` / `Search[T]` helpers
 - **Hybrid search** — `fusion.RRF` combines `vec.KNN` and `fts.Search` rankings via Reciprocal Rank Fusion (Cormack 2009)
 - **Encryption at rest** — pure-Go `vfs/crypto` with Adiantum (default) or AES-XTS-256, transparent page-level encryption of main DB + journal + WAL + temp files; built-in Argon2id key derivation; per-IO `Recorder` observability
@@ -31,8 +31,9 @@ The driver itself — CGo-free, mattn-API + glebarez-gorm drop-in, registered un
 - **Backup, serialize, deserialize** — mattn-compat `(*Conn).Backup` factory + top-level `sqlite.Serialize` / `Deserialize` for in-memory snapshots
 - **Changesets / patchsets (SESSION extension)** — `(*Conn).CreateSession` records changes; serialize to a changeset/patchset, `InvertChangeset`, `ConcatChangesets`, and `ApplyChangeset` to another database with a Go conflict handler. The foundation for offline sync, audit logs, and lightweight replication — **no other pure-Go SQLite driver exposes this**. See `examples/session/`
 - **Column metadata + runtime telemetry** — `(*Conn).TableColumnMetadata` (decltype/collation/PK/autoinc without a SELECT), `(*Conn).Status` (SQLite cache/lookaside counters), `(*Conn).TxnState`, `(*Stmt).Readonly` / `Status`
+- **UDF function-context substrate + lazy collations** — `*FunctionContext` exposes result/argument subtypes (`ResultSubtype` / `ValueSubtype`) and per-argument auxiliary-data caching (`SetAuxData` / `GetAuxData`, e.g. compile a regex once per constant arg); `(*Conn).CollationNeeded` / `AnyCollationNeeded` define collations on demand so foreign schemas open / ATTACH / restore without "no such collation sequence"
 - **Modern Go-typed Config** — `sqlite.Config{Path, Pragmas, Encryption, MaxOpenConns, …}` flows uniformly to both raw `database/sql` and gorm; no DSN-string duplication
-- **`sqlitex` ergonomics** — pure-Go `database/sql` helpers in the zombiezen/crawshaw lineage: `Save` (deferred savepoints), `Transaction` / `ImmediateTransaction`, `ExecScript`, `ResultInt/Text/Float/Bool`, and an `embed.FS` migration runner (`Migrate`, tracked via `PRAGMA user_version`)
+- **`sqlitex` ergonomics** — pure-Go `database/sql` helpers in the zombiezen/crawshaw lineage: `Save` (deferred savepoints), `Transaction` / `ImmediateTransaction`, `ExecScript`, `Execute` (row-callback queries with named params), `ResultInt/Text/Float/Bool` + `ResultStrings/Ints` collectors, and an `embed.FS` migration runner (`Migrate`, tracked via `PRAGMA user_version`)
 - **Modern Go idioms throughout** — generics, `iter.Seq2`, `log/slog`, `range over int`, `sync.WaitGroup.Go`; `gopls modernize` enforced in CI. Requires one of the two most recent Go releases — see [Supported Go versions](#supported-go-versions)
 
 ## How it compares
@@ -49,6 +50,7 @@ The Go SQLite landscape has three architectural camps: CGo bindings (mattn, zomb
 | gorm dialector in the same module | ✓ | ✗ | ✗ | ✗ | ✓ |
 | Typed sqlite-vec API | ✓ | ✗ | ✗ | ✗ | ✗ |
 | Typed FTS5 API | ✓ | ✗ | ✗ | ✗ | ✗ |
+| Custom Go FTS5 tokenizers | ✓ | ✗ | ✗ | ✗ | ✗ |
 | Tag-driven gorm bridges (vec + FTS5 sidecars) | ✓ | ✗ | ✗ | ✗ | ✗ |
 | Hybrid-search rank fusion | ✓ | ✗ | ✗ | ✗ | ✗ |
 | Encryption-at-rest VFS | ✓ (Adiantum + AES-XTS, single constructor) | ✗ (rely on SQLCipher CGo build) | ✗ | ✓ (separate `vfs/adiantum` + `vfs/xts`) | ✗ |
@@ -64,6 +66,7 @@ The Go SQLite landscape has three architectural camps: CGo bindings (mattn, zomb
 - **Single module, full stack.** Driver + gorm + vec + FTS5 + fusion + crypto + cksm + the in-memory VFSes + the full `ext/` catalog all release together; no coordinating cadences across `modernc.org/sqlite` + `glebarez/sqlite` + `asg017/sqlite-vec` + whatever encryption / checksum / vtab module you also need.
 - **One driver, two SQL names.** `"sqlite"` (modernc-style) and `"sqlite3"` (mattn-style) point at the same registered singleton, so the import-swap migration recipe is one line for users coming from either side.
 - **Typed vec + FTS5 + tag-driven gorm sidecars are first-class.** Every other Go SQLite driver requires DIY plumbing for these. Models stay as plain gorm structs; an embedding field with `vec:"dim=N;metric=cosine"` and a text field with `fts5:"tokenize=porter+unicode61"` is enough.
+- **Custom Go FTS5 tokenizers.** `(*Conn).RegisterFTS5Tokenizer` registers a Go-implemented tokenizer through the `fts5_api` `xCreateTokenizer` handshake — CJK segmentation, stemming, or synonym expansion in Go. No other pure-Go SQLite driver (modernc, ncruces) exposes this.
 - **`vfs/crypto` consolidates Adiantum + AES-XTS** behind one `New(Options{Cipher: …})`; ncruces ships them as separate `vfs/adiantum` and `vfs/xts` packages.
 - **Modern Go-typed `sqlite.Config`** flows uniformly to raw `database/sql` and gorm — no DSN-string duplication between layers.
 

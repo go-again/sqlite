@@ -165,6 +165,15 @@ func Create(ctx context.Context, db *sql.DB, name string, dim int, opts Options,
 	if !validIdent(name) {
 		return nil, fmt.Errorf("vec.Create: %q is not a valid SQL identifier", name)
 	}
+	// bit[N] vectors are byte-packed, so N must be a multiple of 8. sqlite-vec
+	// accepts the DDL but fails confusingly at insert ("length divisible by 8");
+	// reject early with a clear message.
+	if opts.Encoding == Bit && dim%8 != 0 {
+		return nil, fmt.Errorf("vec.Create: bit encoding requires dim divisible by 8, got %d", dim)
+	}
+	if opts.ChunkSize != 0 && opts.ChunkSize%8 != 0 {
+		return nil, fmt.Errorf("vec.Create: ChunkSize must be divisible by 8, got %d", opts.ChunkSize)
+	}
 	cfg := &createConfig{}
 	for _, opt := range createOpts {
 		opt(cfg)
@@ -245,6 +254,9 @@ func Open(db *sql.DB, name string, dim int, opts Options) (*Table, error) {
 	if !validIdent(name) {
 		return nil, fmt.Errorf("vec.Open: %q is not a valid SQL identifier", name)
 	}
+	if opts.Encoding == Bit && dim%8 != 0 {
+		return nil, fmt.Errorf("vec.Open: bit encoding requires dim divisible by 8, got %d", dim)
+	}
 	metric := opts.Metric
 	if opts.Encoding == Bit {
 		metric = Hamming
@@ -299,6 +311,12 @@ func (t *Table) Insert(ctx context.Context, rowid int64, embedding []float32) er
 // Row is a single (rowid, embedding) pair consumed by BatchInsert and
 // InsertRow. Values supplies the declared metadata / partition / auxiliary
 // column values keyed by column name; a column absent from the map binds NULL.
+//
+// Note: sqlite-vec requires a value for metadata and partition-key columns — a
+// NULL (i.e. an omitted entry) is rejected at insert. Only auxiliary columns
+// may be omitted. The simple [Table.Insert] therefore works only on tables with
+// no extra columns (or auxiliary-only); use InsertRow / BatchInsert with Values
+// for tables that declare metadata or partition columns.
 type Row struct {
 	Rowid     int64
 	Embedding []float32

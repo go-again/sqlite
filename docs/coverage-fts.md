@@ -44,7 +44,7 @@ Underlying FTS5 docs: https://www.sqlite.org/fts5.html
 | `tokenize='ascii ...'` | ✓ typed | `TestTokenizer_Ascii` | `Ascii{Tokenchars, Separators}`. |
 | `tokenize='porter ...'` | ✓ typed | `TestTokenizer_Porter` | `Porter{Base Tokenizer}` — wraps any base tokenizer. |
 | `tokenize='trigram ...'` | ✓ typed | `TestTokenizer_Trigram` | `Trigram{CaseSensitive}`. |
-| Custom Go tokenizer | ✗ | — | FTS5's `fts5_tokenizer` C API would need a Go binding we don't have. |
+| Custom Go tokenizer | ✓ raw | `TestRegisterFTS5Tokenizer` (root pkg) | `(*sqlite.Conn).RegisterFTS5Tokenizer(name, factory)` registers a Go `FTS5Tokenizer` via the `fts5_api` `xCreateTokenizer` handshake; reference it as `tokenize='name'`. Per-connection (pin the pool). No other pure-Go driver offers this. |
 | `prefix='2 3 4'` | ✓ typed | covered transitively via `Options.Prefix` | Pre-computes prefix-match indexes for the listed lengths. |
 | `content='source_table'` (external content) | ✓ typed | `TestExternal_ContentTable` | `Options.External{ContentTable, ContentRowid}`. |
 | `content_rowid='col'` | ✓ typed | same | Maps the external rowid. |
@@ -139,9 +139,11 @@ Idiomatic FTS5 invocation: `INSERT INTO fts(fts) VALUES('command')`.
 
 ## Known gaps worth flagging
 
-- **No custom Go tokenizers.** FTS5's `fts5_tokenizer_v2` C API allows
-  user-supplied tokenizers. We don't expose a Go binding. The four
-  built-in tokenizers (Unicode61, Ascii, Porter, Trigram) are typed.
+- **Custom Go tokenizers** are exposed via the root-package
+  `(*sqlite.Conn).RegisterFTS5Tokenizer` (the `fts5_api` `xCreateTokenizer`
+  binding) — not through this typed `fts/` package, since registration needs
+  the raw connection. The four built-in tokenizers (Unicode61, Ascii, Porter,
+  Trigram) remain typed here.
 - **`matchinfo()` is not an FTS5 function.** It existed in FTS3/FTS4 and
   is intentionally not carried over; `bm25()` (or a custom rank
   function) replaces it. Confirmed via probe: SQLite returns

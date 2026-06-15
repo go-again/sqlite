@@ -120,3 +120,50 @@ func TestFunctionContext_AuxData(t *testing.T) {
 		t.Errorf("auxdata registry not drained after finalize: have %d, want %d (destructor leak)", got, base)
 	}
 }
+
+// TestFunctionContext_AuxData_NonConstant: the complement of the caching test —
+// when the argument varies per row, GetAuxData never hits, so the body
+// recomputes every row (SQLite only preserves auxdata for constant arguments).
+func TestFunctionContext_AuxData_NonConstant(t *testing.T) {
+	var computes atomic.Int64
+	if err := RegisterFunction("fc_auxvary", &FunctionImpl{
+		NArgs: 1,
+		Scalar: func(ctx *FunctionContext, args []driver.Value) (driver.Value, error) {
+			if _, ok := ctx.GetAuxData(0); !ok {
+				computes.Add(1)
+				ctx.SetAuxData(0, struct{}{})
+			}
+			return args[0], nil
+		},
+	}); err != nil {
+		t.Fatalf("RegisterFunction: %v", err)
+	}
+
+	db, err := sql.Open(DriverName, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// The argument is the per-row value c.i, not a constant, so auxdata is never
+	// preserved → one compute per row.
+	rows, err := db.Query(`WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM c WHERE i < 20) SELECT fc_auxvary(i) FROM c`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for rows.Next() {
+		var v int64
+		if err := rows.Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		n++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	rows.Close()
+	if c := computes.Load(); int(c) != n || n != 20 {
+		t.Errorf("computed %d times over %d rows, want 20 each (non-constant arg ⇒ no cache reuse)", c, n)
+	}
+}

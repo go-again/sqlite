@@ -53,6 +53,12 @@ Methods on `*FunctionContext` (the value passed to scalar / aggregate / window c
 | `(*FunctionContext).ValueSubtype` | `sqlite3_value_subtype` | read an argument's subtype | `TestFunctionContext_Subtype` |
 | `(*FunctionContext).SetAuxData` / `GetAuxData` | `sqlite3_set_auxdata` / `sqlite3_get_auxdata` | cache a Go value against a constant argument and reuse it across rows; auto-released (destructor drains the registry) on finalize | `TestFunctionContext_AuxData` |
 
-All per-connection callbacks (WAL hook, progress handler, rtree geometry/query, collation-needed) are stored in process-global registries keyed by `c.db` / a minted id and drained in `(*conn).dropHookHandlers` on Close — see [`hooks.go`](../hooks.go).
+## Custom FTS5 tokenizer — [`fts5_tokenizer.go`](../fts5_tokenizer.go)
+
+| Method | C symbol | Notes | Test |
+|---|---|---|---|
+| `(*Conn).RegisterFTS5Tokenizer` | `fts5_api.xCreateTokenizer` | registers a Go `FTS5Tokenizer` (the `SELECT fts5(?1)` / `bind_pointer` handshake gets the api); reference it as `tokenize='name'`. Per-connection. No other pure-Go driver exposes this. | `TestRegisterFTS5Tokenizer`, `TestRegisterFTS5Tokenizer_DrainOnClose` |
+
+All per-connection callbacks (WAL hook, progress handler, rtree geometry/query, collation-needed, FTS5 tokenizer factory) are stored in process-global registries keyed by `c.db` / a minted id and drained in `(*conn).dropHookHandlers` on Close — see [`hooks.go`](../hooks.go).
 
 Last reviewed against the transpiled SQLite conn-method surface on 2026-06-13.

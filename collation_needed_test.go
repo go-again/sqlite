@@ -19,7 +19,10 @@ func seedColl(t *testing.T, ctx context.Context, sc *sql.Conn) {
 	if _, err := sc.ExecContext(ctx, `CREATE TABLE t(x TEXT)`); err != nil {
 		t.Fatal(err)
 	}
-	for _, v := range []string{"b", "a", "c"} {
+	// Mixed case so byte-wise (BINARY) order — uppercase before lowercase —
+	// diverges from a case-insensitive/locale order. This makes the "byte-wise
+	// specifically" claim load-bearing rather than true for any collation.
+	for _, v := range []string{"b", "A", "c", "B", "a"} {
 		if _, err := sc.ExecContext(ctx, `INSERT INTO t VALUES (?)`, v); err != nil {
 			t.Fatal(err)
 		}
@@ -59,7 +62,10 @@ func TestCollationNeeded_AnyFakesBinary(t *testing.T) {
 		t.Fatalf("AnyCollationNeeded: %v", err)
 	}
 	got := collOrder(t, ctx, sc, "weird_locale")
-	if want := []string{"a", "b", "c"}; !slices.Equal(got, want) {
+	// BINARY (byte-wise): uppercase (A=65, B=66) sorts before lowercase
+	// (a=97…) — a case-insensitive/locale collation would interleave them, so
+	// this ordering is specific to byte-wise.
+	if want := []string{"A", "B", "a", "b", "c"}; !slices.Equal(got, want) {
 		t.Errorf("order under faked collation = %v, want %v (byte-wise)", got, want)
 	}
 }
@@ -79,7 +85,8 @@ func TestCollationNeeded_Custom(t *testing.T) {
 	seedColl(t, ctx, sc)
 
 	got := collOrder(t, ctx, sc, "rev")
-	if want := []string{"c", "b", "a"}; !slices.Equal(got, want) {
+	// Reverse byte-wise: descending code points → c, b, a, then B, A.
+	if want := []string{"c", "b", "a", "B", "A"}; !slices.Equal(got, want) {
 		t.Errorf("order under reverse collation = %v, want %v", got, want)
 	}
 }

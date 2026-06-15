@@ -120,3 +120,38 @@ func TestTyped_InsertRow(t *testing.T) {
 		t.Errorf("matches = %+v, want rowid 7", matches)
 	}
 }
+
+// TestTyped_InsertRow_AbsentColumnBinding pins sqlite-vec's column-nullability
+// rule: an absent AUXILIARY column binds NULL (allowed), but an absent
+// metadata/partition column is rejected (sqlite-vec requires a value), so the
+// simple Insert path likewise can't be used on a metadata table.
+func TestTyped_InsertRow_AbsentColumnBinding(t *testing.T) {
+	ctx := context.Background()
+	db := openDB(t)
+
+	// Auxiliary column omitted from Values → stored NULL, no error.
+	aux, err := vec.Create(ctx, db, "auxt", 4, vec.Options{
+		Columns: []vec.Column{{Name: "payload", Type: "text", Kind: vec.Auxiliary}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := aux.InsertRow(ctx, vec.Row{Rowid: 1, Embedding: []float32{1, 0, 0, 0}}); err != nil {
+		t.Errorf("InsertRow omitting an auxiliary column should bind NULL, got: %v", err)
+	}
+
+	// Metadata column omitted → sqlite-vec rejects the NULL. The simple Insert
+	// (which binds NULL for every declared column) fails the same way.
+	meta, err := vec.Create(ctx, db, "metat", 4, vec.Options{
+		Columns: []vec.Column{{Name: "cat", Type: "text", Kind: vec.Metadata}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := meta.InsertRow(ctx, vec.Row{Rowid: 1, Embedding: []float32{1, 0, 0, 0}}); err == nil {
+		t.Error("InsertRow omitting a required metadata column should error (NULL rejected)")
+	}
+	if err := meta.Insert(ctx, 2, []float32{0, 1, 0, 0}); err == nil {
+		t.Error("simple Insert on a metadata table should error (binds NULL for the metadata column)")
+	}
+}
