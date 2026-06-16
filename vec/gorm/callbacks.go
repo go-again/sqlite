@@ -5,9 +5,20 @@ import (
 	"reflect"
 
 	"github.com/go-again/sqlite/internal/gormbridge"
-	"github.com/go-again/sqlite/vec"
 	"gorm.io/gorm"
+	"gorm.io/gorm/schema"
 )
+
+// pkValue extracts the model's primary key as the value the sidecar binds:
+// a string for text-keyed sidecars, an int64 rowid otherwise.
+func pkValue(m meta, pkField *schema.Field, row reflect.Value) (any, bool) {
+	if m.KeyIsText {
+		s, ok := gormbridge.PKAsString(pkField, row)
+		return s, ok
+	}
+	n, ok := gormbridge.PKAsInt64(pkField, row)
+	return n, ok
+}
 
 // afterCreate runs after the source-table INSERT. Reads the just-assigned
 // rowid from the gorm Statement and writes the matching embedding to
@@ -26,12 +37,12 @@ func (p *plugin) afterCreate(db *gorm.DB) {
 
 	ctx := gormbridge.HelperContext(db)
 	for _, m := range mm.Fields {
-		items := make([]vec.Row, 0, len(rows))
+		items := make([]sidecarItem, 0, len(rows))
 		for _, row := range rows {
-			rowid, ok := gormbridge.PKAsInt64(mm.PKField, row)
+			key, ok := pkValue(m, mm.PKField, row)
 			if !ok {
 				_ = db.AddError(fmt.Errorf(
-					"vecgorm: %s primary key value %v is not convertible to int64",
+					"vecgorm: %s primary key value %v could not be read as the sidecar key",
 					mm.PKField.Name, row.FieldByIndex(mm.PKField.StructField.Index).Interface()))
 				return
 			}
@@ -42,7 +53,7 @@ func (p *plugin) afterCreate(db *gorm.DB) {
 				// or NULL" convention.)
 				continue
 			}
-			items = append(items, vec.Row{Rowid: rowid, Embedding: emb})
+			items = append(items, sidecarItem{Key: key, Embedding: emb})
 		}
 		if len(items) == 0 {
 			continue
@@ -86,7 +97,7 @@ func (p *plugin) afterUpdate(db *gorm.DB) {
 		}
 
 		for _, row := range rows {
-			rowid, ok := gormbridge.PKAsInt64(mm.PKField, row)
+			key, ok := pkValue(m, mm.PKField, row)
 			if !ok {
 				continue
 			}
@@ -94,7 +105,7 @@ func (p *plugin) afterUpdate(db *gorm.DB) {
 			if !ok || len(emb) == 0 {
 				continue
 			}
-			if err := updateEmbedding(ctx, db, m, rowid, emb); err != nil {
+			if err := updateEmbedding(ctx, db, m, key, emb); err != nil {
 				_ = db.AddError(err)
 				return
 			}
@@ -146,11 +157,11 @@ func (p *plugin) afterDelete(db *gorm.DB) {
 			continue
 		}
 		for _, row := range rows {
-			rowid, ok := gormbridge.PKAsInt64(mm.PKField, row)
+			key, ok := pkValue(m, mm.PKField, row)
 			if !ok {
 				continue
 			}
-			if err := deleteEmbedding(ctx, db, m, rowid); err != nil {
+			if err := deleteEmbedding(ctx, db, m, key); err != nil {
 				_ = db.AddError(err)
 				return
 			}

@@ -34,6 +34,15 @@
 //
 //	db.Migrator().DropTable(&Document{})    // source + sidecar both gone
 //
+// # Primary keys
+//
+// Both integer and string primary keys are supported. An integer PK keys the
+// sidecar on the implicit int64 rowid; a string PK (e.g. a UUID or slug) keys
+// it on an explicit `id text primary key` column backed by a
+// [github.com/go-again/sqlite/vec.KeyedTable]. The model's PK type is detected
+// at registration — no tag is needed. Composite or non-int/non-string primary
+// keys are not supported.
+//
 // # Tag syntax
 //
 // All keys after `vec:` are optional except `dim`. Separator is `;`.

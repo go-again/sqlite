@@ -145,22 +145,47 @@ type ExecPool interface {
 // dropped from the map — callers treat a missing key as a stale sidecar
 // entry and skip it rather than failing the whole search.
 func MaterializeByRowid[T any](ctx context.Context, db *gorm.DB, pkField *schema.Field, rowids []any) (map[int64]T, error) {
+	return MaterializeByKey[int64, T](ctx, db, pkField, rowids, PKAsInt64)
+}
+
+// PKAsString extracts the primary key as a string, unwrapping pointers. Returns
+// ("", false) for a nil pointer or a non-string kind.
+func PKAsString(f *schema.Field, row reflect.Value) (string, bool) {
+	v := row.FieldByIndex(f.StructField.Index)
+	for v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return "", false
+		}
+		v = v.Elem()
+	}
+	if v.Kind() == reflect.String {
+		return v.String(), true
+	}
+	return "", false
+}
+
+// MaterializeByKey is the generic form of [MaterializeByRowid]: it fetches the
+// rows whose primary key is in keys and returns them indexed by the key
+// extracted via keyOf (so callers can key by int64 rowid or string PK). A key
+// present in keys but absent from the fetched rows is silently dropped (treated
+// as a stale sidecar entry).
+func MaterializeByKey[K comparable, T any](ctx context.Context, db *gorm.DB, pkField *schema.Field, keys []any, keyOf func(*schema.Field, reflect.Value) (K, bool)) (map[K]T, error) {
 	var zero T
 	models := reflect.New(reflect.SliceOf(reflect.TypeOf(zero))).Interface()
 	if err := db.WithContext(ctx).
-		Where(fmt.Sprintf("%s IN ?", sqlid.QuoteIdentBacktick(pkField.DBName)), rowids).
+		Where(fmt.Sprintf("%s IN ?", sqlid.QuoteIdentBacktick(pkField.DBName)), keys).
 		Find(models).Error; err != nil {
 		return nil, err
 	}
-	indexed := make(map[int64]T, len(rowids))
+	indexed := make(map[K]T, len(keys))
 	sliceVal := reflect.ValueOf(models).Elem()
 	for i := 0; i < sliceVal.Len(); i++ {
 		row := sliceVal.Index(i)
-		pk, ok := PKAsInt64(pkField, row)
+		k, ok := keyOf(pkField, row)
 		if !ok {
 			continue
 		}
-		indexed[pk] = row.Interface().(T)
+		indexed[k] = row.Interface().(T)
 	}
 	return indexed, nil
 }

@@ -153,6 +153,15 @@ func (p *plugin) registerSchema(db *gorm.DB, model any) (modelMeta, error) {
 		}
 		m.SoftDelete = gormbridge.FindDeletedAtField(stmt.Schema) != nil
 
+		// Resolve the sidecar key column from the model's PK type: integer
+		// PKs key on the implicit rowid; string PKs on an explicit "id" column.
+		if isIntegerPK(mm.PKField) {
+			m.KeyColumn = "rowid"
+		} else {
+			m.KeyIsText = true
+			m.KeyColumn = "id"
+		}
+
 		// Mute gorm's own SQL machinery for this field. The plugin
 		// owns its persistence.
 		f.IgnoreMigration = true

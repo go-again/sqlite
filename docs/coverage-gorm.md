@@ -221,6 +221,7 @@ Conflicting table-level keys across fields are rejected at parse time.
 | Delete (hard) | AfterDelete callback `(*vec.Table).Delete` | AFTER DELETE trigger emits FTS5 `'delete'` |
 | Delete (soft, via `gorm.DeletedAt`) | Sidecar `deleted` flag flipped to 1 | FTS5's UNINDEXED `deleted_at` mirror set by trigger |
 | KNN / Search read-side | Typed `KNN[T]` returns materialized models; soft-deleted excluded by default, `IncludeDeleted()` overrides | Typed `Search[T]` ditto; soft-delete filter is `deleted_at IS NULL` (external) or `deleted = 0` (in-table/contentless) |
+| Primary-key type | Integer PK → rowid-keyed sidecar; string PK (UUID/slug) → `id text primary key` sidecar over `vec.KeyedTable[string]`. Detected at registration, no tag. (`TestStringPK_*`) | FTS5 keys on the source rowid |
 | Multi-embedding models | `vecgorm.WithField("Embedding")` picks which sidecar to query | n/a (FTS5 columns share one index) |
 | Custom projection / JOIN | `vecgorm.KNNSQL[T]` + `WithSelect` / `WithJoin` / `WithOrderBy` returns `(sql, args, err)` for `db.Raw(...).Scan(&custom)` | `ftsgorm.SearchSQL[T]` same shape |
 | DropSidecar | Drops sidecar table | Drops FTS5 table + all three triggers (for external mode) |

@@ -60,6 +60,15 @@ type meta struct {
 	// model's gorm schema has a soft-delete column. The sidecar carries
 	// a `deleted` metadata column and KNN filters on it by default.
 	SoftDelete bool
+
+	// KeyColumn / KeyIsText describe the sidecar's primary-key column,
+	// resolved at registration from the model's gorm PK type. Integer PKs
+	// use the implicit "rowid" (KeyIsText=false); string PKs use an explicit
+	// "id text primary key" column (KeyIsText=true), backed by a
+	// vec.KeyedTable[string]. Stamped onto every field's meta because the
+	// per-field sidecar functions take only meta, not the model's PK info.
+	KeyColumn string
+	KeyIsText bool
 }
 
 // parseTag decodes a vec:"..." tag value into a meta. The fieldName /

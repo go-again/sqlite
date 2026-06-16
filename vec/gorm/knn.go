@@ -212,6 +212,12 @@ func KNN[T any](
 				"with gorm.DB.Raw(sql, args...).Scan(&out) to consume custom projections")
 	}
 
+	// String-PK models read through a vec.KeyedTable[string]; the rowid path
+	// below is for integer PKs.
+	if m.KeyIsText {
+		return knnTextKeys[T](ctx, db, mm, m, query, k, o)
+	}
+
 	tbl, err := openSidecar(db, m)
 	if err != nil {
 		return nil, err
@@ -247,6 +253,39 @@ func KNN[T any](
 			// sidecar has a stale row (e.g. source was deleted but
 			// sidecar wasn't cleaned up). Skip rather than panic.
 			continue
+		}
+		results = append(results, Hit[T]{Model: model, Distance: mt.Distance})
+	}
+	return results, nil
+}
+
+// knnTextKeys is the string-PK analogue of the rowid KNN path: it reads through
+// a vec.KeyedTable[string] and materializes models by their string primary key.
+func knnTextKeys[T any](ctx context.Context, db *gorm.DB, mm modelMeta, m meta, query []float32, k int, o options) ([]Hit[T], error) {
+	tbl, err := openKeyedSidecar(db, m)
+	if err != nil {
+		return nil, err
+	}
+	matches, err := tbl.KNNSlice(ctx, query, k, buildVecQueryOpts(o, m)...)
+	if err != nil {
+		return nil, fmt.Errorf("vecgorm: KNN %s: %w", m.Table, err)
+	}
+	if len(matches) == 0 {
+		return nil, nil
+	}
+	keys := make([]any, len(matches))
+	for i, mt := range matches {
+		keys[i] = mt.Key
+	}
+	indexed, err := gormbridge.MaterializeByKey[string, T](ctx, db, mm.PKField, keys, gormbridge.PKAsString)
+	if err != nil {
+		return nil, fmt.Errorf("vecgorm: fetch models: %w", err)
+	}
+	results := make([]Hit[T], 0, len(matches))
+	for _, mt := range matches {
+		model, ok := indexed[mt.Key]
+		if !ok {
+			continue // stale sidecar row; skip
 		}
 		results = append(results, Hit[T]{Model: model, Distance: mt.Distance})
 	}

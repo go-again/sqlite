@@ -12,6 +12,13 @@ import (
 	"gorm.io/gorm"
 )
 
+// sidecarItem is one row queued for the sidecar: the model's primary key
+// (int64 rowid or string PK, bound directly as an arg) and its embedding.
+type sidecarItem struct {
+	Key       any
+	Embedding []float32
+}
+
 // openSidecar returns a vec.Table handle for the meta's sidecar. The
 // underlying *sql.DB comes from gorm's connection pool; it is used only
 // for KNN reads, where reading the latest committed state is the
@@ -27,6 +34,19 @@ func openSidecar(db *gorm.DB, m meta) (*vec.Table, error) {
 		Metric:   m.Metric,
 		Encoding: m.Encoding,
 	})
+}
+
+// openKeyedSidecar returns a vec.KeyedTable[string] handle for a text-PK
+// sidecar (the string-key analogue of openSidecar).
+func openKeyedSidecar(db *gorm.DB, m meta) (*vec.KeyedTable[string], error) {
+	sqlDB, err := poolDB(db)
+	if err != nil {
+		return nil, err
+	}
+	return vec.OpenKeyed[string](sqlDB, m.Table, m.Dim, vec.Options{
+		Metric:   m.Metric,
+		Encoding: m.Encoding,
+	}, vec.WithKeyColumn(m.KeyColumn))
 }
 
 // poolDB returns a *sql.DB for read paths (KNN) that pre-date the
@@ -50,7 +70,7 @@ func poolDB(db *gorm.DB) (*sql.DB, error) {
 //
 // When m.SoftDelete is set the statement also writes deleted=0, since
 // vec0 INTEGER metadata columns reject NULL.
-func batchInsertEmbeddings(ctx context.Context, db *gorm.DB, m meta, items []vec.Row) (err error) {
+func batchInsertEmbeddings(ctx context.Context, db *gorm.DB, m meta, items []sidecarItem) (err error) {
 	if len(items) == 0 {
 		return nil
 	}
@@ -110,8 +130,8 @@ func batchInsertEmbeddings(ctx context.Context, db *gorm.DB, m meta, items []vec
 	return tx.Commit()
 }
 
-// updateEmbedding overwrites a single sidecar row.
-func updateEmbedding(ctx context.Context, db *gorm.DB, m meta, rowid int64, emb []float32) error {
+// updateEmbedding overwrites a single sidecar row, keyed by the model PK.
+func updateEmbedding(ctx context.Context, db *gorm.DB, m meta, key any, emb []float32) error {
 	if len(emb) != m.Dim {
 		return fmt.Errorf("vecgorm: %s: embedding length %d != dim %d", m.Table, len(emb), m.Dim)
 	}
@@ -120,47 +140,48 @@ func updateEmbedding(ctx context.Context, db *gorm.DB, m meta, rowid int64, emb 
 		return err
 	}
 	stmt := fmt.Sprintf(
-		"UPDATE %s SET %s = %s WHERE rowid = ?",
-		quoteIdent(m.Table), quoteIdent(m.Column), m.Encoding.Placeholder(),
+		"UPDATE %s SET %s = %s WHERE %s = ?",
+		quoteIdent(m.Table), quoteIdent(m.Column), m.Encoding.Placeholder(), m.KeyColumn,
 	)
-	if _, err := pool.ExecContext(ctx, stmt, m.Encoding.Encode(emb), rowid); err != nil {
+	if _, err := pool.ExecContext(ctx, stmt, m.Encoding.Encode(emb), key); err != nil {
 		return fmt.Errorf("vecgorm: update %s: %w", m.Table, err)
 	}
 	return nil
 }
 
-// deleteEmbedding removes a single sidecar row by rowid.
-func deleteEmbedding(ctx context.Context, db *gorm.DB, m meta, rowid int64) error {
+// deleteEmbedding removes a single sidecar row by the model PK.
+func deleteEmbedding(ctx context.Context, db *gorm.DB, m meta, key any) error {
 	pool, err := gormbridge.ActivePool(db)
 	if err != nil {
 		return err
 	}
-	stmt := fmt.Sprintf("DELETE FROM %s WHERE rowid = ?", quoteIdent(m.Table))
-	if _, err := pool.ExecContext(ctx, stmt, rowid); err != nil {
+	stmt := fmt.Sprintf("DELETE FROM %s WHERE %s = ?", quoteIdent(m.Table), m.KeyColumn)
+	if _, err := pool.ExecContext(ctx, stmt, key); err != nil {
 		return fmt.Errorf("vecgorm: delete from %s: %w", m.Table, err)
 	}
 	return nil
 }
 
 // insertStmt builds the INSERT for a single sidecar row, with or without
-// the soft-delete metadata column.
+// the soft-delete metadata column. The key column is the rowid for int64 PKs
+// or the explicit "id" column for string PKs (m.KeyColumn).
 func insertStmt(m meta) string {
 	if m.SoftDelete {
 		return fmt.Sprintf(
-			"INSERT INTO %s (rowid, %s, deleted) VALUES (?, %s, 0)",
-			quoteIdent(m.Table), quoteIdent(m.Column), m.Encoding.Placeholder(),
+			"INSERT INTO %s (%s, %s, deleted) VALUES (?, %s, 0)",
+			quoteIdent(m.Table), m.KeyColumn, quoteIdent(m.Column), m.Encoding.Placeholder(),
 		)
 	}
 	return fmt.Sprintf(
-		"INSERT INTO %s (rowid, %s) VALUES (?, %s)",
-		quoteIdent(m.Table), quoteIdent(m.Column), m.Encoding.Placeholder(),
+		"INSERT INTO %s (%s, %s) VALUES (?, %s)",
+		quoteIdent(m.Table), m.KeyColumn, quoteIdent(m.Column), m.Encoding.Placeholder(),
 	)
 }
 
 // insertArgs returns the bound arguments for insertStmt in declaration
-// order: (rowid, embedding-blob/json).
-func insertArgs(m meta, it vec.Row) []any {
-	return []any{it.Rowid, m.Encoding.Encode(it.Embedding)}
+// order: (key, embedding-blob/json). The key binds as int64 or string.
+func insertArgs(m meta, it sidecarItem) []any {
+	return []any{it.Key, m.Encoding.Encode(it.Embedding)}
 }
 
 // joinTxErr attaches a rollback error to the original failure so neither
@@ -211,12 +232,12 @@ func softDeleteSidecar(db *gorm.DB, mm modelMeta, m meta) error {
 	stmt := fmt.Sprintf(
 		"UPDATE %s SET deleted = "+
 			"COALESCE((SELECT CASE WHEN %s IS NOT NULL THEN 1 ELSE 0 END "+
-			"FROM %s WHERE %s.%s = %s.rowid), 0)",
+			"FROM %s WHERE %s.%s = %s.%s), 0)",
 		quoteIdent(m.Table),
 		delColumn,
 		quoteIdent(mm.SourceTable),
 		quoteIdent(mm.SourceTable), pkColumn,
-		quoteIdent(m.Table),
+		quoteIdent(m.Table), m.KeyColumn,
 	)
 	if err := db.Exec(stmt).Error; err != nil {
 		return fmt.Errorf("vecgorm: soft-delete update on %s: %w", m.Table, err)
@@ -232,8 +253,9 @@ func softDeleteSidecar(db *gorm.DB, mm modelMeta, m meta) error {
 // Routes through db.Exec so it joins the active transaction.
 func deleteByWhere(ctx context.Context, db *gorm.DB, mm modelMeta, m meta) error {
 	stmt := fmt.Sprintf(
-		"DELETE FROM %s WHERE rowid NOT IN (SELECT %s FROM %s)",
+		"DELETE FROM %s WHERE %s NOT IN (SELECT %s FROM %s)",
 		quoteIdent(m.Table),
+		m.KeyColumn,
 		quoteIdent(mm.PKField.DBName),
 		quoteIdent(mm.SourceTable),
 	)

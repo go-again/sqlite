@@ -5,12 +5,29 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/go-again/sqlite/internal/gormbridge"
 	"github.com/go-again/sqlite/vec"
 	"gorm.io/gorm"
+	"gorm.io/gorm/schema"
 )
+
+// isIntegerPK reports whether the primary-key field has an integer Go kind (the
+// only key type the rowid-based sidecar supports), unwrapping pointers.
+func isIntegerPK(f *schema.Field) bool {
+	t := f.FieldType
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	switch t.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return true
+	}
+	return false
+}
 
 // Migrate is the entry point that replaces db.AutoMigrate when using
 // vecgorm. It:
@@ -76,9 +93,13 @@ func ensureSidecar(ctx context.Context, db *gorm.DB, _ any, _ modelMeta, m meta)
 	_ = ctx // reserved for future use; current statements run through gorm.
 	// vec0 doesn't accept quoted identifiers in its constructor; we
 	// validated the table/column names via isIdent at tag-parse time.
-	cols := []string{
-		fmt.Sprintf("%s float[%d] distance_metric=%s", m.Column, m.Dim, m.Metric.Keyword()),
+	var cols []string
+	// String-PK models declare an explicit text primary key; integer PKs use
+	// the implicit rowid (no key column in the DDL).
+	if m.KeyIsText {
+		cols = append(cols, m.KeyColumn+" text primary key")
 	}
+	cols = append(cols, fmt.Sprintf("%s float[%d] distance_metric=%s", m.Column, m.Dim, m.Metric.Keyword()))
 	if m.SoftDelete {
 		cols = append(cols, "deleted integer")
 	}
