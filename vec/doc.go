@@ -56,6 +56,15 @@
 // back with [WithSelect] + [Table.KNNSQL]. Options.ChunkSize sets vec0's
 // chunk_size=.
 //
+// # Explicit primary keys (UUID / slug)
+//
+// [Table] addresses rows by the implicit int64 rowid. When your keys are
+// strings (or you want an explicit key column), use [CreateKeyed] /
+// [OpenKeyed] to get a [KeyedTable][K] (K = int64 | string): Insert / KNN take
+// and return K-typed keys. [WithKeyColumn] names the key column (default "id").
+// This is the form the gorm sidecar needs for models with non-int64 primary
+// keys.
+//
 // # Filtered KNN
 //
 // [WithFilter] AND's a custom WHERE conjunct onto the MATCH clause.

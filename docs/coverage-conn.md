@@ -51,6 +51,7 @@ Not wrapped: `sqlite3_memory_used` / heap-limit / `status64` — modernc disable
 | Method | C symbol | Notes | Test |
 |---|---|---|---|
 | `(*Conn).SetProgressHandler` | `sqlite3_progress_handler` | periodic VM-instruction callback; return true to interrupt | `TestProgressHandler` |
+| `(*Conn).RegisterBusyHandler` | `sqlite3_busy_handler` | programmable lock-contention retry (adaptive/jittered back-off); the callback alternative to a fixed busy_timeout | `TestRegisterBusyHandler` |
 | `(*Conn).SetDBConfig` / `QueryDBConfig` | `sqlite3_db_config` | boolean flags incl. security-only DEFENSIVE / TRUSTED_SCHEMA / WRITABLE_SCHEMA (no PRAGMA equivalent), via `libc.VaList` | `TestDBConfig`, `TestDBConfig_Effect` |
 
 ## Lazy collation registration — [`collation_needed.go`](../collation_needed.go)
@@ -76,6 +77,6 @@ Methods on `*FunctionContext` (the value passed to scalar / aggregate / window c
 |---|---|---|---|
 | `(*Conn).RegisterFTS5Tokenizer` | `fts5_api.xCreateTokenizer` | registers a Go `FTS5Tokenizer` (the `SELECT fts5(?1)` / `bind_pointer` handshake gets the api); reference it as `tokenize='name'`. Per-connection. No other pure-Go driver exposes this. | `TestRegisterFTS5Tokenizer`, `TestRegisterFTS5Tokenizer_DrainOnClose` |
 
-All per-connection callbacks (WAL hook, progress handler, rtree geometry/query, collation-needed, FTS5 tokenizer factory) are stored in process-global registries keyed by `c.db` / a minted id and drained in `(*conn).dropHookHandlers` on Close — see [`hooks.go`](../hooks.go).
+All per-connection callbacks (WAL hook, progress handler, busy handler, rtree geometry/query, collation-needed, FTS5 tokenizer factory) are stored in process-global registries keyed by `c.db` / a minted id and drained in `(*conn).dropHookHandlers` on Close — see [`hooks.go`](../hooks.go).
 
 Last reviewed against the transpiled SQLite conn-method surface on 2026-06-13.

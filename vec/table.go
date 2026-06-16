@@ -132,6 +132,13 @@ type CreateOption func(*createConfig)
 
 type createConfig struct {
 	ifNotExists bool
+	keyColumn   string // KeyedTable primary-key column name; "" → "id"
+}
+
+// WithKeyColumn overrides the primary-key column name of a [KeyedTable]
+// (default "id"). Ignored by the rowid-based [Create].
+func WithKeyColumn(name string) CreateOption {
+	return func(c *createConfig) { c.keyColumn = name }
 }
 
 // WithIfNotExists makes Create idempotent: if the table already exists,

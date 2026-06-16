@@ -142,6 +142,9 @@ func (c *conn) dropHookHandlers() {
 	xWALHooks.mu.Lock()
 	delete(xWALHooks.m, h)
 	xWALHooks.mu.Unlock()
+	xBusyHandlers.mu.Lock()
+	delete(xBusyHandlers.m, h)
+	xBusyHandlers.mu.Unlock()
 
 	for _, id := range c.rtreeGeomIDs {
 		rtreeGeom.drop(id)
