@@ -12,6 +12,8 @@
 //   - sha512(data, size) — size: 224, 256, 384, 512 (default)
 //   - blake2s(data)
 //   - blake2b(data, size) — size: 256, 384, 512 (default)
+//   - blake3(data, size) — size in BYTES (default 32); extendable output
+//   - xxh64(data) — XXH64, 8-byte big-endian (fast, non-cryptographic)
 //   - ripemd160(data)
 //
 // Each SQL function is registered only when the corresponding
@@ -52,10 +54,13 @@ package hash
 
 import (
 	"crypto"
+	"encoding/binary"
 	"errors"
 	"fmt"
 
+	"github.com/cespare/xxhash/v2"
 	sqlite "github.com/go-again/sqlite"
+	"lukechampine.com/blake3"
 )
 
 // Register installs every hash function whose underlying [crypto.Hash] is
@@ -114,6 +119,38 @@ func Register(c *sqlite.Conn) error {
 			})
 		})
 	}
+
+	// BLAKE3 and xxHash are not crypto.Hash values; their implementations are
+	// imported directly, so they are always registered (no .Available() gate).
+
+	// blake3(data, size?) — BLAKE3, an extendable-output function. size is the
+	// digest length in BYTES (default 32 = 256 bits); unlike the bit-sized
+	// crypto digests above, BLAKE3 can emit any length.
+	reg("blake3", func(data []byte, sizeOpt ...int64) ([]byte, error) {
+		size := int64(32)
+		if len(sizeOpt) > 0 {
+			size = sizeOpt[0]
+		}
+		if size < 1 || size > 1<<20 {
+			return nil, fmt.Errorf("blake3: size %d out of range (1..%d bytes)", size, 1<<20)
+		}
+		if size == 32 {
+			d := blake3.Sum256(data)
+			return d[:], nil
+		}
+		h := blake3.New(int(size), nil)
+		_, _ = h.Write(data) // blake3 Hasher.Write never errors
+		return h.Sum(nil), nil
+	})
+
+	// xxh64(data) — XXH64 (seed 0), the 8-byte big-endian digest. A fast non-
+	// cryptographic hash for dedup keys / bucketing; wrap in hex() for text.
+	reg("xxh64", func(data []byte) []byte {
+		var b [8]byte
+		binary.BigEndian.PutUint64(b[:], xxhash.Sum64(data))
+		return b[:]
+	})
+
 	return errors.Join(errs...)
 }
 
