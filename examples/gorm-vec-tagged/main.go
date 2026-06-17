@@ -33,6 +33,15 @@ type Document struct {
 	Embedding vecgorm.Embedding `vec:"dim=4;metric=cosine"`
 }
 
+// Article uses a string primary key (a slug) instead of an int64 ID. The
+// tag-driven sidecar supports both — it detects the PK type at registration and
+// keys the sidecar on an `id text primary key` column, no extra tag required.
+type Article struct {
+	Slug      string `gorm:"primaryKey"`
+	Title     string
+	Embedding vecgorm.Embedding `vec:"dim=4;metric=cosine"`
+}
+
 func main() {
 	db, err := gorm.Open(sqlitegorm.Open(":memory:"), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
@@ -70,6 +79,23 @@ func main() {
 	for _, r := range results {
 		fmt.Printf("  id=%d title=%q distance=%.4f\n", r.Model.ID, r.Model.Title, r.Distance)
 	}
+
+	// The same flow works for a string-PK model — no code changes beyond the
+	// model's primary-key type.
+	if err := vecgorm.Migrate(db, &Article{}); err != nil {
+		log.Fatal(err)
+	}
+	if err := db.Create(&[]Article{
+		{Slug: "bears-of-the-north", Title: "Bears", Embedding: vecgorm.Embedding{0, 1, 0, 0}},
+		{Slug: "eastern-sunrises", Title: "Sunrises", Embedding: vecgorm.Embedding{1, 0, 0, 0}},
+	}).Error; err != nil {
+		log.Fatal(err)
+	}
+	arts, err := vecgorm.KNN[Article](ctx, db, []float32{1, 0, 0, 0}, 1)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("string-PK KNN: nearest article slug=%q distance=%.4f\n", arts[0].Model.Slug, arts[0].Distance)
 
 	// Cleanup is automatic via gorm's Migrator. db.Migrator().DropTable
 	// also drops the sidecar through the plugin's DropTableHook.

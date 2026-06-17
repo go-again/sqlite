@@ -20,7 +20,7 @@ func main() {
 	defer db.Close()
 	ctx := context.Background()
 
-	for _, fn := range []string{"md5", "sha1", "sha256", "sha512", "sha3", "blake2b"} {
+	for _, fn := range []string{"md5", "sha1", "sha256", "sha512", "sha3", "blake2b", "blake3", "xxh64"} {
 		var b []byte
 		if err := db.QueryRowContext(ctx,
 			fmt.Sprintf(`SELECT %s('hello world')`, fn)).Scan(&b); err != nil {

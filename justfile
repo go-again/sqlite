@@ -126,7 +126,8 @@ examples:
     for ex in $(ls -d examples/*/); do \
         echo "=== $ex ==="; \
         sandbox="$(mktemp -d)"; \
-        ( cd "$sandbox" && go run "$repo/$ex" ) || (echo "FAILED: $ex"; rm -rf "$sandbox"; exit 1); \
+        ( cd "$repo" && go build -o "$sandbox/example" "./$ex" ) && ( cd "$sandbox" && ./example ) \
+            || (echo "FAILED: $ex"; rm -rf "$sandbox"; exit 1); \
         rm -rf "$sandbox"; \
     done
 

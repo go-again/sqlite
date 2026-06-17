@@ -52,4 +52,35 @@ func main() {
 		fmt.Printf("  [%d] rowid=%d distance=%.6f\n", i, m.Rowid, m.Distance)
 		i++
 	}
+
+	// int8 quantization: 4x smaller storage (vectors must be in the [-1, 1]
+	// unit range, which these are). The typed API still works in []float32.
+	i8, err := vec.Create(ctx, db, "docs_i8", 4, vec.Options{Encoding: vec.Int8})
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := i8.BatchInsert(ctx, corpus); err != nil {
+		log.Fatal(err)
+	}
+	hits, err := i8.KNNSlice(ctx, q, 1)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("\nint8-quantized nearest to %v: rowid=%d distance=%.4f\n", q, hits[0].Rowid, hits[0].Distance)
+
+	// Metadata columns: filter the KNN by a non-vector attribute (vec.Metadata),
+	// evaluated alongside MATCH.
+	meta, err := vec.Create(ctx, db, "docs_meta", 4, vec.Options{
+		Columns: []vec.Column{{Name: "lang", Type: "text", Kind: vec.Metadata}},
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	_ = meta.InsertRow(ctx, vec.Row{Rowid: 1, Embedding: []float32{1, 0, 0, 0}, Values: map[string]any{"lang": "en"}})
+	_ = meta.InsertRow(ctx, vec.Row{Rowid: 2, Embedding: []float32{1, 0, 0, 0}, Values: map[string]any{"lang": "fr"}})
+	enOnly, err := meta.KNNSlice(ctx, []float32{1, 0, 0, 0}, 5, vec.WithFilter("lang = ?", "en"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("metadata-filtered (lang='en'): %d hit(s), rowid=%d\n", len(enOnly), enOnly[0].Rowid)
 }

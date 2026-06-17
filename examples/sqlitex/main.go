@@ -69,6 +69,29 @@ func main() {
 	}
 	bal, _ := sqlitex.ResultInt(ctx, conn, `SELECT balance FROM accounts WHERE name = 'alice'`)
 	fmt.Printf("alice balance after the savepoint: %d\n", bal)
+
+	// Execute: a row-callback query with a named parameter, then a multi-row
+	// collector — no rows.Next/Scan/Err/Close boilerplate. (Run on the pinned
+	// conn, since MaxOpenConns is 1 and conn holds it.)
+	_, _ = conn.ExecContext(ctx, `INSERT INTO accounts(name, balance) VALUES ('carol', 200)`)
+	fmt.Println("accounts with balance >= :min (sqlitex.Execute):")
+	if err := sqlitex.Execute(ctx, conn, `SELECT name, balance FROM accounts WHERE balance >= :min ORDER BY name`,
+		&sqlitex.ExecOptions{
+			Named: map[string]any{"min": 100},
+			ResultFunc: func(rows *sql.Rows) error {
+				var name string
+				var b int
+				if err := rows.Scan(&name, &b); err != nil {
+					return err
+				}
+				fmt.Printf("  %-6s %d\n", name, b)
+				return nil
+			},
+		}); err != nil {
+		log.Fatal(err)
+	}
+	names, _ := sqlitex.ResultStrings(ctx, conn, `SELECT name FROM accounts ORDER BY name`)
+	fmt.Printf("all account names (sqlitex.ResultStrings): %v\n", names)
 }
 
 // topUp uses sqlitex.Save: the savepoint commits because err stays nil; had it
