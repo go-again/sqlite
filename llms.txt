@@ -26,7 +26,7 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [gorm/doc.go](gorm/doc.go): gorm dialector — drop-in for glebarez/sqlite and gorm.io/driver/sqlite. Also exposes `sqlitegorm.OpenConfig(sqlite.Config, ...gorm.Config) (*sqlitegorm.DB, error)` for the modern Go-typed entry.
 - [vec/gorm/doc.go](vec/gorm/doc.go): tag-driven sqlite-vec sidecars (`vec:"dim=N;metric=…"`) on gorm models.
 - [fts/gorm/doc.go](fts/gorm/doc.go): tag-driven FTS5 sidecars (`fts5:"tokenize=…;external=…;contentless=…"`) on gorm models.
-- [vfs/doc.go](vfs/doc.go): expose any `fs.FS` (embed.FS, fstest.MapFS, zip-fs) as a read-only SQLite VFS, plus `vfs.NewReader(io.ReaderAt, size)` for direct-buffer immutable databases without an fs.FS wrapper.
+- [vfs/doc.go](vfs/doc.go): expose any `fs.FS` (embed.FS, fstest.MapFS, zip-fs) as a read-only SQLite VFS, plus `vfs.NewReader(io.ReaderAt, size)` for direct-buffer immutable databases without an fs.FS wrapper; and a public user-implementable VFS — implement `vfs.VFS` / `vfs.File` and `vfs.Register(name, impl)` to back a writable database with arbitrary Go storage (rollback-journal mode; WAL deferred), embedding `vfs.NoLock` for single-process locking.
 - [vfs/crypto/doc.go](vfs/crypto/doc.go): pure-Go encryption-at-rest VFS — Adiantum / AES-XTS-256, transparent page-level encryption of main DB + journal + WAL + temp files.
 - [vfs/cksm/doc.go](vfs/cksm/doc.go): page-level checksum VFS — Fletcher-style trailer on every main-DB page, surfaces silent corruption as SQLITE_IOERR_DATA. Composes with vfs/crypto.
 - [vfs/mvcc/doc.go](vfs/mvcc/doc.go): in-memory MVCC VFS — snapshot-isolation reads + atomic publish on commit; shared (`file:/name`) and private (`file:name`) DBs.
@@ -58,6 +58,7 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [examples/fusion-hybrid-search](examples/fusion-hybrid-search/main.go): combine vec.KNN + fts.Search rankings via fusion.RRF2.
 - [examples/window-function](examples/window-function/main.go): Conn.RegisterWindowFunction demo.
 - [examples/vfs-embed](examples/vfs-embed/main.go): bundle a `.db` inside `embed.FS`.
+- [examples/vfs-custom](examples/vfs-custom/main.go): implement a writable in-memory VFS on the public `vfs.VFS` / `vfs.File` interface and `vfs.Register` it — full CRUD + transactions through `database/sql`.
 - [examples/sqlite-config](examples/sqlite-config/main.go): modern Go-typed `sqlite.Config` for plain *sql.DB — plain + encrypted variants, no DSN strings.
 - [examples/gorm-config](examples/gorm-config/main.go): same `sqlite.Config` routed through gorm via `sqlitegorm.OpenConfig`.
 - [examples/vfs-crypto](examples/vfs-crypto/main.go): encryption at rest via vfs/crypto (Adiantum / AES-XTS-256, pure Go).
@@ -94,7 +95,7 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [docs/coverage-fts.md](docs/coverage-fts.md): every FTS5 feature with status.
 - [docs/coverage-gorm.md](docs/coverage-gorm.md): every gorm.Dialector / Migrator / ErrorTranslator method with status.
 - [docs/coverage-ext.md](docs/coverage-ext.md): every `ext/` loadable extension with status (✓ landed / ⚠ partial / ✗ deferred / ✗ skipped), upstream reference, and the test pin. Includes the per-extension scaffolding checklist.
-- [docs/coverage-vfs.md](docs/coverage-vfs.md): every `vfs/` sub-package (root fs.FS adapter + `vfs.NewReader`, crypto, cksm, mvcc, memdb) with status, upstream reference, and the test pin. Includes the per-VFS scaffolding checklist.
+- [docs/coverage-vfs.md](docs/coverage-vfs.md): every `vfs/` sub-package (root fs.FS adapter + `vfs.NewReader` + the user-implementable `vfs.Register` interface, crypto, cksm, mvcc, memdb) with status, upstream reference, and the test pin. Includes the per-VFS scaffolding checklist.
 
 ## Optional
 

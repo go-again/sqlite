@@ -1,70 +1,83 @@
-// Package vfs exposes any Go io/fs.FS implementation as a read-only
-// SQLite VFS. Pair it with the parent github.com/go-again/sqlite
-// driver to open a SQLite database backed by an embed.FS, a
-// fstest.MapFS, a zip-backed fs.FS, or any other read-only
-// filesystem implementation — without ever touching the real disk.
+// Package vfs lets you back a SQLite database with storage you control,
+// in pure Go. It offers two surfaces, smallest first:
 //
-// # When to use this
+//   - [New] / [NewReader] — expose any read-only io/fs.FS (or io.ReaderAt)
+//     as a SQLite VFS. The zero-code path for shipping seed data inside a
+//     binary, reading a zip-backed catalog, or serving a database from a
+//     memory buffer — without ever touching the real disk.
+//   - [Register] with a user-implemented [VFS] / [File] — a full,
+//     writable virtual file system in pure Go: an object-store backend,
+//     a fault-injecting wrapper, a tmpfs-on-a-budget. This is the
+//     building block downstream code uses to put SQLite on storage the
+//     driver never anticipated, without forking the driver or touching
+//     the transpiled lib/.
 //
-// The canonical use case is shipping seed data inside the binary.
-// A CLI tool that wants to read from a pre-populated SQLite catalog
-// can embed the database file in its own binary, register it as a
-// VFS, and open it as a normal *sql.DB:
+// Pair either with the parent github.com/go-again/sqlite driver and
+// select it from a DSN via ?vfs=<name>.
 //
-//	import (
-//	    "embed"
-//	    "database/sql"
-//	    _ "github.com/go-again/sqlite"
-//	    "github.com/go-again/sqlite/vfs"
-//	)
+// # Read-only fs.FS exposure
 //
-//	//go:embed seed.db
-//	var seed embed.FS
+// The canonical use case is shipping seed data inside the binary. A CLI
+// tool that wants to read from a pre-populated SQLite catalog embeds the
+// database file, registers it as a VFS via New, and opens it as a normal
+// *sql.DB with `?vfs=<name>&mode=ro`. The three entry points:
 //
-//	func main() {
-//	    name, _, err := vfs.New(seed)
-//	    if err != nil { ... }
-//	    db, err := sql.Open("sqlite3",
-//	        "file:seed.db?vfs="+name+"&mode=ro")
-//	    if err != nil { ... }
-//	    defer db.Close()
-//	    // db is now a read-only handle on the embedded file.
-//	}
+//   - New(fs.FS) (name, *FS, error) — registers fs under a fresh unique
+//     name; pass the name back via the DSN's ?vfs= parameter.
+//   - NewReader(io.ReaderAt, size int64) (name, *FS, error) — same shape
+//     but wraps any io.ReaderAt + known size as the single underlying
+//     file (named "db"); no fs.FS needed.
+//   - FS — type alias for modernc.org/sqlite/vfs.FS, a handle on the
+//     registered VFS for lifetime control.
 //
-// # API
+// See examples/vfs-embed/ for the runnable embed.FS demonstration.
 //
-// The package exposes a small set of symbols:
+// This surface is a thin re-export of modernc.org/sqlite/vfs; the C side
+// is transpiled per-target there, so platform coverage matches its
+// matrix. The VFS is read-only — any write the engine attempts is
+// rejected; append &mode=ro so SQLite refuses writes at open time and
+// you get a clear error rather than a surprise mid-query.
 //
-//   - New(fs.FS) (name string, *FS, error) — registers fs under a
-//     fresh unique VFS name and returns it. Pass the name back via
-//     the DSN's ?vfs= parameter when opening a database.
-//   - NewReader(io.ReaderAt, size int64) (name string, *FS, error) —
-//     same shape as New, but wraps any io.ReaderAt + known size as the
-//     single underlying file (named "db") without requiring an fs.FS.
-//     Useful for direct-buffer or memory-mapped immutable databases.
-//   - FS — a type alias for modernc.org/sqlite/vfs.FS, kept around
-//     so callers can hold a reference to the registered VFS for
-//     lifetime control if needed.
+// # User-implementable VFS
 //
-// New is concurrency-safe; multiple calls register independent VFS
-// instances with distinct names.
+// Implement [VFS] (Open/Delete/Access/FullPathname) and [File]
+// (ReadAt/WriteAt/Truncate/Sync/Size/locking/Close), then:
 //
-// # Read-only by design
+//	err := vfs.Register("myvfs", myImpl)            // once at startup
+//	db, _ := sql.Open("sqlite", "file:app.db?vfs=myvfs")
+//	// ... use db ...
+//	db.Close()
+//	vfs.Unregister("myvfs")                          // after every db is closed
 //
-// The VFS is read-only. Any write the database engine would attempt
-// (journals, locks, the file itself) is rejected by the underlying
-// fs.FS contract. Append &mode=ro to the DSN to make SQLite refuse
-// writes at open time — that gives you a clear error rather than a
-// surprise mid-query.
+// Embed [NoLock] in a File to satisfy the advisory-lock trio with
+// accept-everything semantics — correct for any single-process backend.
+// Return a [VFSError] from any method to surface a specific SQLITE_*
+// result code (e.g. SQLITE_READONLY, SQLITE_BUSY); a plain error becomes
+// SQLITE_IOERR. The generic dispatcher copies every buffer at the C
+// boundary, delegates wall-clock/sleep/randomness to the platform VFS,
+// and recovers the implementation through the same token-registry
+// machinery (internal/cabi) that backs the built-in vfs/memdb and
+// vfs/mvcc backends — so a hand-written VFS gets the same vetted
+// trampolines, not a second copy.
 //
-// # Implementation
+// Phase 1 supports rollback-journal databases. WAL needs the
+// shared-memory (xShm*) methods, deferred to a future ShmFile capability
+// interface; until then a custom-VFS database stays in journal mode.
+// [Unregister] refuses to remove a VFS while any database is still open
+// against it — close every handle first.
 //
-// This package is a thin re-export of modernc.org/sqlite/vfs. The C
-// side of the VFS bridge is transpiled per-target by that package;
-// platform coverage matches modernc.org/sqlite's coverage matrix.
+// # Sub-packages
+//
+// Built on the same machinery, ready to use:
+//
+//   - vfs/memdb — plain in-memory VFS (per-page store under one RWMutex).
+//   - vfs/mvcc — in-memory VFS with snapshot-isolation reads.
+//   - vfs/crypto — encryption-at-rest, layered over a base VFS.
+//   - vfs/cksm — page-checksum corruption detection, layered over a base VFS.
 //
 // # See also
 //
-//   - examples/vfs-embed/ — minimal embed.FS demonstration.
-//   - examples/gorm-vfs/ — same flow with a gorm dialector on top.
+//   - examples/vfs-custom/ — a writable in-memory VFS on the public interface.
+//   - examples/vfs-embed/ — minimal read-only embed.FS demonstration.
+//   - examples/gorm-vfs/ — the read-only flow with a gorm dialector on top.
 package vfs

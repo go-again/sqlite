@@ -1,8 +1,11 @@
 # Coverage — vfs/ wrappers
 
 Tracks each sub-package under [`vfs/`](../vfs/). The root `vfs/` package
-itself re-exports `modernc.org/sqlite/vfs` so any `fs.FS` becomes a
-read-only SQLite VFS; everything else wraps a base VFS to add a
+offers two surfaces: it re-exports `modernc.org/sqlite/vfs` so any
+`fs.FS` becomes a read-only SQLite VFS, and it exposes a public
+user-implementable `VFS` / `File` interface (`vfs.Register`) so
+downstream code can back a *writable* database with arbitrary Go storage
+through one generic dispatcher. Everything else wraps a base VFS to add a
 specific capability (encryption, checksum) by intercepting xRead /
 xWrite.
 
@@ -18,6 +21,7 @@ Status legend:
 | sub-package | Upstream | Status | Entry | Test pin |
 |---|---|---|---|---|
 | `vfs/` (root, fs.FS adapter) | [ncruces vfs/readervfs](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs/readervfs) | ✓ landed | `vfs.New(fs.FS)` | `vfs/vfs_test.go` |
+| `vfs/` (root, user-implementable VFS) | [ncruces vfs core](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs) | ⚠ partial (Phase 1: rollback-journal; WAL/shm deferred) | `vfs.Register(name, VFS)` + `vfs.VFS` / `vfs.File` interfaces | `vfs/interface_test.go` |
 | `vfs/crypto` | [ncruces vfs/adiantum](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs/adiantum) + [vfs/xts](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs/xts) | ✓ landed | `crypto.New(Options)` | `vfs/crypto/integration_test.go` |
 | `vfs/cksm` | [ncruces vfs/cksm.go](https://github.com/ncruces/go-sqlite3/blob/main/vfs/cksm.go) | ✓ landed | `cksm.New(Options)` + `(*sqlite.Conn).EnableChecksums(schema)` | `vfs/cksm/cksm_test.go` |
 | `vfs/mvcc` | [ncruces vfs/mvcc](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs/mvcc) | ✓ landed (Go-native re-implementation, no wbt dep) | `mvcc.New(Options)` | `vfs/mvcc/mvcc_test.go` |
@@ -75,6 +79,33 @@ every existing page with the trailer in place.
 |---|---|
 | ncruces `vfs/` core framework (api.go, file.go, lock_*.go, os_*.go, shm_*.go) | Specific to ncruces' Wazero-WASM runtime. We use `modernc.org/sqlite/vfs`, whose core framework is the transpiled SQLite default VFS — different runtime, same end behaviour. |
 
+## User-implementable VFS interface
+
+`vfs.Register(name, impl)` drives any implementation of the public
+`vfs.VFS` (Open/Delete/Access/FullPathname) and `vfs.File`
+(ReadAt/WriteAt/Truncate/Sync/Size/Lock/Unlock/CheckReservedLock/
+SectorSize/DeviceCharacteristics/Close) interfaces through one shared
+set of generic trampolines — the same `internal/cabi` registry +
+function-pointer machinery the bespoke sub-packages use, lifted to
+dispatch into a Go interface. Embed `vfs.NoLock` for accept-everything
+advisory locking (the single-process case); return a `*vfs.VFSError` to
+surface a specific SQLITE_* result code; implement the optional
+`vfs.FileControl` capability interface to handle file-control opcodes.
+The dispatcher copies every buffer at the C boundary, delegates
+clock/sleep/randomness to the platform VFS, and refuses `Unregister`
+while any database is still open.
+
+Phase 1 is rollback-journal only: the shared io-methods table is
+`iVersion 1` (no `xShm*` slots), so WAL falls back to journal mode.
+Phase 2 will add a `vfs.ShmFile` capability interface for WAL. The
+reference `refMemVFS` in `vfs/interface_test.go` is a complete writable
+in-memory VFS on this interface and doubles as a copy-paste template;
+`examples/vfs-custom/` is the runnable version.
+
+This is the from-scratch path; the wrap-and-forward sub-packages below
+(crypto/cksm) layer over an existing VFS instead and keep their bespoke
+trampolines.
+
 ## Adding a new VFS wrapper
 
 1. Pick an upstream pattern from the [ncruces/go-sqlite3 vfs/ tree](https://github.com/ncruces/go-sqlite3/tree/main/vfs)
@@ -93,4 +124,4 @@ every existing page with the trailer in place.
    overviews" so consumer agents find it.
 6. Optional: drop a runnable example under `examples/vfs-<name>/`.
 
-Last reviewed against ncruces/go-sqlite3 main on 2026-05-29.
+Last reviewed against ncruces/go-sqlite3 main on 2026-06-13.

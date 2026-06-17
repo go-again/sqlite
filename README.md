@@ -26,6 +26,7 @@ The driver itself — CGo-free, mattn-API + glebarez-gorm drop-in, registered un
 - **Corruption detection** — pure-Go `vfs/cksm` with Fletcher-style 8-byte trailer per page (on-disk compatible with SQLite's `cksumvfs`); composes beneath `vfs/crypto` for checksum-then-encrypt stacks
 - **In-memory VFSes** — `vfs/mvcc` (snapshot isolation + atomic publish) and `vfs/memdb` (direct page store, no MVCC) for tests + scratch DBs, with shared (`file:/name`) and private (`file:name`) modes
 - **`fs.FS` / `io.ReaderAt` as a database** — `vfs.New(fs.FS)` for `embed.FS`-bundled DBs; `vfs.NewReader(io.ReaderAt, size)` for raw-buffer immutable DBs
+- **User-implementable VFS** — back a writable database with arbitrary Go storage by implementing `vfs.VFS` / `vfs.File` and calling `vfs.Register(name, impl)`; one generic dispatcher drives it through the same vetted C-ABI machinery the built-in VFSes use. Embed `vfs.NoLock` for single-process locking, return a `vfs.VFSError` for a specific result code. Rollback-journal mode today (WAL deferred). See `examples/vfs-custom/`
 - **Loadable Go SQL extensions** under `ext/` — SQL scalars / aggregates / collations (`regexp`, `uuid`, `hash`, `ipaddr`, `zorder`, `stats`, `unicode`, `encode`, `text`), virtual tables (`array`, `csv`, `lines`, `statement`, `closure`, `pivot`, `rtree`, `series`), specialised stores (`bloom`, `spellfix1`), I/O (`blobio`, `fileio`) — many also expose a typed Go handle (`csv.Table`, `lines.Table`, `closure.Graph`, `bloom.Filter`, `spellfix1.Vocab`, `rtree.Table`) mirroring `vec.Table` / `fts.Index` so callers skip hand-written DDL. Auto-register per conn or pool-wide via blank-import `/auto`; full inventory + status matrix in [`docs/coverage-ext.md`](docs/coverage-ext.md)
 - **Hooks** — per-conn update / authorizer / commit / rollback / pre-update / trace; conn-pinning idiom documented and shown in `examples/hooks/`
 - **Backup, serialize, deserialize** — mattn-compat `(*Conn).Backup` factory + top-level `sqlite.Serialize` / `Deserialize` for in-memory snapshots
@@ -57,6 +58,7 @@ The Go SQLite landscape has three architectural camps: CGo bindings (mattn, zomb
 | Page-checksum VFS | ✓ | ✗ | ✗ | ✓ | ✗ |
 | In-memory MVCC + direct VFS | ✓ | ✗ | ✗ | ✓ | ✗ |
 | `fs.FS` / `io.ReaderAt` VFS | ✓ | ✗ | ✗ | ✓ | ✗ |
+| User-implementable VFS (pure Go) | ✓ (rollback-journal; WAL deferred) | ✗ | ✗ | ✓ | ✗ |
 | Changesets / session sync (offline replication, audit) | ✓ (typed `*Session` + `ApplyChangeset`) | ✗ | ✗ | ✗ | ✗ |
 | Loadable Go SQL extensions | catalog under `ext/`, per-conn or pool-wide | math/regexp via build-tag | ✗ | similar catalog | ✗ |
 | Hot UDF-row throughput | == modernc | fastest (CGo) | baseline | slowest (wazero) | == modernc |
@@ -121,7 +123,7 @@ The cost: a constant-factor perf gap on hot UDF / per-row callback paths
 | `github.com/go-again/sqlite/fts` | Typed FTS5 `Index[K, V]` with tokenizers, query builder, snippet/highlight. |
 | `github.com/go-again/sqlite/fts/gorm` | Tag-driven FTS5 sidecars on gorm models. |
 | `github.com/go-again/sqlite/fusion` | Rank-fusion helpers — combine `vec.KNN` and `fts.Search` results via Reciprocal Rank Fusion. |
-| `github.com/go-again/sqlite/vfs` | Expose any `io/fs.FS` (incl. `embed.FS`) as a read-only SQLite VFS. |
+| `github.com/go-again/sqlite/vfs` | Expose any `io/fs.FS` (incl. `embed.FS`) as a read-only SQLite VFS, or implement the `vfs.VFS` / `vfs.File` interface and `vfs.Register` a writable pure-Go virtual file system of your own. |
 | `github.com/go-again/sqlite/vfs/crypto` | Pure-Go encryption-at-rest VFS — Adiantum or AES-XTS-256, transparent page-level encryption of main DB + journal + WAL + temp files. |
 | `github.com/go-again/sqlite/vfs/cksm` | Pure-Go corruption-detection VFS — Fletcher-style 8-byte checksum trailer per page; surfaces silent bit-rot as `SQLITE_IOERR_DATA`. |
 | `github.com/go-again/sqlite/vfs/mvcc` | Pure-Go in-memory MVCC VFS — snapshot-isolated reads + atomic-publish writes. Shared (`file:/name`) or private (`file:name`) databases. |
