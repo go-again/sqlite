@@ -52,6 +52,7 @@ Status legend:
 | regexp | ~310 | [ncruces/ext/regexp](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/regexp) | ✓ landed | `ext/regexp` + `ext/regexp/auto` | `ext/regexp/regexp_test.go` |
 | encode | ~120 | [sqlean crypto](https://github.com/nalgeon/sqlean) (codec half) | ✓ landed | `ext/encode` + `ext/encode/auto` | `ext/encode/encode_test.go` |
 | text | ~110 | [sqlean text](https://github.com/nalgeon/sqlean) | ✓ landed | `ext/text` + `ext/text/auto` | `ext/text/text_test.go` |
+| fuzzy | ~270 | [sqlean fuzzy](https://github.com/nalgeon/sqlean) | ✓ landed (leven / damerau / hamming / jaro / jaro_winkler / soundex; caverphone & phonetic-hash deferred) | `ext/fuzzy` + `ext/fuzzy/auto` | `ext/fuzzy/fuzzy_test.go` |
 | uuid | ~330 | [ncruces/ext/uuid](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/uuid) | ⚠ partial | `ext/uuid` + `ext/uuid/auto` | `ext/uuid/uuid_test.go` |
 | hash | ~190 | [ncruces/ext/hash](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/hash) | ✓ landed | `ext/hash` + `ext/hash/auto` | `ext/hash/hash_test.go` |
 | ipaddr | ~150 | [ncruces/ext/ipaddr](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/ipaddr) | ✓ landed | `ext/ipaddr` + `ext/ipaddr/auto` | `ext/ipaddr/ipaddr_test.go` |
