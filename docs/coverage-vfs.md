@@ -118,7 +118,7 @@ visibility, and a 1-writer/4-reader concurrent stress under `-race`).
 
 The reference `refMemVFS` in `vfs/interface_test.go` is a complete
 writable in-memory VFS on this interface and doubles as a copy-paste
-template; `examples/vfs-custom/` is the runnable version (with `vfs.Wrap`
+template; `examples/features/vfs/custom/` is the runnable version (with `vfs.Wrap`
 instrumentation).
 
 This is the from-scratch path; the wrap-and-forward sub-packages below

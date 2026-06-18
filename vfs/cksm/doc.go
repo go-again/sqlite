@@ -51,7 +51,7 @@
 //
 //	// First-run setup: enable the trailer on new DBs. EnableChecksums
 //	// flips PRAGMA reserved_bytes=8 and VACUUMs in a single conn-
-//	// pinned call. See examples/vfs-cksm/main.go for the full recipe.
+//	// pinned call. See examples/features/vfs/cksm/main.go for the full recipe.
 //	sc, _ := db.Conn(ctx)
 //	defer sc.Close()
 //	_ = sc.Raw(func(dc any) error {

@@ -48,51 +48,51 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 
 ## Examples (runnable)
 
-- [examples/mattn-compat](examples/mattn-compat/main.go): one-line import swap from mattn/go-sqlite3.
-- [examples/modernc-compat](examples/modernc-compat/main.go): one-line import swap from modernc.org/sqlite.
-- [examples/gorm](examples/gorm/main.go): basic gorm CRUD.
-- [examples/gorm-vfs](examples/gorm-vfs/main.go): gorm reading from a fstest.MapFS via vfs/.
-- [examples/gorm-vec](examples/gorm-vec/main.go): gorm + vec sidecar (side-by-side, no plugin).
-- [examples/gorm-fts](examples/gorm-fts/main.go): gorm + fts external-content (side-by-side, no plugin).
-- [examples/gorm-vec-tagged](examples/gorm-vec-tagged/main.go): tag-driven vec sidecars via vec/gorm plugin.
-- [examples/gorm-fts-tagged](examples/gorm-fts-tagged/main.go): tag-driven FTS5 sidecars via fts/gorm plugin.
-- [examples/gorm-ext-scalars](examples/gorm-ext-scalars/main.go): pair gorm with the scalar / aggregate / collation flavors of ext/ — `regexp`, `uuid`, `hash`, `ipaddr`, `zorder`, `stats`, `unicode` — all auto-registered per conn and driven through plain gorm Where/Order/Select.
-- [examples/gorm-ext-vtabs](examples/gorm-ext-vtabs/main.go): pair gorm with the virtual-table flavors of ext/ — `array` (via `sqlite.Pointer`), `lines`, `csv` (sandboxed via a `Driver.RegisterConnectionHook`), `statement`, `closure`, `bloom`, `spellfix1` — all driven through gorm Exec / Raw / Scan.
-- [examples/vec-search](examples/vec-search/main.go): raw `vec.Table` API.
-- [examples/fts-search](examples/fts-search/main.go): raw `fts.Index` API.
-- [examples/fusion-hybrid-search](examples/fusion-hybrid-search/main.go): combine vec.KNN + fts.Search rankings via fusion.RRF2.
-- [examples/window-function](examples/window-function/main.go): Conn.RegisterWindowFunction demo.
-- [examples/vfs-embed](examples/vfs-embed/main.go): bundle a `.db` inside `embed.FS`.
-- [examples/vfs-custom](examples/vfs-custom/main.go): implement a writable in-memory VFS on the public `vfs.VFS` / `vfs.File` interface and `vfs.Register` it — full CRUD + transactions through `database/sql`.
-- [examples/pcache](examples/pcache/main.go): `pcache.InstallBoundedLRU(32)` then churn a table past the bound — prints hit/miss/eviction/live-page stats showing memory stayed capped.
-- [examples/sqlite-config](examples/sqlite-config/main.go): modern Go-typed `sqlite.Config` for plain *sql.DB — plain + encrypted variants, no DSN strings.
-- [examples/gorm-config](examples/gorm-config/main.go): same `sqlite.Config` routed through gorm via `sqlitegorm.OpenConfig`.
-- [examples/vfs-crypto](examples/vfs-crypto/main.go): encryption at rest via vfs/crypto (Adiantum / AES-XTS-256, pure Go).
-- [examples/gorm-crypto](examples/gorm-crypto/main.go): gorm + vfs/crypto + vec/gorm + fts/gorm + fusion — encrypted DB with embedding sidecars, FTS5 search, hybrid ranking via RRF, argon2id key derivation, slog Recorder, WAL + busy_timeout.
-- [examples/ext-array](examples/ext-array/main.go): bind a Go slice as a SQL table via the `ext/array` eponymous vtab; shows explicit `array.Register` + `array.Bind` and the blank-import auto path; JOINs the array against a normal table to demonstrate composition.
-- [examples/ext-regexp](examples/ext-regexp/main.go): REGEXP operator + regexp_substr / regexp_replace over a small users table.
-- [examples/ext-uuid](examples/ext-uuid/main.go): generate v1/v4/v6/v7 + name-based v5; parse + reformat round-trip via uuid_str/uuid_blob.
-- [examples/ext-hash](examples/ext-hash/main.go): md5/sha1/sha2/sha3/blake2b digests + sha3 size variants.
-- [examples/ext-ipaddr](examples/ext-ipaddr/main.go): ipcontains/ipfamily/ipnetwork over an events table with mixed IPv4 / IPv6 sources.
-- [examples/ext-zorder](examples/ext-zorder/main.go): 2D Morton encoding round-trip + locality property demo.
-- [examples/ext-stats](examples/ext-stats/main.go): PostgreSQL-style aggregates (variance, percentile, regr_*, median, mode, every) plus a windowed regr_slope demo over a small employees table.
-- [examples/ext-unicode](examples/ext-unicode/main.go): Unicode-aware case mapping (with locale-tagged forms for Turkish / German), normalize, unaccent, NOCASE_UNICODE / NOCASE_ACCENT preset collations, plus a Swedish-locale collation that sorts `å` after `z`.
-- [examples/ext-csv](examples/ext-csv/main.go): read CSV files as SQL tables via the typed `csv.Table` API (Create / Columns / Rows / Name) — `Create` hides the `USING csv(…)` argument string and its quoting. Shows GROUP BY + SUM and a JOIN across two CSV files sandboxed in an `fstest.MapFS`.
-- [examples/ext-blobio](examples/ext-blobio/main.go): stream `zeroblob(N)` allocations via `readblob` / `writeblob`, and the same data through the typed `(*Conn).OpenBlob` API.
-- [examples/ext-bloom](examples/ext-bloom/main.go): probabilistic set-membership via the typed `bloom.Filter` API (Create / AddMany / Contains) with a tunable false-positive rate.
-- [examples/ext-fileio](examples/ext-fileio/main.go): walk a sandboxed `fstest.MapFS` via `fsdir`, `readfile`-it through SQL, and confirm `writefile` is unavailable in sandbox mode.
-- [examples/ext-statement](examples/ext-statement/main.go): parametrized views — anonymous `?N` and named `:pat` binds exposed as HIDDEN columns.
-- [examples/ext-pivot](examples/ext-pivot/main.go): three-SELECT cross-tab (rows × columns × cell aggregate) over a small sales table.
-- [examples/ext-closure](examples/ext-closure/main.go): parent-child graph walks via the typed `closure.Graph` API — descendants, depth bounds (`WithMaxDepth`), and ancestor walks via `Reversed`.
-- [examples/ext-lines](examples/ext-lines/main.go): read a log file as one-row-per-line via the typed `lines.Table` API (Create / Columns / Rows / Name), then filter ERROR lines and aggregate by severity with plain SQL over the vtab.
-- [examples/ext-rtree](examples/ext-rtree/main.go): spatial index via the typed `rtree.Table` API — Create a 2D R-Tree, InsertPoint several venues, then a bounding-box Search and a SearchCircle radius query (circle geometry wired by blank-importing `ext/rtree/auto`).
-- [examples/vfs-cksm](examples/vfs-cksm/main.go): detect simulated bit-rot via the checksum VFS — corrupt one byte, observe `SQLITE_IOERR_DATA` on read.
-- [examples/vfs-mvcc](examples/vfs-mvcc/main.go): SHARED (`file:/name`) vs PRIVATE (`file:name`) in-memory MVCC databases; reader / writer concurrency demo.
-- [examples/vfs-memdb](examples/vfs-memdb/main.go): same shared / private shape as vfs-mvcc but on the simpler `vfs/memdb` VFS — writes are visible immediately, no snapshot isolation.
-- [examples/hooks](examples/hooks/main.go): install update / authorizer / commit / trace hooks on a pinned connection (MaxOpenConns(1) + db.Conn + sc.Raw idiom).
-- [examples/backup](examples/backup/main.go): `(*Conn).Backup` mattn-compat factory + top-level `sqlite.Serialize` / `sqlite.Deserialize` round-trip.
-- [examples/session](examples/session/main.go): SESSION extension — record changes on a primary database into a changeset (`(*Conn).CreateSession` → `*Session.Changeset`), replay onto a replica with `(*Conn).ApplyChangeset`, then undo via `InvertChangeset`. The offline-sync / replication primitive, pure Go.
-- [examples/ext-spellfix1](examples/ext-spellfix1/main.go): fuzzy spell-correction via the typed `spellfix1.Vocab` API (Create / AddMany / Correct / CorrectSQL), Soundex prefilter + Damerau-Levenshtein scoring.
+- [examples/migrating/from-mattn](examples/migrating/from-mattn/main.go): one-line import swap from mattn/go-sqlite3.
+- [examples/migrating/from-modernc](examples/migrating/from-modernc/main.go): one-line import swap from modernc.org/sqlite.
+- [examples/migrating/from-glebarez](examples/migrating/from-glebarez/main.go): basic gorm CRUD.
+- [examples/features/gorm/vfs](examples/features/gorm/vfs/main.go): gorm reading from a fstest.MapFS via vfs/.
+- [examples/features/gorm/vec](examples/features/gorm/vec/main.go): gorm + vec sidecar (side-by-side, no plugin).
+- [examples/features/gorm/fts](examples/features/gorm/fts/main.go): gorm + fts external-content (side-by-side, no plugin).
+- [examples/features/gorm/vec-tagged](examples/features/gorm/vec-tagged/main.go): tag-driven vec sidecars via vec/gorm plugin.
+- [examples/features/gorm/fts-tagged](examples/features/gorm/fts-tagged/main.go): tag-driven FTS5 sidecars via fts/gorm plugin.
+- [examples/features/gorm/ext-scalars](examples/features/gorm/ext-scalars/main.go): pair gorm with the scalar / aggregate / collation flavors of ext/ — `regexp`, `uuid`, `hash`, `ipaddr`, `zorder`, `stats`, `unicode` — all auto-registered per conn and driven through plain gorm Where/Order/Select.
+- [examples/features/gorm/ext-vtabs](examples/features/gorm/ext-vtabs/main.go): pair gorm with the virtual-table flavors of ext/ — `array` (via `sqlite.Pointer`), `lines`, `csv` (sandboxed via a `Driver.RegisterConnectionHook`), `statement`, `closure`, `bloom`, `spellfix1` — all driven through gorm Exec / Raw / Scan.
+- [examples/features/search/vec-search](examples/features/search/vec-search/main.go): raw `vec.Table` API.
+- [examples/features/search/fts-search](examples/features/search/fts-search/main.go): raw `fts.Index` API.
+- [examples/features/search/fusion-hybrid](examples/features/search/fusion-hybrid/main.go): combine vec.KNN + fts.Search rankings via fusion.RRF2.
+- [examples/features/advanced/window-function](examples/features/advanced/window-function/main.go): Conn.RegisterWindowFunction demo.
+- [examples/features/vfs/embed](examples/features/vfs/embed/main.go): bundle a `.db` inside `embed.FS`.
+- [examples/features/vfs/custom](examples/features/vfs/custom/main.go): implement a writable in-memory VFS on the public `vfs.VFS` / `vfs.File` interface and `vfs.Register` it — full CRUD + transactions through `database/sql`.
+- [examples/features/advanced/pcache](examples/features/advanced/pcache/main.go): `pcache.InstallBoundedLRU(32)` then churn a table past the bound — prints hit/miss/eviction/live-page stats showing memory stayed capped.
+- [examples/getting-started/config](examples/getting-started/config/main.go): modern Go-typed `sqlite.Config` for plain *sql.DB — plain + encrypted variants, no DSN strings.
+- [examples/getting-started/gorm](examples/getting-started/gorm/main.go): same `sqlite.Config` routed through gorm via `sqlitegorm.OpenConfig`.
+- [examples/features/vfs/crypto](examples/features/vfs/crypto/main.go): encryption at rest via vfs/crypto (Adiantum / AES-XTS-256, pure Go).
+- [examples/features/gorm/crypto](examples/features/gorm/crypto/main.go): gorm + vfs/crypto + vec/gorm + fts/gorm + fusion — encrypted DB with embedding sidecars, FTS5 search, hybrid ranking via RRF, argon2id key derivation, slog Recorder, WAL + busy_timeout.
+- [examples/features/extensions/array](examples/features/extensions/array/main.go): bind a Go slice as a SQL table via the `ext/array` eponymous vtab; shows explicit `array.Register` + `array.Bind` and the blank-import auto path; JOINs the array against a normal table to demonstrate composition.
+- [examples/features/extensions/regexp](examples/features/extensions/regexp/main.go): REGEXP operator + regexp_substr / regexp_replace over a small users table.
+- [examples/features/extensions/uuid](examples/features/extensions/uuid/main.go): generate v1/v4/v6/v7 + name-based v5; parse + reformat round-trip via uuid_str/uuid_blob.
+- [examples/features/extensions/hash](examples/features/extensions/hash/main.go): md5/sha1/sha2/sha3/blake2b digests + sha3 size variants.
+- [examples/features/extensions/ipaddr](examples/features/extensions/ipaddr/main.go): ipcontains/ipfamily/ipnetwork over an events table with mixed IPv4 / IPv6 sources.
+- [examples/features/extensions/zorder](examples/features/extensions/zorder/main.go): 2D Morton encoding round-trip + locality property demo.
+- [examples/features/extensions/stats](examples/features/extensions/stats/main.go): PostgreSQL-style aggregates (variance, percentile, regr_*, median, mode, every) plus a windowed regr_slope demo over a small employees table.
+- [examples/features/extensions/unicode](examples/features/extensions/unicode/main.go): Unicode-aware case mapping (with locale-tagged forms for Turkish / German), normalize, unaccent, NOCASE_UNICODE / NOCASE_ACCENT preset collations, plus a Swedish-locale collation that sorts `å` after `z`.
+- [examples/features/extensions/csv](examples/features/extensions/csv/main.go): read CSV files as SQL tables via the typed `csv.Table` API (Create / Columns / Rows / Name) — `Create` hides the `USING csv(…)` argument string and its quoting. Shows GROUP BY + SUM and a JOIN across two CSV files sandboxed in an `fstest.MapFS`.
+- [examples/features/extensions/blobio](examples/features/extensions/blobio/main.go): stream `zeroblob(N)` allocations via `readblob` / `writeblob`, and the same data through the typed `(*Conn).OpenBlob` API.
+- [examples/features/extensions/bloom](examples/features/extensions/bloom/main.go): probabilistic set-membership via the typed `bloom.Filter` API (Create / AddMany / Contains) with a tunable false-positive rate.
+- [examples/features/extensions/fileio](examples/features/extensions/fileio/main.go): walk a sandboxed `fstest.MapFS` via `fsdir`, `readfile`-it through SQL, and confirm `writefile` is unavailable in sandbox mode.
+- [examples/features/extensions/statement](examples/features/extensions/statement/main.go): parametrized views — anonymous `?N` and named `:pat` binds exposed as HIDDEN columns.
+- [examples/features/extensions/pivot](examples/features/extensions/pivot/main.go): three-SELECT cross-tab (rows × columns × cell aggregate) over a small sales table.
+- [examples/features/extensions/closure](examples/features/extensions/closure/main.go): parent-child graph walks via the typed `closure.Graph` API — descendants, depth bounds (`WithMaxDepth`), and ancestor walks via `Reversed`.
+- [examples/features/extensions/lines](examples/features/extensions/lines/main.go): read a log file as one-row-per-line via the typed `lines.Table` API (Create / Columns / Rows / Name), then filter ERROR lines and aggregate by severity with plain SQL over the vtab.
+- [examples/features/extensions/rtree](examples/features/extensions/rtree/main.go): spatial index via the typed `rtree.Table` API — Create a 2D R-Tree, InsertPoint several venues, then a bounding-box Search and a SearchCircle radius query (circle geometry wired by blank-importing `ext/rtree/auto`).
+- [examples/features/vfs/cksm](examples/features/vfs/cksm/main.go): detect simulated bit-rot via the checksum VFS — corrupt one byte, observe `SQLITE_IOERR_DATA` on read.
+- [examples/features/vfs/mvcc](examples/features/vfs/mvcc/main.go): SHARED (`file:/name`) vs PRIVATE (`file:name`) in-memory MVCC databases; reader / writer concurrency demo.
+- [examples/features/vfs/memdb](examples/features/vfs/memdb/main.go): same shared / private shape as vfs-mvcc but on the simpler `vfs/memdb` VFS — writes are visible immediately, no snapshot isolation.
+- [examples/features/advanced/hooks](examples/features/advanced/hooks/main.go): install update / authorizer / commit / trace hooks on a pinned connection (MaxOpenConns(1) + db.Conn + sc.Raw idiom).
+- [examples/features/advanced/backup](examples/features/advanced/backup/main.go): `(*Conn).Backup` mattn-compat factory + top-level `sqlite.Serialize` / `sqlite.Deserialize` round-trip.
+- [examples/features/advanced/session](examples/features/advanced/session/main.go): SESSION extension — record changes on a primary database into a changeset (`(*Conn).CreateSession` → `*Session.Changeset`), replay onto a replica with `(*Conn).ApplyChangeset`, then undo via `InvertChangeset`. The offline-sync / replication primitive, pure Go.
+- [examples/features/extensions/spellfix1](examples/features/extensions/spellfix1/main.go): fuzzy spell-correction via the typed `spellfix1.Vocab` API (Create / AddMany / Correct / CorrectSQL), Soundex prefilter + Damerau-Levenshtein scoring.
 
 ## Feature coverage matrices
 

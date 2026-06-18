@@ -121,6 +121,6 @@
 //   - github.com/go-again/sqlite/vec — raw vector-search API.
 //   - github.com/go-again/sqlite/gorm — gorm dialector (Open, New,
 //     Dialector, the DropTableHook interface).
-//   - examples/gorm-vec-tagged — end-to-end demo of this package.
+//   - examples/features/gorm/vec-tagged — end-to-end demo of this package.
 //   - docs/coverage-gorm.md — tag syntax tables and lifecycle matrix.
 package vecgorm

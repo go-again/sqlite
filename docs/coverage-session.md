@@ -22,7 +22,7 @@ The API lives in the root package because it needs the connection's unexported h
 
 Conflict types (`ConflictData` / `NotFound` / `Conflict` / `Constraint` / `ForeignKey`) and actions (`ChangesetOmit` / `Replace` / `Abort`) are typed. With no `WithConflictHandler`, conflicts abort and roll back (the safe default).
 
-Example: [`examples/session`](../examples/session/main.go) — record changes on a primary, replay onto a replica, undo via the inverse.
+Example: [`examples/features/advanced/session`](../examples/features/advanced/session/main.go) — record changes on a primary, replay onto a replica, undo via the inverse.
 
 ## Deferred (follow-ups)
 

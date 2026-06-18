@@ -154,8 +154,8 @@ fixture verbatim; a delta there means upstream changed numeric output.
 
 - [`coverage-gorm.md`](coverage-gorm.md) — covers the tag-driven
   `vec/gorm` bridge that wraps `vec.Table` for gorm models.
-- [`../examples/vec-search/`](../examples/vec-search/) — raw `vec.Table`.
-- [`../examples/gorm-vec-tagged/`](../examples/gorm-vec-tagged/) — the
+- [`../examples/features/search/vec-search/`](../examples/features/search/vec-search/) — raw `vec.Table`.
+- [`../examples/features/gorm/vec-tagged/`](../examples/features/gorm/vec-tagged/) — the
   `vecgorm.Plugin()` flow with a struct-tag-driven sidecar.
 
 ---

@@ -134,8 +134,8 @@
 //     sidecars wired into gorm models. Define an Embedding field on
 //     a gorm model and the plugin owns CRUD sync, soft-delete
 //     filtering, and DropTable cascade.
-//   - examples/vec-search — runnable demo of the raw vec.Table API.
-//   - examples/gorm-vec-tagged — the same data flow expressed via
+//   - examples/features/search/vec-search — runnable demo of the raw vec.Table API.
+//   - examples/features/gorm/vec-tagged — the same data flow expressed via
 //     the gorm bridge.
 //   - docs/coverage-vec.md — every documented sqlite-vec feature
 //     with its current status (typed / raw / inherited).

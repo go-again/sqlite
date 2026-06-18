@@ -30,7 +30,7 @@
 //   - FS — type alias for modernc.org/sqlite/vfs.FS, a handle on the
 //     registered VFS for lifetime control.
 //
-// See examples/vfs-embed/ for the runnable embed.FS demonstration.
+// See examples/features/vfs/embed/ for the runnable embed.FS demonstration.
 //
 // This surface is a thin re-export of modernc.org/sqlite/vfs; the C side
 // is transpiled per-target there, so platform coverage matches its
@@ -97,7 +97,7 @@
 //
 // # See also
 //
-//   - examples/vfs-custom/ — a writable in-memory VFS on the public interface.
-//   - examples/vfs-embed/ — minimal read-only embed.FS demonstration.
-//   - examples/gorm-vfs/ — the read-only flow with a gorm dialector on top.
+//   - examples/features/vfs/custom/ — a writable in-memory VFS on the public interface.
+//   - examples/features/vfs/embed/ — minimal read-only embed.FS demonstration.
+//   - examples/features/gorm/vfs/ — the read-only flow with a gorm dialector on top.
 package vfs

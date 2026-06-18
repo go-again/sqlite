@@ -26,12 +26,12 @@ The driver itself — CGo-free, mattn-API + glebarez-gorm drop-in, registered un
 - **Corruption detection** — pure-Go `vfs/cksm` with Fletcher-style 8-byte trailer per page (on-disk compatible with SQLite's `cksumvfs`); composes beneath `vfs/crypto` for checksum-then-encrypt stacks
 - **In-memory VFSes** — `vfs/mvcc` (snapshot isolation + atomic publish) and `vfs/memdb` (direct page store, no MVCC) for tests + scratch DBs, with shared (`file:/name`) and private (`file:name`) modes
 - **`fs.FS` / `io.ReaderAt` as a database** — `vfs.New(fs.FS)` for `embed.FS`-bundled DBs; `vfs.NewReader(io.ReaderAt, size)` for raw-buffer immutable DBs
-- **User-implementable VFS** — back a writable database with arbitrary Go storage by implementing `vfs.VFS` / `vfs.File` and calling `vfs.Register(name, impl)`; one generic dispatcher drives it through the same vetted C-ABI machinery the built-in VFSes use. Embed `vfs.NoLock` for single-process locking, return a `vfs.VFSError` for a specific result code, and `vfs.Wrap(base, recorder)` to instrument per-op latency / bytes / errors over any VFS. WAL is one method away — implement `vfs.ShmFile` and the dispatcher owns the shared memory + lock table. See `examples/vfs-custom/`
-- **Bounded page cache** — `pcache.InstallBoundedLRU(maxPages)` swaps SQLite's page cache for a fixed-capacity LRU over C-allocated buffers with hit / miss / eviction / live-page counters, making the heap predictable and observable under write load (the recurring "modernc grows memory" complaint). Install once before the first open. See `examples/pcache/`
+- **User-implementable VFS** — back a writable database with arbitrary Go storage by implementing `vfs.VFS` / `vfs.File` and calling `vfs.Register(name, impl)`; one generic dispatcher drives it through the same vetted C-ABI machinery the built-in VFSes use. Embed `vfs.NoLock` for single-process locking, return a `vfs.VFSError` for a specific result code, and `vfs.Wrap(base, recorder)` to instrument per-op latency / bytes / errors over any VFS. WAL is one method away — implement `vfs.ShmFile` and the dispatcher owns the shared memory + lock table. See `examples/features/vfs/custom/`
+- **Bounded page cache** — `pcache.InstallBoundedLRU(maxPages)` swaps SQLite's page cache for a fixed-capacity LRU over C-allocated buffers with hit / miss / eviction / live-page counters, making the heap predictable and observable under write load (the recurring "modernc grows memory" complaint). Install once before the first open. See `examples/features/advanced/pcache/`
 - **Loadable Go SQL extensions** under `ext/` — SQL scalars / aggregates / collations (`regexp`, `uuid`, `hash`, `ipaddr`, `zorder`, `stats`, `unicode`, `encode`, `text`, `fuzzy`, `decimal`, `money`, `time`, `eval`), virtual tables (`array`, `csv`, `lines`, `statement`, `closure`, `pivot`, `rtree`, `series`), specialised stores (`bloom`, `spellfix1`), I/O (`blobio`, `fileio`) — many also expose a typed Go handle (`csv.Table`, `lines.Table`, `closure.Graph`, `bloom.Filter`, `spellfix1.Vocab`, `rtree.Table`) mirroring `vec.Table` / `fts.Index` so callers skip hand-written DDL. Auto-register per conn or pool-wide via blank-import `/auto`; full inventory + status matrix in [`docs/coverage-ext.md`](docs/coverage-ext.md)
-- **Hooks** — per-conn update / authorizer / commit / rollback / pre-update / trace; conn-pinning idiom documented and shown in `examples/hooks/`
+- **Hooks** — per-conn update / authorizer / commit / rollback / pre-update / trace; conn-pinning idiom documented and shown in `examples/features/advanced/hooks/`
 - **Backup, serialize, deserialize** — mattn-compat `(*Conn).Backup` factory + top-level `sqlite.Serialize` / `Deserialize` for in-memory snapshots
-- **Changesets / patchsets (SESSION extension)** — `(*Conn).CreateSession` records changes; serialize to a changeset/patchset, `InvertChangeset`, `ConcatChangesets`, and `ApplyChangeset` to another database with a Go conflict handler. The foundation for offline sync, audit logs, and lightweight replication — **no other pure-Go SQLite driver exposes this**. See `examples/session/`
+- **Changesets / patchsets (SESSION extension)** — `(*Conn).CreateSession` records changes; serialize to a changeset/patchset, `InvertChangeset`, `ConcatChangesets`, and `ApplyChangeset` to another database with a Go conflict handler. The foundation for offline sync, audit logs, and lightweight replication — **no other pure-Go SQLite driver exposes this**. See `examples/features/advanced/session/`
 - **Column metadata + runtime telemetry** — `(*Conn).TableColumnMetadata` (decltype/collation/PK/autoinc without a SELECT), `(*Conn).Status` (SQLite cache/lookaside counters), `(*Conn).TxnState`, `(*Stmt).Readonly` / `Status`
 - **UDF function-context substrate + lazy collations** — `*FunctionContext` exposes result/argument subtypes (`ResultSubtype` / `ValueSubtype`) and per-argument auxiliary-data caching (`SetAuxData` / `GetAuxData`, e.g. compile a regex once per constant arg); `(*Conn).CollationNeeded` / `AnyCollationNeeded` define collations on demand so foreign schemas open / ATTACH / restore without "no such collation sequence"
 - **Modern Go-typed Config** — `sqlite.Config{Path, Pragmas, Encryption, MaxOpenConns, …}` flows uniformly to both raw `database/sql` and gorm; no DSN-string duplication
@@ -235,7 +235,7 @@ driver registration via `&sqlite3.SQLiteDriver{Extensions, ConnectHook}`,
 `Conn.RegisterFunc`, `errors.Is(err, sqlite.ErrConstraintUnique)` — works
 unchanged.
 
-See [`examples/mattn-compat/`](examples/mattn-compat/main.go).
+See [`examples/migrating/from-mattn/`](examples/migrating/from-mattn/main.go).
 
 ### Coming from ncruces/go-sqlite3
 
@@ -279,7 +279,7 @@ db, _ := gorm.Open(sqlite.Open("file:my.db?_pragma=foreign_keys(1)"), &gorm.Conf
 either glebarez or the official go-gorm/sqlite import-paths can be swapped
 in.
 
-See [`examples/gorm/`](examples/gorm/main.go).
+See [`examples/migrating/from-glebarez/`](examples/migrating/from-glebarez/main.go).
 
 ### Vector search
 
@@ -297,7 +297,7 @@ for m, err := range tbl.KNN(ctx, query, 5) {
 }
 ```
 
-See [`examples/vec-search/`](examples/vec-search/main.go).
+See [`examples/features/search/vec-search/`](examples/features/search/vec-search/main.go).
 
 ### Full-text search
 
@@ -317,7 +317,7 @@ matches, _ := idx.SearchSlice(ctx, fts.Term("fox"),
     fts.WithSnippet("value", "[", "]", "…", 8))
 ```
 
-See [`examples/fts-search/`](examples/fts-search/main.go).
+See [`examples/features/search/fts-search/`](examples/features/search/fts-search/main.go).
 
 ### Hybrid search (semantic + lexical) via fusion
 
@@ -404,8 +404,8 @@ alias that implements gorm's `GormDataType`); `[]float32` with
 wrapper.
 
 See [`vec/gorm/`](vec/gorm/) and [`fts/gorm/`](fts/gorm/) for full
-package docs and [`examples/gorm-vec-tagged/`](examples/gorm-vec-tagged/)
-+ [`examples/gorm-fts-tagged/`](examples/gorm-fts-tagged/) for
+package docs and [`examples/features/gorm/vec-tagged/`](examples/features/gorm/vec-tagged/)
++ [`examples/features/gorm/fts-tagged/`](examples/features/gorm/fts-tagged/) for
 runnable end-to-end usage; coverage matrix lives in
 [`docs/coverage-gorm.md`](docs/coverage-gorm.md).
 
@@ -421,7 +421,7 @@ name, _, _ := vfs.New(seed)
 db, _ := sql.Open("sqlite3", "file:seed.db?vfs="+name+"&mode=ro")
 ```
 
-See [`examples/vfs-embed/`](examples/vfs-embed/main.go).
+See [`examples/features/vfs/embed/`](examples/features/vfs/embed/main.go).
 
 ### Encryption at rest
 
@@ -439,7 +439,7 @@ Pure-Go page-level encryption — Adiantum (default, 32-byte key) or AES-XTS-256
 
 **What to know.** Confidentiality only — no SQLCipher on-disk format compatibility, no MAC. SQLCipher's per-page HMAC integrity is not what we ship; for active-tamper threats pair with disk-level integrity (LUKS dm-integrity, ZFS). Overhead on a write-heavy microbenchmark is in the tens of percent; the exact factor depends on cipher and platform (Adiantum is faster than AES-XTS on most ARM, often the reverse on AES-NI-capable x86). Run `go test -bench=BenchmarkInsert ./vfs/crypto/` to measure on your hardware.
 
-**Composing.** Add `Options.Recorder = crypto.NewSlogRecorder(slog.Default())` (or any custom `crypto.Recorder`) for per-IO observability. Stack `vfs/cksm` underneath via `Options.WrapVFS` for checksum-then-encrypt protection. See [`examples/vfs-crypto/`](examples/vfs-crypto/main.go) for the standalone shape and [`examples/gorm-crypto/`](examples/gorm-crypto/main.go) for an end-to-end stack with gorm + vec + fts + fusion on top of encryption + Argon2id key derivation. Package docs in [`vfs/crypto/doc.go`](vfs/crypto/doc.go).
+**Composing.** Add `Options.Recorder = crypto.NewSlogRecorder(slog.Default())` (or any custom `crypto.Recorder`) for per-IO observability. Stack `vfs/cksm` underneath via `Options.WrapVFS` for checksum-then-encrypt protection. See [`examples/features/vfs/crypto/`](examples/features/vfs/crypto/main.go) for the standalone shape and [`examples/features/gorm/crypto/`](examples/features/gorm/crypto/main.go) for an end-to-end stack with gorm + vec + fts + fusion on top of encryption + Argon2id key derivation. Package docs in [`vfs/crypto/doc.go`](vfs/crypto/doc.go).
 
 ### Corruption detection at rest
 
@@ -461,7 +461,7 @@ Pure-Go page-level Fletcher-style checksum trailer (8 bytes per page). `(*sqlite
 
 **What to know.** On reopens the VFS detects byte 20 == 8 in the SQLite header and auto-activates verification; a flipped bit surfaces as `SQLITE_IOERR_DATA` on read instead of silent corruption. On-disk compatible with SQLite's `cksumvfs` extension, so a database written here is readable by stock SQLite + cksumvfs.
 
-**Composing.** Both `cksm.Options` and `crypto.Options` accept `WrapVFS` to stack — register cksm first, then point crypto at it for checksum-on-the-inside / encrypt-on-the-outside. See [`examples/vfs-cksm/`](examples/vfs-cksm/main.go) for a corrupt-a-byte-and-watch-the-error demo.
+**Composing.** Both `cksm.Options` and `crypto.Options` accept `WrapVFS` to stack — register cksm first, then point crypto at it for checksum-on-the-inside / encrypt-on-the-outside. See [`examples/features/vfs/cksm/`](examples/features/vfs/cksm/main.go) for a corrupt-a-byte-and-watch-the-error demo.
 
 ### In-memory databases (MVCC and direct)
 
@@ -484,7 +484,7 @@ defer fs.Close()
 db, _ := sql.Open("sqlite", "file:/cache.db?vfs="+name)
 ```
 
-`vfs/mvcc` gives reader snapshots at lock-acquire time and republishes the snapshot atomically on commit; pair it with the standard SQLite busy-timeout retry for concurrent writers. `vfs/memdb` is the smaller-surface alternative for tests and scratch DBs — no snapshot copy on commit, no MVCC bookkeeping; concurrent writers see each other's writes immediately. Both VFSes use the leading-`/` convention (`file:/name`) for shared stores vs no-leading-slash (`file:name`) for per-handle private stores. See [`examples/vfs-mvcc/`](examples/vfs-mvcc/main.go) and [`examples/vfs-memdb/`](examples/vfs-memdb/main.go).
+`vfs/mvcc` gives reader snapshots at lock-acquire time and republishes the snapshot atomically on commit; pair it with the standard SQLite busy-timeout retry for concurrent writers. `vfs/memdb` is the smaller-surface alternative for tests and scratch DBs — no snapshot copy on commit, no MVCC bookkeeping; concurrent writers see each other's writes immediately. Both VFSes use the leading-`/` convention (`file:/name`) for shared stores vs no-leading-slash (`file:name`) for per-handle private stores. See [`examples/features/vfs/mvcc/`](examples/features/vfs/mvcc/main.go) and [`examples/features/vfs/memdb/`](examples/features/vfs/memdb/main.go).
 
 ### io.ReaderAt-backed databases
 
@@ -518,9 +518,9 @@ sc.Raw(func(dc any) error {
 // Drive traffic through sc.ExecContext, NOT db.Exec.
 ```
 
-See [`examples/hooks/`](examples/hooks/main.go) for the full update / authorizer / commit / trace round-trip.
+See [`examples/features/advanced/hooks/`](examples/features/advanced/hooks/main.go) for the full update / authorizer / commit / trace round-trip.
 
-**Backups.** The mattn-compat `(*Conn).Backup(destSchema, srcConn, srcSchema)` factory drives `sqlite3_backup_*` against an open destination connection (caller-owned). See [`examples/backup/`](examples/backup/main.go).
+**Backups.** The mattn-compat `(*Conn).Backup(destSchema, srcConn, srcSchema)` factory drives `sqlite3_backup_*` against an open destination connection (caller-owned). See [`examples/features/advanced/backup/`](examples/features/advanced/backup/main.go).
 
 **Serialize / deserialize.** Top-level `sqlite.Serialize(ctx, db) []byte` snapshots an in-memory database into a byte buffer; `sqlite.Deserialize(ctx, db, buf)` restores it. Useful for ship-a-DB-as-state and for state-machine tests.
 
@@ -556,7 +556,7 @@ db.Select(`hex(sha256(body)) AS digest`).Find(&logs)
 db.Where("ipcontains(?, src_ip)", "10.0.0.0/8").Find(&events)
 ```
 
-Covered packages: [`regexp`](ext/regexp/) (RE2 operator + `regexp_*` scalars), [`uuid`](ext/uuid/) (v1–v7 incl. DCE v2 + `uuid_str`/`uuid_blob`), [`hash`](ext/hash/) (md5/sha1/sha2/sha3/blake2/ripemd), [`ipaddr`](ext/ipaddr/) (`ipcontains`/`ipfamily`/`ipnetwork` over `net/netip`), [`zorder`](ext/zorder/) (Morton encoding for 2-24 dimensions), [`stats`](ext/stats/) (variance/percentile/regr_*/median/mode aggregates + sliding-window inverses), [`unicode`](ext/unicode/) (Unicode-aware `upper`/`lower`/`normalize`/`unaccent` + preset `NOCASE_UNICODE` collation + locale-tagged collators), [`encode`](ext/encode/) (`encode`/`decode` for base64/base32/base16/ascii85/url), [`text`](ext/text/) (rune-aware `text_reverse`/`text_lpad`/`text_rpad`/`text_repeat`/`text_split`), [`decimal`](ext/decimal/) (exact base-10 `decimal_add`/`mul`/`div`/`round`/… + `decimal_sum` aggregate over `math/big`), [`money`](ext/money/) (fixed-2dp currency + `money_format`), [`time`](ext/time/) (`time_unix`/`add`/`diff`/`part`/`trunc` over Go `time`), [`eval`](ext/eval/) (run dynamic SQL on the calling connection). End-to-end demo composing seven of them against one gorm model: [`examples/gorm-ext-scalars/`](examples/gorm-ext-scalars/main.go).
+Covered packages: [`regexp`](ext/regexp/) (RE2 operator + `regexp_*` scalars), [`uuid`](ext/uuid/) (v1–v7 incl. DCE v2 + `uuid_str`/`uuid_blob`), [`hash`](ext/hash/) (md5/sha1/sha2/sha3/blake2/ripemd), [`ipaddr`](ext/ipaddr/) (`ipcontains`/`ipfamily`/`ipnetwork` over `net/netip`), [`zorder`](ext/zorder/) (Morton encoding for 2-24 dimensions), [`stats`](ext/stats/) (variance/percentile/regr_*/median/mode aggregates + sliding-window inverses), [`unicode`](ext/unicode/) (Unicode-aware `upper`/`lower`/`normalize`/`unaccent` + preset `NOCASE_UNICODE` collation + locale-tagged collators), [`encode`](ext/encode/) (`encode`/`decode` for base64/base32/base16/ascii85/url), [`text`](ext/text/) (rune-aware `text_reverse`/`text_lpad`/`text_rpad`/`text_repeat`/`text_split`), [`decimal`](ext/decimal/) (exact base-10 `decimal_add`/`mul`/`div`/`round`/… + `decimal_sum` aggregate over `math/big`), [`money`](ext/money/) (fixed-2dp currency + `money_format`), [`time`](ext/time/) (`time_unix`/`add`/`diff`/`part`/`trunc` over Go `time`), [`eval`](ext/eval/) (run dynamic SQL on the calling connection). End-to-end demo composing seven of them against one gorm model: [`examples/features/gorm/ext-scalars/`](examples/features/gorm/ext-scalars/main.go).
 
 ### Pattern 2 — virtual tables (CREATE VIRTUAL TABLE + bind / Pointer)
 
@@ -580,7 +580,7 @@ db.Exec(`CREATE VIRTUAL TABLE dict USING spellfix1`)
 
 Covered packages: [`array`](ext/array/) (slice-as-table; supports the transparent `sqlite.Pointer` path), [`lines`](ext/lines/) (split a text blob into rows), [`csv`](ext/csv/) (CSV files as tables; sandbox via `csv.RegisterFS(c, fsys)`), [`statement`](ext/statement/) (parametrized views with `?N` / `:name` HIDDEN bind columns), [`closure`](ext/closure/) (`transitive_closure` graph walker with optional depth bounds), [`bloom`](ext/bloom/) (persistent Bloom filter; survives `db.Close`), [`spellfix1`](ext/spellfix1/) (Soundex + Damerau-Levenshtein fuzzy lookup; vocabulary persists), [`pivot`](ext/pivot/) (three-SELECT cross-tab — rows × columns × cell aggregate), [`rtree`](ext/rtree/) (R-Tree spatial index — the built-in `rtree`/`geopoly` vtabs plus custom geometry/query callbacks), [`series`](ext/series/) (`generate_series(start, stop[, step])` integer sequence).
 
-Several of these also expose a **typed Go handle** that hides the `CREATE VIRTUAL TABLE` DDL and the query SQL — `csv.Table`, `lines.Table`, `closure.Graph`, `bloom.Filter`, `spellfix1.Vocab`, `rtree.Table` — mirroring `vec.Table` / `fts.Index`. Per-extension demos live under `examples/ext-*` (e.g. [`ext-rtree`](examples/ext-rtree/main.go) does a bounding-box and a circle-radius search via `rtree.Table`); the end-to-end demo composing seven vtabs against one gorm DB is [`examples/gorm-ext-vtabs/`](examples/gorm-ext-vtabs/main.go).
+Several of these also expose a **typed Go handle** that hides the `CREATE VIRTUAL TABLE` DDL and the query SQL — `csv.Table`, `lines.Table`, `closure.Graph`, `bloom.Filter`, `spellfix1.Vocab`, `rtree.Table` — mirroring `vec.Table` / `fts.Index`. Per-extension demos live under `examples/ext-*` (e.g. [`ext-rtree`](examples/features/extensions/rtree/main.go) does a bounding-box and a circle-radius search via `rtree.Table`); the end-to-end demo composing seven vtabs against one gorm DB is [`examples/features/gorm/ext-vtabs/`](examples/features/gorm/ext-vtabs/main.go).
 
 ### Pattern 3 — `fs.FS`-bound (connect-hook idiom)
 
@@ -599,11 +599,11 @@ sqlite.DefaultDriver().RegisterConnectionHook(
 // Now gorm.Open(...) opens conns that all have csv sandboxed to myFsys.
 ```
 
-Same shape works for `lines.RegisterFS`, `fileio.RegisterFS`, `blobio.RegisterFS`. [`examples/gorm-ext-vtabs/`](examples/gorm-ext-vtabs/main.go) shows the recipe end-to-end with csv.
+Same shape works for `lines.RegisterFS`, `fileio.RegisterFS`, `blobio.RegisterFS`. [`examples/features/gorm/ext-vtabs/`](examples/features/gorm/ext-vtabs/main.go) shows the recipe end-to-end with csv.
 
 ### Window functions and custom UDFs
 
-`(*Conn).RegisterWindowFunction(name, nArg, ctor, pure)` is the typed window-function entry. See [`examples/window-function/`](examples/window-function/main.go). For plain scalar / aggregate UDFs use `Conn.RegisterFunc` / `RegisterAggregator` (mattn-compatible) or the top-level `sqlite.RegisterFunction`.
+`(*Conn).RegisterWindowFunction(name, nArg, ctor, pure)` is the typed window-function entry. See [`examples/features/advanced/window-function/`](examples/features/advanced/window-function/main.go). For plain scalar / aggregate UDFs use `Conn.RegisterFunc` / `RegisterAggregator` (mattn-compatible) or the top-level `sqlite.RegisterFunction`.
 
 ### Status matrix
 

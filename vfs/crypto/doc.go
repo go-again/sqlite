@@ -177,7 +177,7 @@
 //
 // # See also
 //
-//   - examples/vfs-crypto — runnable end-to-end demo.
+//   - examples/features/vfs/crypto — runnable end-to-end demo.
 //   - [github.com/go-again/sqlite/vec] / [github.com/go-again/sqlite/fts]
 //     — both compose with this VFS transparently. The same Recorder-
 //     shaped observability surface is parallel across all three.

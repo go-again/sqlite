@@ -1,0 +1,15 @@
+# Advanced — connection-level controls
+
+Lower-level capabilities. Several use raw SQL on a pinned connection because the feature *is* connection-level — that's the right tool here, not legacy style.
+
+| example | what it shows |
+|---|---|
+| [`hooks`](hooks/) | per-conn update / authorizer / commit / trace hooks, with the `MaxOpenConns(1)` + `db.Conn` + `sc.Raw` pinning idiom |
+| [`session`](session/) | the SESSION extension — record changes into a changeset, replay onto a replica with `ApplyChangeset`, undo via `InvertChangeset` (offline sync / replication, pure Go) |
+| [`backup`](backup/) | the `(*Conn).Backup` factory + top-level `sqlite.Serialize` / `Deserialize` round-trip |
+| [`pcache`](pcache/) | `pcache.InstallBoundedLRU(maxPages)` — bound and observe SQLite's page-cache heap (hit / miss / eviction / live counters) |
+| [`busy-handler`](busy-handler/) | `RegisterBusyHandler` with exponential back-off under real lock contention |
+| [`collation-needed`](collation-needed/) | `CollationNeeded` (lazy collation registration) + `AnyCollationNeeded` |
+| [`udf-context`](udf-context/) | `FunctionContext` aux-data — cache a compiled regexp across rows in a scalar UDF |
+| [`sqlitex`](sqlitex/) | the `sqlitex` helpers — `embed.FS` migrations, `Transaction`, deferred savepoints, `Execute`, scalar reads |
+| [`window-function`](window-function/) | a custom Go window function via `Conn.RegisterWindowFunction` |

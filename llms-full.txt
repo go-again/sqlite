@@ -123,7 +123,7 @@ defer db.Close()
 db.AutoMigrate(&MyModel{}) // *gorm.DB methods, unchanged
 ```
 
-Runnable end-to-end demos: [examples/sqlite-config](examples/sqlite-config/main.go) (plain `database/sql`) and [examples/gorm-config](examples/gorm-config/main.go) (gorm). The encrypted variants in both verify the on-disk file is opaque (SQLite header not visible).
+Runnable end-to-end demos: [examples/getting-started/config](examples/getting-started/config/main.go) (plain `database/sql`) and [examples/getting-started/gorm](examples/getting-started/gorm/main.go) (gorm). The encrypted variants in both verify the on-disk file is opaque (SQLite header not visible).
 
 ## Escape hatches for legacy DSN callers
 

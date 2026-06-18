@@ -110,8 +110,8 @@
 //     plugin manages CREATE, AFTER INSERT/UPDATE/DELETE triggers,
 //     external / in-table / contentless mode selection, soft-delete
 //     filtering, and DropTable cascade.
-//   - examples/fts-search — runnable demo of the raw fts.Index API.
-//   - examples/gorm-fts-tagged — the same flow expressed via the
+//   - examples/features/search/fts-search — runnable demo of the raw fts.Index API.
+//   - examples/features/gorm/fts-tagged — the same flow expressed via the
 //     gorm bridge.
 //   - docs/coverage-fts.md — every documented FTS5 feature with its
 //     current status (typed / raw / inherited).

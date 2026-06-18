@@ -45,7 +45,7 @@
 // wrapper exists to release the pool AND unregister the encryption
 // VFS in the right order on Close.
 //
-// See [examples/sqlite-config] for the full plain + encrypted demo,
+// See [examples/getting-started/config] for the full plain + encrypted demo,
 // and the [gorm] sub-package's [OpenConfig] for the gorm flavor
 // (same [Config] type, *gorm.DB return).
 //

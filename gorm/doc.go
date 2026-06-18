@@ -37,7 +37,7 @@
 // Same [sqlite.Config] type the root package exposes — set
 // [sqlite.Encryption] for transparent encryption at rest, or
 // MaxOpenConns / MaxIdleConns / ConnMaxLifetime to tune the pool.
-// See examples/gorm-config for the plain + encrypted demos.
+// See examples/getting-started/gorm for the plain + encrypted demos.
 //
 // # Quick start (legacy DSN, still supported)
 //
@@ -78,7 +78,7 @@
 // over db.DB(). There is deliberately no csv/gorm or lines/gorm sidecar:
 // those vtabs are the table, not a companion index, so the bridge-plugin
 // shape used by vec/gorm and fts/gorm does not apply. See
-// examples/gorm-ext-vtabs for csv / lines / closure / bloom / spellfix1
+// examples/features/gorm/ext-vtabs for csv / lines / closure / bloom / spellfix1
 // each driven through gorm.
 //
 // # Configuration knobs

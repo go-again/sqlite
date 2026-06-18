@@ -79,7 +79,7 @@ against us — it's whether *user code* that imports mattn and uses the
 1. `compat_test.go` in this repo, which exercises the
    `&SQLiteDriver{...}` literal-struct pattern + the type aliases
    (`SQLiteConn`, `SQLiteStmt`, `SQLiteError`, etc.).
-2. The migration examples under `examples/mattn-compat/`.
+2. The migration examples under `examples/migrating/from-mattn/`.
 3. The unlock-notify and math-functions tests vendored here.
 4. The DSN flag table in `dsn.go::translateMattnDSN` covering all
    `_*` flags mattn defined.

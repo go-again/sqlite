@@ -119,7 +119,7 @@
 //   - github.com/go-again/sqlite/fts — raw FTS5 API.
 //   - github.com/go-again/sqlite/gorm — gorm dialector and the
 //     DropTableHook interface this package implements.
-//   - examples/gorm-fts-tagged — end-to-end demo of this package.
+//   - examples/features/gorm/fts-tagged — end-to-end demo of this package.
 //   - docs/coverage-gorm.md — tag syntax tables, mode tradeoffs,
 //     lifecycle matrix.
 package ftsgorm

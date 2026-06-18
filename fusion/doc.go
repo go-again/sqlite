@@ -64,6 +64,6 @@
 //
 //   - [github.com/go-again/sqlite/vec.KNNSlice] / [github.com/go-again/sqlite/fts.SearchSlice]
 //     — the typical input producers.
-//   - examples/fusion-hybrid-search — runnable end-to-end demo that
+//   - examples/features/search/fusion-hybrid — runnable end-to-end demo that
 //     wires a vec.KNN ranking and an fts.Search ranking through RRF2.
 package fusion

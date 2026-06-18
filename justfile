@@ -113,17 +113,29 @@ fmt:
 tidy:
     go mod tidy
 
-# Run an example by directory name (e.g. `just example vec-search`).
+# Run an example by leaf name or sub-path. examples/ is grouped
+# (migrating/, getting-started/, features/<area>/), so both
+# `just example hash` and `just example features/extensions/hash` work;
+# an ambiguous leaf (e.g. `crypto`) lists the candidates.
 example NAME:
-    go run ./examples/{{NAME}}/
+    @m=$(find examples -type d | sed 's|^examples/||' | grep -E '(^|/){{NAME}}$' || true); \
+    c=$(printf '%s\n' "$m" | grep -c . || true); \
+    if [ "$c" -eq 0 ]; then echo "no example matching '{{NAME}}' — see: just examples-list"; exit 1; \
+    elif [ "$c" -gt 1 ]; then echo "ambiguous '{{NAME}}', pick one:"; printf '  %s\n' $m; exit 1; \
+    else go run "./examples/$m/"; fi
+
+# List every runnable example (its sub-path under examples/).
+examples-list:
+    @find examples -name main.go | sed 's|/main.go||; s|^examples/||' | sort
 
 # Examples that write .db files (crypto/cksm/backup) would otherwise leave
 # debris in the repo PWD — we redirect each one into a per-example temp
 # dir and clean up afterwards.
 # Smoke-test every example (each prints something to stdout when working).
+# Discovery is depth-agnostic (find main.go) so the grouped layout works.
 examples:
     @repo="$(pwd)"; \
-    for ex in $(ls -d examples/*/); do \
+    for ex in $(find examples -name main.go | sed 's|/main.go||' | sort); do \
         echo "=== $ex ==="; \
         sandbox="$(mktemp -d)"; \
         ( cd "$repo" && go build -o "$sandbox/example" "./$ex" ) && ( cd "$sandbox" && ./example ) \
