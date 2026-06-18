@@ -8,9 +8,11 @@
 //	jaro(a, b)                 -- Jaro similarity in [0, 1]
 //	jaro_winkler(a, b)         -- Jaro with a common-prefix bonus
 //	soundex(s)                 -- 4-character American Soundex code
+//	caverphone(s)              -- 10-character Caverphone 2.0 phonetic code
 //
-// Distances/similarities are rune-aware (Unicode-correct); Soundex operates on
-// ASCII letters as the algorithm is defined. The cousin to ext/spellfix1 (a
+// Distances/similarities are rune-aware (Unicode-correct); Soundex and
+// Caverphone operate on ASCII letters as those algorithms are defined. The
+// cousin to ext/spellfix1 (a
 // vtab-based fuzzy vocabulary): these are stateless scalars over two strings.
 // Ported in spirit from the sqlean `fuzzy` module.
 //
@@ -41,6 +43,7 @@ func Register(c *sqlite.Conn) error {
 		c.RegisterFunc("jaro", jaro, true),
 		c.RegisterFunc("jaro_winkler", jaroWinkler, true),
 		c.RegisterFunc("soundex", soundex, true),
+		c.RegisterFunc("caverphone", caverphone, true),
 	)
 }
 

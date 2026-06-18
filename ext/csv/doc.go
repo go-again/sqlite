@@ -41,6 +41,13 @@
 //   - comma=',' — column separator; any single-rune literal. Default ','.
 //   - comment='#' — lines starting with this rune are skipped. Default
 //     unset.
+//   - skip=N — discard N leading rows before the header / first record
+//     (provenance banners, export metadata). Default 0.
+//
+// With comma= (any delimiter, e.g. tab or pipe), schema= (per-column
+// affinity so numeric fields read back as INTEGER/REAL), and skip=,
+// this module covers the affinity-typed / custom-separator CSV variants
+// that some toolchains expose as a separate "vsv" extension.
 //
 // # Type affinity
 //

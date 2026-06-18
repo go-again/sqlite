@@ -3,11 +3,12 @@
 //
 // # Functions
 //
-//   - uuid([version [, namespace [, data]]]) → TEXT
+//   - uuid([version [, ...]]) → TEXT
 //     Generate a UUID. Defaults to v4 when called with no args.
 //     Version selector covers v1 (time-based), v4 (random),
 //     v6 (reordered time-based), v7 (Unix epoch time-based),
-//     and v3 / v5 (name-based MD5 / SHA-1, requires namespace + data).
+//     v3 / v5 (name-based MD5 / SHA-1, requires namespace + data), and
+//     v2 (DCE Security, requires domain + id — see below).
 //   - gen_random_uuid() → TEXT: shorthand for uuid() = uuid(4).
 //   - uuid_str(u) → TEXT: parse a UUID (TEXT or 16-byte BLOB) into
 //     the canonical 8-4-4-4-12 hex string.
@@ -15,6 +16,10 @@
 //   - uuid_extract_version(u) → INTEGER: the RFC 4122 version field.
 //   - uuid_extract_timestamp(u) → INTEGER: Unix seconds for v1/v6/v7
 //     UUIDs; NULL otherwise.
+//   - uuid_extract_domain(u) → TEXT: the DCE domain (person/group/org)
+//     of a v2 UUID; NULL otherwise.
+//   - uuid_extract_id(u) → INTEGER: the local identifier (UID/GID) of a
+//     v2 UUID; NULL otherwise.
 //
 // For v3 / v5 (name-based) UUIDs, the namespace may be any of:
 //
@@ -23,9 +28,13 @@
 //   - one of the well-known namespace shortcuts: "dns", "url", "oid",
 //     "x500" (case-insensitive)
 //
-// Ported from [ncruces/ext/uuid]. The DCE Security (v2) variant is NOT
-// surfaced — it's rarely used and adds substantial domain-specific code
-// (UID/GID lookups, domain enums). Open an issue if you need it.
+// For v2 (DCE Security), call uuid(2, domain, id): domain is a name
+// (person/group/org, case-insensitive) or its numeric code (0/1/2), and
+// id is the local identifier (a POSIX UID/GID for the person/group
+// domains). The id is supplied explicitly rather than read from the
+// process, so generation stays portable and deterministic.
+//
+// Ported from [ncruces/ext/uuid].
 //
 // # Usage
 //
@@ -49,6 +58,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
+	"strings"
 
 	gid "github.com/google/uuid"
 
@@ -65,6 +76,8 @@ const (
 	FuncUUIDBlob             = "uuid_blob"
 	FuncUUIDExtractVersion   = "uuid_extract_version"
 	FuncUUIDExtractTimestamp = "uuid_extract_timestamp"
+	FuncUUIDExtractDomain    = "uuid_extract_domain"
+	FuncUUIDExtractID        = "uuid_extract_id"
 )
 
 // Register installs the uuid family of SQL functions on c.
@@ -78,6 +91,8 @@ func Register(c *sqlite.Conn) error {
 		c.RegisterFunc(FuncUUIDBlob, toBlob, true),
 		c.RegisterFunc(FuncUUIDExtractVersion, extractVersion, true),
 		c.RegisterFunc(FuncUUIDExtractTimestamp, extractTimestamp, true),
+		c.RegisterFunc(FuncUUIDExtractDomain, extractDomain, true),
+		c.RegisterFunc(FuncUUIDExtractID, extractID, true),
 	)
 }
 
@@ -103,6 +118,29 @@ func generate(args ...any) (string, error) {
 		u, err := gid.NewUUID()
 		if err != nil {
 			return "", fmt.Errorf("uuid: NewUUID: %w", err)
+		}
+		return u.String(), nil
+	case 2:
+		// DCE Security: uuid(2, domain, id). The id (a POSIX UID/GID for
+		// the person/group domains) is supplied explicitly rather than
+		// read from the process, keeping the function portable and pure.
+		if len(args) < 3 {
+			return "", fmt.Errorf("uuid: v2 needs (version, domain, id) — domain is person/group/org or 0/1/2")
+		}
+		dom, err := resolveDomain(args[1])
+		if err != nil {
+			return "", fmt.Errorf("uuid: bad domain: %w", err)
+		}
+		id, err := toInt64(args[2])
+		if err != nil {
+			return "", fmt.Errorf("uuid: bad id: %w", err)
+		}
+		if id < 0 || id > math.MaxUint32 {
+			return "", fmt.Errorf("uuid: v2 id %d out of uint32 range", id)
+		}
+		u, err := gid.NewDCESecurity(dom, uint32(id))
+		if err != nil {
+			return "", fmt.Errorf("uuid: NewDCESecurity: %w", err)
 		}
 		return u.String(), nil
 	case 4:
@@ -136,8 +174,71 @@ func generate(args ...any) (string, error) {
 		}
 		return gid.NewSHA1(ns, data).String(), nil
 	default:
-		return "", fmt.Errorf("uuid: unsupported version %d (supported: 1, 3, 4, 5, 6, 7)", ver)
+		return "", fmt.Errorf("uuid: unsupported version %d (supported: 1, 2, 3, 4, 5, 6, 7)", ver)
 	}
+}
+
+// resolveDomain accepts a DCE Security domain as a name (person/group/
+// org, case-insensitive) or its numeric code (0/1/2).
+func resolveDomain(v any) (gid.Domain, error) {
+	switch x := v.(type) {
+	case string, []byte:
+		var s string
+		if b, ok := x.([]byte); ok {
+			s = string(b)
+		} else {
+			s = x.(string)
+		}
+		switch strings.ToLower(s) {
+		case "person", "0":
+			return gid.Person, nil
+		case "group", "1":
+			return gid.Group, nil
+		case "org", "2":
+			return gid.Org, nil
+		}
+		return 0, fmt.Errorf("unknown domain %q (want person/group/org)", s)
+	default:
+		n, err := toInt64(v)
+		if err != nil {
+			return 0, err
+		}
+		switch n {
+		case 0:
+			return gid.Person, nil
+		case 1:
+			return gid.Group, nil
+		case 2:
+			return gid.Org, nil
+		}
+		return 0, fmt.Errorf("domain %d out of range (0=person, 1=group, 2=org)", n)
+	}
+}
+
+// extractDomain returns the DCE domain name of a v2 UUID, or NULL for any
+// other version (where the field is not a domain).
+func extractDomain(v any) (any, error) {
+	u, err := fromAny(v)
+	if err != nil {
+		return nil, err
+	}
+	if u.Version() != 2 {
+		return nil, nil
+	}
+	return strings.ToLower(u.Domain().String()), nil
+}
+
+// extractID returns the local identifier (UID/GID) of a v2 UUID, or NULL
+// for any other version.
+func extractID(v any) (any, error) {
+	u, err := fromAny(v)
+	if err != nil {
+		return nil, err
+	}
+	if u.Version() != 2 {
+		return nil, nil
+	}
+	return int64(u.ID()), nil
 }
 
 func toString(v any) (string, error) {

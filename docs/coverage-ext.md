@@ -17,7 +17,7 @@ Status legend:
 | blobio | ~250 | [ncruces/ext/blobio](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/blobio) | ✓ landed | `ext/blobio` + `ext/blobio/auto` | `ext/blobio/blobio_test.go` |
 | bloom | ~560 | [ncruces/ext/bloom](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/bloom) | ✓ landed (+ typed `Filter` API) | `ext/bloom` + `ext/bloom/auto` | `ext/bloom/bloom_test.go`, `filter_test.go` |
 | closure | ~480 | [ncruces/ext/closure](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/closure) | ✓ landed (+ typed `Graph` API) | `ext/closure` + `ext/closure/auto` | `ext/closure/closure_test.go`, `graph_test.go` |
-| csv | ~600 | [ncruces/ext/csv](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/csv) | ✓ landed (+ typed `Table` API) | `ext/csv` + `ext/csv/auto` | `ext/csv/csv_test.go`, `table_test.go` |
+| csv | ~620 | [ncruces/ext/csv](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/csv) | ✓ landed (+ typed `Table` API; `comma=` / `schema=` affinity / `skip=` subsume the "vsv" variant) | `ext/csv` + `ext/csv/auto` | `ext/csv/csv_test.go`, `table_test.go`, `skip_test.go` |
 | fileio | ~330 | [ncruces/ext/fileio](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/fileio) | ✓ landed | `ext/fileio` + `ext/fileio/auto` | `ext/fileio/fileio_test.go` |
 | lines | ~370 | [ncruces/ext/lines](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/lines) | ✓ landed (+ typed `Table` API) | `ext/lines` + `ext/lines/auto` | `ext/lines/lines_test.go`, `table_test.go` |
 | pivot | ~340 | [ncruces/ext/pivot](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/pivot) | ✓ landed | `ext/pivot` + `ext/pivot/auto` | `ext/pivot/pivot_test.go` |
@@ -52,13 +52,17 @@ Status legend:
 | regexp | ~310 | [ncruces/ext/regexp](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/regexp) | ✓ landed | `ext/regexp` + `ext/regexp/auto` | `ext/regexp/regexp_test.go` |
 | encode | ~120 | [sqlean crypto](https://github.com/nalgeon/sqlean) (codec half) | ✓ landed | `ext/encode` + `ext/encode/auto` | `ext/encode/encode_test.go` |
 | text | ~110 | [sqlean text](https://github.com/nalgeon/sqlean) | ✓ landed | `ext/text` + `ext/text/auto` | `ext/text/text_test.go` |
-| fuzzy | ~270 | [sqlean fuzzy](https://github.com/nalgeon/sqlean) | ✓ landed (leven / damerau / hamming / jaro / jaro_winkler / soundex; caverphone & phonetic-hash deferred) | `ext/fuzzy` + `ext/fuzzy/auto` | `ext/fuzzy/fuzzy_test.go` |
-| uuid | ~330 | [ncruces/ext/uuid](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/uuid) | ⚠ partial | `ext/uuid` + `ext/uuid/auto` | `ext/uuid/uuid_test.go` |
+| fuzzy | ~310 | [sqlean fuzzy](https://github.com/nalgeon/sqlean) | ✓ landed (leven / damerau / hamming / jaro / jaro_winkler / soundex / caverphone; phonetic-hash deferred — ambiguous algorithm) | `ext/fuzzy` + `ext/fuzzy/auto` | `ext/fuzzy/fuzzy_test.go`, `caverphone_test.go` |
+| decimal | ~200 | [sqlean decimal](https://github.com/nalgeon/sqlean) | ✓ landed (add/sub/mul/div/cmp/neg/abs/round/floor/ceil + decimal_sum aggregate, exact via math/big) | `ext/decimal` + `ext/decimal/auto` | `ext/decimal/decimal_test.go` |
+| money | ~120 | [sqlean (currency)](https://github.com/nalgeon/sqlean) | ✓ landed (fixed 2-dp add/sub/mul + thousands-separator format, shared bigdec backend) | `ext/money` + `ext/money/auto` | `ext/money/money_test.go` |
+| time | ~170 | [sqlean time](https://github.com/nalgeon/sqlean) | ✓ landed (now/unix/from_unix/add/diff/part/trunc/format over Go time; package `timeext`) | `ext/time` + `ext/time/auto` | `ext/time/time_test.go` |
+| eval | ~110 | [sqlean define](https://github.com/nalgeon/sqlean) (eval half) | ✓ landed (dynamic SQL on the calling conn; persistent `define()` UDF-creation deferred — conflicts with SQLite's active-statement rule) | `ext/eval` + `ext/eval/auto` | `ext/eval/eval_test.go` |
+| uuid | ~420 | [ncruces/ext/uuid](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/uuid) | ✓ landed | `ext/uuid` + `ext/uuid/auto` | `ext/uuid/uuid_test.go`, `v2_test.go` |
 | hash | ~190 | [ncruces/ext/hash](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/hash) | ✓ landed | `ext/hash` + `ext/hash/auto` | `ext/hash/hash_test.go` |
 | ipaddr | ~150 | [ncruces/ext/ipaddr](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/ipaddr) | ✓ landed | `ext/ipaddr` + `ext/ipaddr/auto` | `ext/ipaddr/ipaddr_test.go` |
 | zorder | ~120 | [ncruces/ext/zorder](https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/zorder) | ✓ landed | `ext/zorder` + `ext/zorder/auto` | `ext/zorder/zorder_test.go` |
 
-`uuid` is ⚠ partial because the DCE Security v2 variant is not yet implemented (rarely used; consumers can open an issue if they need it). v1 / v3 / v4 / v5 / v6 / v7 plus parsing, formatting, version extraction, and timestamp extraction are covered.
+`uuid` covers every RFC 4122 / DCE version: v1, v2 (DCE Security, via `uuid(2, domain, id)` with `uuid_extract_domain` / `uuid_extract_id`), v3, v4, v5, v6, v7, plus parsing, formatting, and version/timestamp extraction. The v2 id is supplied explicitly rather than read from the process (`os.Getuid`/`Getgid`), keeping generation portable and deterministic.
 
 ## Aggregates / windows (pure Go)
 
@@ -83,6 +87,7 @@ Status legend:
 |---|---|
 | serdes | Root package already exposes `(*Conn).Serialize` / `Deserialize`. |
 | vec1 | Sub-package `vec/` over `sqlite-vec` provides a richer typed surface. |
+| vsv | `ext/csv` already covers it: `comma=` (any delimiter), `schema=` (per-column affinity so numeric fields read back typed), and `skip=N` (drop leading banner rows). A separate package would be ~90% duplication. |
 
 ## Registration shape
 
@@ -108,4 +113,4 @@ The explicit form is the canonical entry; the blank-import `auto` sub-package is
 5. Add a one-line entry to [`llms.txt`](../llms.txt) under "Per-package overviews" so consumer agents find it.
 6. Optional: drop a runnable example under `examples/ext-<name>/`.
 
-Last reviewed against ncruces/go-sqlite3 main on 2026-06-12.
+Last reviewed against ncruces/go-sqlite3 main on 2026-06-14.

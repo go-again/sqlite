@@ -31,6 +31,7 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [vfs/cksm/doc.go](vfs/cksm/doc.go): page-level checksum VFS — Fletcher-style trailer on every main-DB page, surfaces silent corruption as SQLITE_IOERR_DATA. Composes with vfs/crypto.
 - [vfs/mvcc/doc.go](vfs/mvcc/doc.go): in-memory MVCC VFS — snapshot-isolation reads + atomic publish on commit; shared (`file:/name`) and private (`file:name`) DBs.
 - [vfs/memdb/doc.go](vfs/memdb/doc.go): plain in-memory VFS — direct per-page store with no MVCC; smaller-surface alternative to vfs/mvcc for tests and scratch DBs.
+- [pcache/doc.go](pcache/doc.go): application-controlled page cache — `pcache.InstallBoundedLRU(maxPages)` swaps SQLite's page cache for a fixed-capacity LRU over C-allocated buffers with hit/miss/eviction/live-page counters; one-time, process-global, install before the first sql.Open. Bounds the heap modernc grows under write load.
 - [fusion/doc.go](fusion/doc.go): rank-fusion helpers — combine vec.KNN and fts.Search results via Reciprocal Rank Fusion (Cormack 2009).
 - [sqlitex/doc.go](sqlitex/doc.go): ergonomic database/sql helpers (pure Go) — `Save` deferred savepoints, `Transaction` / `ImmediateTransaction`, `ExecScript`, `ResultInt/Text/Float/Bool`, and `Migrate` (embed.FS migration runner tracked via `PRAGMA user_version`). The sqlitex quality-of-life layer for a database/sql driver.
 - [ext/README.md](ext/README.md): loadable Go extensions umbrella — opt-in SQL scalar UDFs, table-valued functions, and vtab-based readers. Each sub-package independent; pick by need. Several are Go-native ports of ncruces/go-sqlite3 extensions. See [docs/coverage-ext.md](docs/coverage-ext.md) for the full matrix.
@@ -38,8 +39,12 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [ext/rtree/rtree.go](ext/rtree/rtree.go): R-Tree spatial index — typed `rtree.Table` (Create / Insert / InsertPoint / Search bounding-box / SearchCircle / Delete / Drop) over the built-in `rtree`/`geopoly` vtabs, plus a ready-made `circle(cx, cy, r)` geometry for `WHERE id MATCH circle(…)`. Built on root `(*Conn).RegisterRTreeGeometry` / `RegisterRTreeQuery`, which wrap `sqlite3_rtree_geometry_callback` / `query_callback` for arbitrary Go geometry/query callbacks.
 - [ext/series/series.go](ext/series/series.go): `generate_series(start, stop[, step])` table-valued function — an integer sequence as a SQL table source. start/stop required (stop bounded to avoid a runaway scan), step defaults to 1 and may be negative.
 - [ext/text/text.go](ext/text/text.go): rune-aware string scalars SQLite lacks — `text_reverse`, `text_repeat`, `text_lpad`, `text_rpad`, `text_split` (with overflow-safe output-size guards). Casing/normalization stay in `ext/unicode`.
-- [ext/fuzzy/fuzzy.go](ext/fuzzy/fuzzy.go): approximate string matching scalars — `levenshtein`, `damerau_levenshtein`, `hamming`, `jaro`, `jaro_winkler`, `soundex`. Rune-aware distances; the stateless cousin of the `spellfix1` vtab.
+- [ext/fuzzy/fuzzy.go](ext/fuzzy/fuzzy.go): approximate string matching scalars — `levenshtein`, `damerau_levenshtein`, `hamming`, `jaro`, `jaro_winkler`, `soundex`, `caverphone` (2.0). Rune-aware distances; the stateless cousin of the `spellfix1` vtab.
 - [ext/encode/encode.go](ext/encode/encode.go): `encode(data, format)` / `decode(text, format)` for base64 / base64url / base32 / base32hex / base16 (hex) / ascii85 / url. The codec half of sqlean `crypto`; digests are `ext/hash`.
+- [ext/decimal/decimal.go](ext/decimal/decimal.go): exact base-10 arithmetic scalars over math/big — `decimal_add`/`sub`/`mul`/`div`/`cmp`/`neg`/`abs`/`round`/`floor`/`ceil` + `decimal_sum` aggregate. Inputs TEXT/INT/REAL (REAL read as the shortest round-tripping decimal); any NULL → NULL. Shared `ext/internal/bigdec` backend.
+- [ext/money/money.go](ext/money/money.go): fixed 2-dp currency scalars over the same bigdec backend — `money`/`money_add`/`sub`/`mul` + `money_format(x[,symbol])` with thousands separators.
+- [ext/time/time.go](ext/time/time.go): Go-time-backed scalars beyond datetime() — `time_now`/`unix`/`from_unix`/`add`/`diff`/`part`/`trunc`/`format` (Go duration + reference-layout syntax). Package name `timeext` (avoids shadowing stdlib); SQL names are `time_*`.
+- [ext/eval/eval.go](ext/eval/eval.go): `eval(sql[, sep])` runs dynamic SQL on the calling connection (re-entrant prepared statement) and returns its result values joined by sep. Executes arbitrary SQL — never pass untrusted input; not registered by default.
 
 ## Examples (runnable)
 
@@ -59,6 +64,7 @@ range-over-int, sync.WaitGroup.Go, etc. are all in use.
 - [examples/window-function](examples/window-function/main.go): Conn.RegisterWindowFunction demo.
 - [examples/vfs-embed](examples/vfs-embed/main.go): bundle a `.db` inside `embed.FS`.
 - [examples/vfs-custom](examples/vfs-custom/main.go): implement a writable in-memory VFS on the public `vfs.VFS` / `vfs.File` interface and `vfs.Register` it — full CRUD + transactions through `database/sql`.
+- [examples/pcache](examples/pcache/main.go): `pcache.InstallBoundedLRU(32)` then churn a table past the bound — prints hit/miss/eviction/live-page stats showing memory stayed capped.
 - [examples/sqlite-config](examples/sqlite-config/main.go): modern Go-typed `sqlite.Config` for plain *sql.DB — plain + encrypted variants, no DSN strings.
 - [examples/gorm-config](examples/gorm-config/main.go): same `sqlite.Config` routed through gorm via `sqlitegorm.OpenConfig`.
 - [examples/vfs-crypto](examples/vfs-crypto/main.go): encryption at rest via vfs/crypto (Adiantum / AES-XTS-256, pure Go).

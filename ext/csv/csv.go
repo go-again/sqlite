@@ -51,6 +51,7 @@ type table struct {
 	comma   rune
 	comment rune
 	header  bool
+	skip    int // leading rows to discard before the header / first record
 }
 
 func (*table) Disconnect() error { return nil }
@@ -104,6 +105,8 @@ func buildTable(fsys fs.FS, args []string) (*table, error) {
 			t.comma, err = runeArg(key, val)
 		case "comment":
 			t.comment, err = runeArg(key, val)
+		case "skip":
+			t.skip, err = uintArg(key, val)
 		default:
 			return nil, fmt.Errorf("csv: unknown parameter %q", key)
 		}
@@ -159,6 +162,20 @@ func (t *table) newReader() (*encodingcsv.Reader, io.Closer, error) {
 	cr.Comma = t.comma
 	cr.Comment = t.comment
 	cr.FieldsPerRecord = -1 // tolerate ragged rows; column padding handled in Column.
+	// Discard skip leading rows (e.g. provenance banners above the
+	// header) so every reader — the schema probe and each cursor scan —
+	// starts at the same logical row 0.
+	for range t.skip {
+		if _, err := cr.Read(); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if cl != nil {
+				cl.Close()
+			}
+			return nil, nil, fmt.Errorf("csv: skip rows: %w", err)
+		}
+	}
 	return cr, cl, nil
 }
 
