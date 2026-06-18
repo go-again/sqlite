@@ -28,12 +28,15 @@ type registeredVFS struct {
 
 // openFile is the per-open state recovered from a file's tail
 // allocation. It remembers the open flags and name so xClose can honour
-// OpenDeleteOnClose without a second lookup.
+// OpenDeleteOnClose without a second lookup. shm/shmKey are populated
+// lazily on the first xShmMap when the File implements [ShmFile].
 type openFile struct {
-	file  File
-	vfs   *registeredVFS
-	name  string
-	flags OpenFlags
+	file   File
+	vfs    *registeredVFS
+	name   string
+	flags  OpenFlags
+	shm    *shmGroup
+	shmKey string
 }
 
 // perFileState is the tail block appended after each Tsqlite3_file: it
@@ -98,7 +101,10 @@ func Register(name string, impl VFS, opts ...Option) error {
 		return fmt.Errorf("vfs: Register: no default VFS")
 	}
 	defVfs := (*sqlite3.Tsqlite3_vfs)(unsafe.Pointer(defPtr))
-	initOnce.Do(initIoMethods)
+	initOnce.Do(func() {
+		initIoMethods()
+		initShmIoMethods()
+	})
 
 	cname, err := libc.CString(name)
 	if err != nil {
@@ -233,7 +239,14 @@ func xOpenTrampoline(_ *libc.TLS, pVfs, zName, pFile uintptr, flags int32, pOutF
 
 	of := &openFile{file: f, vfs: rv, name: name, flags: OpenFlags(flags)}
 	perFileStateOf(pFile).token = fileRegistry.Register(of)
-	(*sqlite3.Tsqlite3_file)(unsafe.Pointer(pFile)).FpMethods = ioMethodsPtr.Load()
+	// A File that implements ShmFile gets the iVersion-2 methods table
+	// (with the xShm* slots) so SQLite will offer it WAL mode; everyone
+	// else gets the iVersion-1 table and stays in rollback-journal mode.
+	methods := ioMethodsPtr.Load()
+	if _, ok := f.(ShmFile); ok {
+		methods = ioMethodsShmPtr.Load()
+	}
+	(*sqlite3.Tsqlite3_file)(unsafe.Pointer(pFile)).FpMethods = methods
 
 	if pOutFlags != 0 {
 		*(*int32)(unsafe.Pointer(pOutFlags)) = int32(granted)

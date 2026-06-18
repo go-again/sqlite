@@ -21,7 +21,7 @@ Status legend:
 | sub-package | Upstream | Status | Entry | Test pin |
 |---|---|---|---|---|
 | `vfs/` (root, fs.FS adapter) | [ncruces vfs/readervfs](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs/readervfs) | ✓ landed | `vfs.New(fs.FS)` | `vfs/vfs_test.go` |
-| `vfs/` (root, user-implementable VFS) | [ncruces vfs core](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs) | ⚠ partial (Phase 1: rollback-journal; WAL/shm deferred) | `vfs.Register(name, VFS)` + `vfs.VFS` / `vfs.File` interfaces | `vfs/interface_test.go` |
+| `vfs/` (root, user-implementable VFS) | [ncruces vfs core](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs) | ✓ landed (rollback-journal + WAL via `ShmFile`; in-process shm) | `vfs.Register(name, VFS)` + `vfs.VFS` / `vfs.File` / `vfs.ShmFile` interfaces | `vfs/interface_test.go`, `vfs/shm_test.go` |
 | `vfs/crypto` | [ncruces vfs/adiantum](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs/adiantum) + [vfs/xts](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs/xts) | ✓ landed | `crypto.New(Options)` | `vfs/crypto/integration_test.go` |
 | `vfs/cksm` | [ncruces vfs/cksm.go](https://github.com/ncruces/go-sqlite3/blob/main/vfs/cksm.go) | ✓ landed | `cksm.New(Options)` + `(*sqlite.Conn).EnableChecksums(schema)` | `vfs/cksm/cksm_test.go` |
 | `vfs/mvcc` | [ncruces vfs/mvcc](https://pkg.go.dev/github.com/ncruces/go-sqlite3/vfs/mvcc) | ✓ landed (Go-native re-implementation, no wbt dep) | `mvcc.New(Options)` | `vfs/mvcc/mvcc_test.go` |
@@ -95,12 +95,31 @@ The dispatcher copies every buffer at the C boundary, delegates
 clock/sleep/randomness to the platform VFS, and refuses `Unregister`
 while any database is still open.
 
-Phase 1 is rollback-journal only: the shared io-methods table is
-`iVersion 1` (no `xShm*` slots), so WAL falls back to journal mode.
-Phase 2 will add a `vfs.ShmFile` capability interface for WAL. The
-reference `refMemVFS` in `vfs/interface_test.go` is a complete writable
-in-memory VFS on this interface and doubles as a copy-paste template;
-`examples/vfs-custom/` is the runnable version.
+`vfs.Wrap(base, recorder)` (Phase 3) decorates any VFS so each
+Open/Read/Write/Sync reports latency + byte count + error to a
+`vfs.Recorder`; `vfs.NewSlogRecorder` is the built-in log/slog Recorder
+(Debug per op, Warn on a genuine fault, with the expected `io.EOF`
+short-read carved out). A nil Recorder returns the base unchanged. The
+wrapper forwards the optional `vfs.FileControl` capability so wrapping
+never silently drops it. Test pin: `vfs/wrap_test.go`.
+
+WAL is supported through the optional `vfs.ShmFile` capability: a File
+that also implements `ShmGroup() string` advertises the `xShm*` methods,
+so SQLite offers it WAL mode. The dispatcher owns the shared-memory
+regions (stable C allocations the WAL index lives in) and the 8-slot WAL
+lock table — user code only declares which open files share a WAL index
+(same `ShmGroup` key → shared shm). Coordination is in-process: it backs
+multiple `database/sql` connections to one Go-managed database within a
+process, not cross-process WAL over a real filesystem (the platform VFS
+remains the tool for that). A File that does not implement `ShmFile`
+stays on the `iVersion 1` methods table and runs in rollback-journal
+mode. Test pin: `vfs/shm_test.go` (WAL round-trip, shared-reader
+visibility, and a 1-writer/4-reader concurrent stress under `-race`).
+
+The reference `refMemVFS` in `vfs/interface_test.go` is a complete
+writable in-memory VFS on this interface and doubles as a copy-paste
+template; `examples/vfs-custom/` is the runnable version (with `vfs.Wrap`
+instrumentation).
 
 This is the from-scratch path; the wrap-and-forward sub-packages below
 (crypto/cksm) layer over an existing VFS instead and keep their bespoke

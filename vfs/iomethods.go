@@ -41,6 +41,10 @@ func xCloseTrampoline(_ *libc.TLS, pFile uintptr) int32 {
 	fileRegistry.Unregister(pst.token)
 	pst.token = 0
 
+	// SQLite normally calls xShmUnmap before xClose, but detach again as
+	// a safety net so an abnormal teardown can't leak a shm group.
+	of.detachShm()
+
 	err := of.file.Close()
 	// Files opened with DELETEONCLOSE must vanish on close; the native
 	// os VFS unlinks them here, so the dispatcher does too (best effort,

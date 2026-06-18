@@ -5,7 +5,9 @@
 // The memVFS below is a complete, ~80-line in-memory backend: a map of
 // named files, each a growable byte slice. Swap the storage for an S3
 // bucket, a fault injector, or a tmpfs-on-a-budget and the rest of the
-// program is unchanged.
+// program is unchanged. It runs in rollback-journal mode; add a
+// ShmGroup() string method to memFile (implementing vfs.ShmFile) and the
+// dispatcher unlocks WAL — see vfs/shm_test.go for that variant.
 //
 // Run with:
 //
@@ -20,6 +22,7 @@ import (
 	"io/fs"
 	"log"
 	"sync"
+	"time"
 
 	_ "github.com/go-again/sqlite"
 	"github.com/go-again/sqlite/vfs"
@@ -127,9 +130,40 @@ func (f *memFile) SectorSize() int                        { return 512 }
 func (f *memFile) DeviceCharacteristics() vfs.DeviceFlags { return 0 }
 func (f *memFile) Close() error                           { return nil }
 
+// ioStats is a vfs.Recorder that tallies the I/O vfs.Wrap observes.
+type ioStats struct {
+	mu                    sync.Mutex
+	reads, writes, syncs  int
+	readBytes, writeBytes int
+}
+
+func (s *ioStats) OnOpen(string, vfs.OpenFlags, time.Duration, error) {}
+func (s *ioStats) OnRead(_ string, _ int64, n int, _ time.Duration, _ error) {
+	s.mu.Lock()
+	s.reads++
+	s.readBytes += n
+	s.mu.Unlock()
+}
+func (s *ioStats) OnWrite(_ string, _ int64, n int, _ time.Duration, _ error) {
+	s.mu.Lock()
+	s.writes++
+	s.writeBytes += n
+	s.mu.Unlock()
+}
+func (s *ioStats) OnSync(string, time.Duration, error) {
+	s.mu.Lock()
+	s.syncs++
+	s.mu.Unlock()
+}
+
 func main() {
+	// vfs.Wrap layers per-op instrumentation over any VFS — here the
+	// in-memory backend below — without the backend knowing about it.
+	stats := &ioStats{}
+	backend := vfs.Wrap(&memVFS{files: map[string]*memData{}}, stats)
+
 	// Register the VFS once, under a name DSNs reference via ?vfs=.
-	if err := vfs.Register("memexample", &memVFS{files: map[string]*memData{}}); err != nil {
+	if err := vfs.Register("memexample", backend); err != nil {
 		log.Fatalf("Register: %v", err)
 	}
 	// Unregister only after every database is closed — it refuses while
@@ -186,4 +220,11 @@ func main() {
 	if err := rows.Err(); err != nil {
 		log.Fatal(err)
 	}
+
+	// The vfs.Wrap recorder counted every page the engine moved through
+	// the custom backend.
+	stats.mu.Lock()
+	fmt.Printf("\nvfs.Wrap I/O stats: %d reads (%d B), %d writes (%d B), %d syncs\n",
+		stats.reads, stats.readBytes, stats.writes, stats.writeBytes, stats.syncs)
+	stats.mu.Unlock()
 }

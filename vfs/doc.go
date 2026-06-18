@@ -60,11 +60,31 @@
 // vfs/mvcc backends — so a hand-written VFS gets the same vetted
 // trampolines, not a second copy.
 //
-// Phase 1 supports rollback-journal databases. WAL needs the
-// shared-memory (xShm*) methods, deferred to a future ShmFile capability
-// interface; until then a custom-VFS database stays in journal mode.
+// A custom VFS runs in rollback-journal mode by default. To unlock WAL,
+// have your File also implement [ShmFile] — a single method declaring a
+// sharing group; the dispatcher owns the WAL shared memory and lock
+// table, so you never touch unsafe memory or the lock protocol. WAL
+// coordination is in-process (it backs multiple database/sql
+// connections to one Go-managed database within a process, not
+// cross-process WAL over a real disk).
+//
 // [Unregister] refuses to remove a VFS while any database is still open
 // against it — close every handle first.
+//
+// # Instrumenting a VFS
+//
+// [Wrap] decorates any VFS (yours, or a built-in backend) so every
+// Open/Read/Write/Sync reports its latency, byte count, and error to a
+// [Recorder] — the building block for I/O dashboards. [NewSlogRecorder]
+// is a ready-made Recorder that logs each op via log/slog. A nil
+// Recorder returns the base unchanged, so tracing toggles cleanly:
+//
+//	impl := myVFS()
+//	if *trace { impl = vfs.Wrap(impl, vfs.NewSlogRecorder(logger)) }
+//	vfs.Register("app", impl)
+//
+// Wrap observes only; a backend that injects faults or shapes latency
+// implements [VFS] / [File] directly.
 //
 // # Sub-packages
 //

@@ -111,6 +111,34 @@ type FileControl interface {
 	FileControl(op int, arg uintptr) error
 }
 
+// ShmFile is the optional capability that unlocks WAL (write-ahead log)
+// mode for a custom VFS. A File that implements it advertises the
+// shared-memory methods SQLite's WAL index needs; a File that does not
+// stays in rollback-journal mode (the dispatcher's default).
+//
+// The implementation burden is deliberately tiny: the dispatcher owns
+// the shared-memory regions (allocated as stable C memory) and the
+// 8-slot WAL lock table. All a File declares is its **sharing group** —
+// an opaque key identifying which open files must see the same WAL
+// index. Every connection that opens the same logical database returns
+// the same non-empty key (the database's canonical name is the natural
+// choice); the dispatcher then routes them to one shared shm region and
+// arbitrates their locks. A unique (or empty-but-unique) key means
+// private shm — correct for an exclusive single-connection database.
+//
+// WAL coordination is in-process only: this backs multiple
+// database/sql connections to one in-memory or Go-managed database
+// within a single process, not cross-process WAL over a real
+// filesystem. For that, the platform VFS (the default on-disk path)
+// remains the right tool.
+type ShmFile interface {
+	File
+	// ShmGroup returns the key that ties this file's WAL shared memory
+	// to sibling connections. Same non-empty key → shared shm; distinct
+	// keys → independent shm.
+	ShmGroup() string
+}
+
 // OpenFlags is the SQLite open bitset passed to VFS.Open and returned
 // as the granted set.
 type OpenFlags int
