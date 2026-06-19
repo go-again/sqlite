@@ -2,7 +2,7 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/go-again/sqlite.svg)](https://pkg.go.dev/github.com/go-again/sqlite)
 
-A CGo-free SQLite **driver + ecosystem** for Go. Drop-in replacement for [`mattn/go-sqlite3`](https://github.com/mattn/go-sqlite3) (registers as `"sqlite3"`), [`modernc.org/sqlite`](https://gitlab.com/cznic/sqlite) (`"sqlite"`), and the [`glebarez/sqlite`](https://github.com/glebarez/sqlite) gorm dialector — with first-class typed APIs for vector search, full-text search, encryption at rest, in-memory MVCC, hybrid ranking, a user-implementable VFS, a bounded page cache, and a catalog of loadable Go SQL extensions. All in one module, all pure Go.
+**The comprehensive, AI-ready, CGo-free SQLite stack for Go.** One module replaces [`mattn/go-sqlite3`](https://github.com/mattn/go-sqlite3) (registers as `"sqlite3"`), [`modernc.org/sqlite`](https://gitlab.com/cznic/sqlite) (`"sqlite"`), and the [`glebarez/sqlite`](https://github.com/glebarez/sqlite) gorm dialector — then adds first-class **typed** APIs for vector search, full-text search, encryption at rest, in-memory MVCC, hybrid ranking, a user-implementable VFS, a bounded page cache, and a catalog of loadable SQL extensions. Designed so that **migrating to CGo-free and adopting advanced SQLite features is a one-line change**, and so your **AI coding agent gets it right the first time** — the repo ships [Agent Skills](skills/) that teach assistants the real API. All pure Go.
 
 ```go
 import sqlite "github.com/go-again/sqlite"
@@ -13,6 +13,16 @@ defer db.Close()
 ```
 
 Existing mattn / modernc / glebarez / ncruces code keeps working after the import swap; the legacy `sql.Open("sqlite3", "file:...?_pragma=…")` form is still accepted. See the **[migration guide](docs/guides/migrating.md)**.
+
+## Why go-again/sqlite
+
+- **🤖 AI / LLM-ready — your coding agent writes correct code on the first try.** The repo ships [**Agent Skills**](skills/): task-scoped instructions (vector search, FTS5, gorm sidecars, custom VFS, migration, pitfalls) an AI assistant loads on demand, so it reaches for the *real* API instead of hallucinating one — drop `skills/` into your agent and the trial-and-error loop largely disappears. It's backed by structured, task-oriented [docs](docs/) ("I want X → do Y"), an [`AGENTS.md`](AGENTS.md) for agents working *in* the codebase, and `doc.go` on every package for pkg.go.dev. **This is the fastest way to build on SQLite with an AI pair-programmer.**
+
+- **📦 Comprehensive — one module, the whole stack.** Driver + gorm dialector + typed sqlite-vec + FTS5 + rank fusion + encryption + checksums + in-memory & custom VFSes + a bounded page cache + the `ext/` catalog all ship and version **together**. No stitching `modernc.org/sqlite` + `glebarez/sqlite` + `asg017/sqlite-vec` + a separate encryption/vtab module and reconciling four release cadences — and your agent reasons about *one* surface, not four.
+
+- **🔀 CGo-free migration in one line.** Swap the import; keep your `sql.Open("sqlite3", …)` calls and `_*` DSN flags (translated transparently). Two driver names (`"sqlite"` + `"sqlite3"`) mean code from either lineage compiles unchanged. You drop the C toolchain, cross-compile with plain `GOOS=… go build`, and ship static distroless/alpine binaries.
+
+- **⚡ Advanced SQLite features without the DIY plumbing.** Vector + full-text search, tag-driven gorm sidecars, encryption at rest, a writable custom VFS, sessions/changesets, custom Go FTS5 tokenizers, a bounded page cache — **typed and first-class** here, where every other Go SQLite driver makes you build them yourself (or doesn't offer them at all). Tag a struct field, register a plugin, done.
 
 ## Documentation
 
@@ -45,6 +55,8 @@ The Go SQLite landscape has three camps: CGo bindings (mattn, zombiezen), pure-G
 
 | Capability | this | mattn | modernc | ncruces | glebarez |
 |---|---|---|---|---|---|
+| Ships AI Agent Skills + task-oriented docs | ✓ | ✗ | ✗ | ✗ | ✗ |
+| Whole stack (driver + gorm + vec + FTS5 + VFS + ext) in one module | ✓ | ✗ | ✗ | ✗ | ✗ |
 | CGo-free | ✓ | ✗ | ✓ | ✓ (wazero) | ✓ |
 | Builds in distroless / `golang:alpine`, no `apk add` | ✓ | ✗ | ✓ | ✓ | ✓ |
 | `database/sql` driver | ✓ | ✓ | ✓ | ✓ | ✗ (gorm only) |
@@ -63,7 +75,7 @@ The Go SQLite landscape has three camps: CGo bindings (mattn, zombiezen), pure-G
 | Loadable Go SQL extensions | catalog under `ext/` | math/regexp via build-tag | ✗ | similar catalog | ✗ |
 | Hot UDF-row throughput | == modernc | fastest (CGo) | baseline | slowest (wazero) | == modernc |
 
-**Better here:** one module ships the whole stack (driver + gorm + vec + FTS5 + fusion + crypto + cksm + VFSes + `ext/`) on one release cadence; one driver under two SQL names makes migration a one-line swap; typed vec/FTS5 + tag-driven gorm sidecars are first-class where every other driver needs DIY plumbing; custom Go FTS5 tokenizers and the typed `sqlite.Config` are unique to this module.
+**Better here:** it's the only Go SQLite package that ships AI Agent Skills + task-oriented docs, so an AI assistant builds against it correctly without trial and error; one module ships the whole stack (driver + gorm + vec + FTS5 + fusion + crypto + cksm + VFSes + page cache + `ext/`) on one release cadence; one driver under two SQL names makes migration a one-line swap; typed vec/FTS5 + tag-driven gorm sidecars are first-class where every other driver needs DIY plumbing; custom Go FTS5 tokenizers and the typed `sqlite.Config` are unique to this module.
 
 **Worse here:** mattn's CGo binding is still fastest on hot per-row UDF paths (we measure ~3% slower with a few extra allocs/op on a no-op authorizer; invisible for "let SQL do the work" loads); the support window is the two newest Go releases only; `vfs/crypto` is confidentiality-only (no SQLCipher format / MAC). Details in [Performance](docs/reference/performance.md).
 
