@@ -3,7 +3,7 @@
 // vendor (mattn-specific Error / SQLiteConn internals). Extracted so the
 // tests that DO compile can find the helper.
 //
-// See docs/mattn-upstream.md for the divergence list.
+// See dev/upstream/mattn.md for the divergence list.
 
 //go:build mattn_upstream
 

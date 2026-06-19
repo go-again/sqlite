@@ -89,7 +89,7 @@
 //     constants.go. Works with errors.Is.
 //
 // The compat surface is enforced by tests we vendored from mattn's
-// own suite — see docs/mattn-upstream.md and the `mattn_upstream`
+// own suite — see dev/upstream/mattn.md and the `mattn_upstream`
 // CI lane in the repo root.
 //
 // # Hooks and per-conn state
@@ -187,7 +187,7 @@
 //     zorder. Each sub-package is independent — pick what you need and
 //     leave the rest off your import graph. Register per-conn via
 //     <name>.Register(c) or pool-wide via blank-import of <name>/auto.
-//     See docs/coverage-ext.md for the matrix.
+//     See dev/coverage/ext.md for the matrix.
 //
 // # Virtual tables from Go
 //

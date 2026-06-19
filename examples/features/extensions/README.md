@@ -1,6 +1,6 @@
 # Extensions — the `ext/` catalog
 
-Opt-in loadable Go extensions. Each registers per-connection (or pool-wide via its `/auto` blank-import). Full status matrix: [`docs/coverage-ext.md`](../../../docs/coverage-ext.md).
+Opt-in loadable Go extensions. Each registers per-connection (or pool-wide via its `/auto` blank-import). Full status matrix: [`dev/coverage/ext.md`](../../../dev/coverage/ext.md).
 
 **Scalars / aggregates / collations**
 

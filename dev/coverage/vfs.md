@@ -1,6 +1,6 @@
 # Coverage — vfs/ wrappers
 
-Tracks each sub-package under [`vfs/`](../vfs/). The root `vfs/` package
+Tracks each sub-package under [`vfs/`](../../vfs/). The root `vfs/` package
 offers two surfaces: it re-exports `modernc.org/sqlite/vfs` so any
 `fs.FS` becomes a read-only SQLite VFS, and it exposes a public
 user-implementable `VFS` / `File` interface (`vfs.Register`) so
@@ -139,8 +139,7 @@ trampolines.
    three are the same pattern as `vfs/crypto`.)
 4. Add a row to the table above; flip to ✓ landed once tests + lint
    pass.
-5. Add a one-line entry to [`llms.txt`](../llms.txt) under "Per-package
-   overviews" so consumer agents find it.
+5. Add/update the matching [`skills/`](../../skills/) entry and the relevant [`docs/`](../../docs/) page so consumer agents and humans find it.
 6. Optional: drop a runnable example under `examples/vfs-<name>/`.
 
 Last reviewed against ncruces/go-sqlite3 main on 2026-06-13.

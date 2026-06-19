@@ -1,7 +1,7 @@
 // Vendored from modernc.org/sqlite (see go.mod for the pin) to run against the fork in this
 // repository. Build tag `modernc_upstream` keeps it out of the default
 // `go test ./...` so the long-running upstream suite stays opt-in.
-// See docs/modernc-upstream.md for the reproduction recipe.
+// See dev/upstream/modernc.md for the reproduction recipe.
 
 //go:build modernc_upstream
 

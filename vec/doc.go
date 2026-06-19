@@ -137,7 +137,7 @@
 //   - examples/features/search/vec-search — runnable demo of the raw vec.Table API.
 //   - examples/features/gorm/vec-tagged — the same data flow expressed via
 //     the gorm bridge.
-//   - docs/coverage-vec.md — every documented sqlite-vec feature
+//   - dev/coverage/vec.md — every documented sqlite-vec feature
 //     with its current status (typed / raw / inherited).
 //   - github.com/go-again/sqlite/vfs/crypto — pure-Go encryption at
 //     rest. Composes with vec0 — encrypted vector databases work

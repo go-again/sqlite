@@ -107,7 +107,7 @@
 //
 // The gorm.io/gorm/tests integration suite runs against this dialector
 // on every CI push via a thin shim re-exporting our types under
-// gorm.io/driver/sqlite. See docs/gorm-upstream.md
+// gorm.io/driver/sqlite. See dev/upstream/gorm.md
 // in the repo for the reproduction recipe.
 //
 // # See also

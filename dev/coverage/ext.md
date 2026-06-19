@@ -1,6 +1,6 @@
 # Coverage — ext/ loadable extensions
 
-Tracks every loadable extension under [`ext/`](../ext/) — Go-native ports of selected ncruces/go-sqlite3 extensions and our own additions. Each row records the upstream reference, ported entry, registration shape, and the test pin.
+Tracks every loadable extension under [`ext/`](../../ext/) — Go-native ports of selected ncruces/go-sqlite3 extensions and our own additions. Each row records the upstream reference, ported entry, registration shape, and the test pin.
 
 Status legend:
 
@@ -27,13 +27,13 @@ Status legend:
 
 `array` supports two binding styles: transparent via `sqlite.Pointer(slice)` (preferred — SQLite's destructor releases on stmt finalize, no caller cleanup needed) and explicit `array.Bind(c, slice) → token, release()` for long-lived bindings or int64-sentinel use cases.
 
-`bloom` persists the bit array to a `<vtab>_storage` shadow table via the incremental BLOB API ([`(*Conn).OpenBlob`](../blob.go)). Filter state survives `db.Close()` / reconnect. Hashes use Kirsch–Mitzenmacher double-hashing over FNV-1a streams seeded with stable salts so bit positions match across process restarts.
+`bloom` persists the bit array to a `<vtab>_storage` shadow table via the incremental BLOB API ([`(*Conn).OpenBlob`](../../blob.go)). Filter state survives `db.Close()` / reconnect. Hashes use Kirsch–Mitzenmacher double-hashing over FNV-1a streams seeded with stable salts so bit positions match across process restarts.
 
 `closure`, `pivot`, and `statement` are vtab modules that run nested SQL from inside `xCreate`/`xFilter` against the host `*Conn`. The reentrancy is pinned by `vtab_nested_prepare_test.go` at the root.
 
 ### xCreate / xConnect split
 
-`bloom` and `spellfix1` use the [`(*Conn).CreateModuleSplit`](../module.go) two-callback form so they can run distinct logic for the first `CREATE VIRTUAL TABLE` (build the `<vtab>_storage` shadow table, seed the metadata row / index) and every subsequent `xConnect` reopen (declare the schema, fetch persisted params). Modules whose create and connect paths are identical should stick with the simpler `(*Conn).CreateModule`.
+`bloom` and `spellfix1` use the [`(*Conn).CreateModuleSplit`](../../module.go) two-callback form so they can run distinct logic for the first `CREATE VIRTUAL TABLE` (build the `<vtab>_storage` shadow table, seed the metadata row / index) and every subsequent `xConnect` reopen (declare the schema, fetch persisted params). Modules whose create and connect paths are identical should stick with the simpler `(*Conn).CreateModule`.
 
 `fileio` exposes `readfile` / `writefile` / `lsmode` scalars plus the `fsdir` recursive-walk vtab. Use `fileio.Register(c)` for the os-backed mode (read+write of the local filesystem) or `fileio.RegisterFS(c, fs.FS)` for a sandboxed variant; the latter intentionally omits `writefile` since `fs.FS` is read-only.
 
@@ -110,7 +110,7 @@ The explicit form is the canonical entry; the blank-import `auto` sub-package is
 2. Translate to our `(*Conn).RegisterFunc` / `RegisterAggregator` / `RegisterWindowFunction` / vtab helper APIs. Don't copy upstream verbatim; the runtime is different.
 3. Ship `ext/<name>/<name>.go` + `<name>_test.go` + `doc.go` + `ext/<name>/auto/auto.go`.
 4. Add a row to the relevant table above; flip status to ✓ landed once tests and lint pass.
-5. Add a one-line entry to [`llms.txt`](../llms.txt) under "Per-package overviews" so consumer agents find it.
+5. Add/update the matching [`skills/`](../../skills/) entry and the relevant [`docs/`](../../docs/) page so consumer agents and humans find it.
 6. Optional: drop a runnable example under `examples/ext-<name>/`.
 
 Last reviewed against ncruces/go-sqlite3 main on 2026-06-14.

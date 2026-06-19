@@ -1,7 +1,7 @@
 // Vendored from github.com/mattn/go-sqlite3 v1.14.x to validate
 // mattn-compatibility against this fork. Build tag `mattn_upstream`
 // keeps it out of the default `go test ./...`. See
-// docs/mattn-upstream.md.
+// dev/upstream/mattn.md.
 
 //go:build mattn_upstream
 

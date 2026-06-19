@@ -1,8 +1,8 @@
 # Coverage — connection-level methods (WAL / snapshot / introspection / config)
 
-Typed `(*Conn)` / `(*Stmt)` methods that bind SQLite C-API surface beyond the `database/sql` contract. These complement the SQL-feature matrix in [coverage-sql.md](coverage-sql.md) (which is scoped to SQL clauses / PRAGMAs) and the SESSION matrix in [coverage-session.md](coverage-session.md). All are thin binds over already-compiled symbols.
+Typed `(*Conn)` / `(*Stmt)` methods that bind SQLite C-API surface beyond the `database/sql` contract. These complement the SQL-feature matrix in [coverage-sql.md](sql.md) (which is scoped to SQL clauses / PRAGMAs) and the SESSION matrix in [coverage-session.md](session.md). All are thin binds over already-compiled symbols.
 
-## Introspection & telemetry — [`introspect.go`](../introspect.go), [`stmt.go`](../stmt.go)
+## Introspection & telemetry — [`introspect.go`](../../introspect.go), [`stmt.go`](../../stmt.go)
 
 | Method | C symbol | What it returns | Test |
 |---|---|---|---|
@@ -17,7 +17,7 @@ Typed `(*Conn)` / `(*Stmt)` methods that bind SQLite C-API surface beyond the `d
 | `(*Conn).CacheFlush` | `sqlite3_db_cacheflush` | flush dirty pages mid-transaction (no PRAGMA equivalent) | `TestConn_CacheFlushAndFileControl` |
 | `(*Conn).SetFileControlInt` / `ResetCache` | `sqlite3_file_control` (int ops / `RESET_CACHE`) | generic int file-control escape hatch; drop page cache | `TestConn_CacheFlushAndFileControl` |
 
-### Package-level C-API helpers — [`runtime.go`](../runtime.go)
+### Package-level C-API helpers — [`runtime.go`](../../runtime.go)
 
 Process-global, connection-independent (serialized through one mutex-guarded TLS).
 
@@ -29,7 +29,7 @@ Process-global, connection-independent (serialized through one mutex-guarded TLS
 
 Not wrapped: `sqlite3_memory_used` / heap-limit / `status64` — modernc disables SQLite's memstat (they return 0); use Go's `runtime/metrics` instead.
 
-## WAL control — [`wal.go`](../wal.go)
+## WAL control — [`wal.go`](../../wal.go)
 
 | Method | C symbol | Notes | Test |
 |---|---|---|---|
@@ -37,7 +37,7 @@ Not wrapped: `sqlite3_memory_used` / heap-limit / `status64` — modernc disable
 | `(*Conn).WALAutoCheckpoint` | `sqlite3_wal_autocheckpoint` | auto-checkpoint frame threshold | `TestWALCheckpoint` |
 | `(*Conn).RegisterWALHook` | `sqlite3_wal_hook` | post-commit callback; non-nil error fails the commit; replaces auto-checkpoint | `TestWALHook`, `TestWALHook_Error` |
 
-## Snapshot (WAL point-in-time) — [`snapshot.go`](../snapshot.go)
+## Snapshot (WAL point-in-time) — [`snapshot.go`](../../snapshot.go)
 
 | Method | C symbol | Test |
 |---|---|---|
@@ -46,7 +46,7 @@ Not wrapped: `sqlite3_memory_used` / heap-limit / `status64` — modernc disable
 | `(*Conn).SnapshotRecover` | `sqlite3_snapshot_recover` | `TestSnapshot_OpenAndRecover` |
 | `(*Snapshot).Cmp` / `Close` | `sqlite3_snapshot_cmp` / `_free` | `TestSnapshot_CmpAndGuards` |
 
-## Progress & config — [`control.go`](../control.go)
+## Progress & config — [`control.go`](../../control.go)
 
 | Method | C symbol | Notes | Test |
 |---|---|---|---|
@@ -54,14 +54,14 @@ Not wrapped: `sqlite3_memory_used` / heap-limit / `status64` — modernc disable
 | `(*Conn).RegisterBusyHandler` | `sqlite3_busy_handler` | programmable lock-contention retry (adaptive/jittered back-off); the callback alternative to a fixed busy_timeout | `TestRegisterBusyHandler` |
 | `(*Conn).SetDBConfig` / `QueryDBConfig` | `sqlite3_db_config` | boolean flags incl. security-only DEFENSIVE / TRUSTED_SCHEMA / WRITABLE_SCHEMA (no PRAGMA equivalent), via `libc.VaList` | `TestDBConfig`, `TestDBConfig_Effect` |
 
-## Lazy collation registration — [`collation_needed.go`](../collation_needed.go)
+## Lazy collation registration — [`collation_needed.go`](../../collation_needed.go)
 
 | Method | C symbol | Notes | Test |
 |---|---|---|---|
 | `(*Conn).CollationNeeded` | `sqlite3_collation_needed` | fires when a statement references an undefined collation; handler defines it on demand (typically via `RegisterCollation`) | `TestCollationNeeded_Custom` |
 | `(*Conn).AnyCollationNeeded` | (built on the above) | defines every unknown collation as byte-wise/BINARY so foreign schemas open/ATTACH/restore without "no such collation sequence" | `TestCollationNeeded_AnyFakesBinary`, `TestCollationNeeded_DrainOnClose` |
 
-## UDF function-context substrate — [`function_context.go`](../function_context.go)
+## UDF function-context substrate — [`function_context.go`](../../function_context.go)
 
 Methods on `*FunctionContext` (the value passed to scalar / aggregate / window callbacks).
 
@@ -71,12 +71,12 @@ Methods on `*FunctionContext` (the value passed to scalar / aggregate / window c
 | `(*FunctionContext).ValueSubtype` | `sqlite3_value_subtype` | read an argument's subtype | `TestFunctionContext_Subtype` |
 | `(*FunctionContext).SetAuxData` / `GetAuxData` | `sqlite3_set_auxdata` / `sqlite3_get_auxdata` | cache a Go value against a constant argument and reuse it across rows; auto-released (destructor drains the registry) on finalize | `TestFunctionContext_AuxData` |
 
-## Custom FTS5 tokenizer — [`fts5_tokenizer.go`](../fts5_tokenizer.go)
+## Custom FTS5 tokenizer — [`fts5_tokenizer.go`](../../fts5_tokenizer.go)
 
 | Method | C symbol | Notes | Test |
 |---|---|---|---|
 | `(*Conn).RegisterFTS5Tokenizer` | `fts5_api.xCreateTokenizer` | registers a Go `FTS5Tokenizer` (the `SELECT fts5(?1)` / `bind_pointer` handshake gets the api); reference it as `tokenize='name'`. Per-connection. No other pure-Go driver exposes this. | `TestRegisterFTS5Tokenizer`, `TestRegisterFTS5Tokenizer_DrainOnClose` |
 
-All per-connection callbacks (WAL hook, progress handler, busy handler, rtree geometry/query, collation-needed, FTS5 tokenizer factory) are stored in process-global registries keyed by `c.db` / a minted id and drained in `(*conn).dropHookHandlers` on Close — see [`hooks.go`](../hooks.go).
+All per-connection callbacks (WAL hook, progress handler, busy handler, rtree geometry/query, collation-needed, FTS5 tokenizer factory) are stored in process-global registries keyed by `c.db` / a minted id and drained in `(*conn).dropHookHandlers` on Close — see [`hooks.go`](../../hooks.go).
 
 Last reviewed against the transpiled SQLite conn-method surface on 2026-06-13.

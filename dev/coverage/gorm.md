@@ -163,14 +163,14 @@ Beyond the per-method matrix above, the full `gorm.io/gorm/tests`
 integration suite runs against this dialector via a thin shim,
 pinned to the same gorm version go.mod
 depends on. The setup, reproduction recipe, and reasoning for each
-shim flag live in [gorm-upstream.md](gorm-upstream.md). The same
+shim flag live in [gorm-upstream.md](../upstream/gorm.md). The same
 recipe is enforced by the `gorm-upstream` CI job.
 
 ## Virtual-table extensions through gorm
 
 The `ext/` vtab modules (`csv`, `lines`, `closure`, `bloom`, `spellfix1`, `array`, `statement`) are usable from this dialector with no bridge package — once a module is registered on the pool, its vtab is an ordinary SQL table gorm can drive. The pattern: register the module pool-wide before `Open` (blank-import the module's `auto` sub-package, or install a `Driver.ConnectHook` when the module needs state at registration time, e.g. `csv.RegisterFS` with a sandboxed `fs.FS`), pin the pool with `sqlDB.SetMaxOpenConns(1)` (a `CREATE VIRTUAL TABLE` lives on the conn that issued it), then use plain gorm calls — `db.Exec` for the DDL, `db.Raw` / `db.Table(...).Scan` / `Where` for reads.
 
-`AutoMigrate` does not understand `CREATE VIRTUAL TABLE … USING …`, so the vtab is created out-of-band: raw `db.Exec`, or the typed `csv.Create` / `lines.Create` / `closure.Create` over `db.DB()`. There is intentionally no `csv/gorm` or `lines/gorm` sidecar plugin — those vtabs *are* the table, not a companion index, so the lifecycle-hook shape below does not fit them. [`examples/features/gorm/ext-vtabs`](../examples/features/gorm/ext-vtabs/main.go) drives `csv` / `lines` / `closure` / `bloom` / `spellfix1` (plus `array` and `statement`) through gorm end-to-end.
+`AutoMigrate` does not understand `CREATE VIRTUAL TABLE … USING …`, so the vtab is created out-of-band: raw `db.Exec`, or the typed `csv.Create` / `lines.Create` / `closure.Create` over `db.DB()`. There is intentionally no `csv/gorm` or `lines/gorm` sidecar plugin — those vtabs *are* the table, not a companion index, so the lifecycle-hook shape below does not fit them. [`examples/features/gorm/ext-vtabs`](../../examples/features/gorm/ext-vtabs/main.go) drives `csv` / `lines` / `closure` / `bloom` / `spellfix1` (plus `array` and `statement`) through gorm end-to-end.
 
 ## Deep integration: `vec/gorm` and `fts/gorm`
 

@@ -1,6 +1,6 @@
 # Coverage — SESSION extension (changesets / patchsets)
 
-The SQLite [SESSION extension](https://sqlite.org/sessionintro.html) records changes to a database and serializes them as changeset/patchset blobs that can be inverted, concatenated, and applied to another database with conflict resolution. `SQLITE_ENABLE_SESSION` is compiled into the transpiled lib; this module exposes it as a typed Go API in [`session.go`](../session.go). No other pure-Go SQLite driver (modernc, ncruces) exposes it.
+The SQLite [SESSION extension](https://sqlite.org/sessionintro.html) records changes to a database and serializes them as changeset/patchset blobs that can be inverted, concatenated, and applied to another database with conflict resolution. `SQLITE_ENABLE_SESSION` is compiled into the transpiled lib; this module exposes it as a typed Go API in [`session.go`](../../session.go). No other pure-Go SQLite driver (modernc, ncruces) exposes it.
 
 The API lives in the root package because it needs the connection's unexported handles; the apply callbacks dispatch through static trampolines + an id registry, the same shape as the R-Tree and scalar-UDF machinery.
 
@@ -22,7 +22,7 @@ The API lives in the root package because it needs the connection's unexported h
 
 Conflict types (`ConflictData` / `NotFound` / `Conflict` / `Constraint` / `ForeignKey`) and actions (`ChangesetOmit` / `Replace` / `Abort`) are typed. With no `WithConflictHandler`, conflicts abort and roll back (the safe default).
 
-Example: [`examples/features/advanced/session`](../examples/features/advanced/session/main.go) — record changes on a primary, replay onto a replica, undo via the inverse.
+Example: [`examples/features/advanced/session`](../../examples/features/advanced/session/main.go) — record changes on a primary, replay onto a replica, undo via the inverse.
 
 ## Deferred (follow-ups)
 

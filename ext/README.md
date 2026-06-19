@@ -18,7 +18,7 @@ The explicit form is canonical; the `/auto` blank-import is a thin shim that cal
 
 ## Available extensions
 
-Coverage matrix and status (✓ landed / ⚠ partial / ✗ deferred) lives at [`docs/coverage-ext.md`](../docs/coverage-ext.md). Shipped today:
+Coverage matrix and status (✓ landed / ⚠ partial / ✗ deferred) lives at [`dev/coverage/ext.md`](../dev/coverage/ext.md). Shipped today:
 
 | Package | What it gives you |
 |---|---|
@@ -52,4 +52,4 @@ Several extensions are Go-native ports of [ncruces/go-sqlite3](https://github.co
 
 ## Adding a new extension
 
-See the bottom of [`docs/coverage-ext.md`](../docs/coverage-ext.md) for the per-extension scaffolding checklist.
+See the bottom of [`dev/coverage/ext.md`](../dev/coverage/ext.md) for the per-extension scaffolding checklist.

@@ -1,0 +1,33 @@
+---
+title: Encryption at rest
+description: Pure-Go page-level encryption VFS — Adiantum or AES-XTS-256, with a slog recorder and checksum stacking.
+sidebar:
+  order: 8
+---
+
+# Encryption at rest
+
+`vfs/crypto` is a pure-Go, page-level encryption VFS — Adiantum (default, 32-byte key) or AES-XTS-256 (64-byte key). The main DB file, rollback journal, WAL frames, and temp files are all encrypted; the WAL `-shm` index stays plaintext (it's process-local coordination state, not row data).
+
+```go
+import "github.com/go-again/sqlite/vfs/crypto"
+
+key := make([]byte, 32) // derive from passphrase / keyring / HSM
+name, fs, _ := crypto.New(crypto.Options{Key: key})
+defer fs.Close()
+
+db, _ := sql.Open("sqlite", "file:secret.db?vfs="+name)
+```
+
+Or via the typed `Config`: `sqlite.Open(sqlite.Config{Path: "secret.db", Encryption: &sqlite.Encryption{Key: key}})` ([Configuration](configuration.md)).
+
+## What to know
+
+- **Confidentiality only** — no SQLCipher on-disk format compatibility, no MAC. SQLCipher's per-page HMAC integrity is not what we ship; for active-tamper threats pair with disk-level integrity (LUKS dm-integrity, ZFS).
+- **Overhead** on a write-heavy microbenchmark is in the tens of percent; the exact factor depends on cipher and platform (Adiantum is faster than AES-XTS on most ARM, often the reverse on AES-NI x86). Measure with `go test -bench=BenchmarkInsert ./vfs/crypto/`.
+
+## Composing
+
+Add `Options.Recorder = crypto.NewSlogRecorder(slog.Default())` (or any custom `crypto.Recorder`) for per-IO observability. Stack `vfs/cksm` underneath via `Options.WrapVFS` for checksum-then-encrypt protection (see [Checksums](checksums.md)).
+
+Runnable: [`examples/features/vfs/crypto/`](../../examples/features/vfs/crypto/main.go) (standalone) and [`examples/features/gorm/crypto/`](../../examples/features/gorm/crypto/main.go) (end-to-end with gorm + vec + fts + fusion + Argon2id key derivation). Package docs: [`vfs/crypto/doc.go`](../../vfs/crypto/doc.go). On-disk format + threat model: `vfs/crypto/doc.go`; coverage: [`dev/coverage/vfs.md`](../../dev/coverage/vfs.md).

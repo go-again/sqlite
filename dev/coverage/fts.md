@@ -200,11 +200,11 @@ modernc bump.
 
 ## See also
 
-- [`coverage-gorm.md`](coverage-gorm.md) — covers the tag-driven
+- [`coverage-gorm.md`](gorm.md) — covers the tag-driven
   `fts/gorm` bridge that wraps `fts.Index` for gorm models, including
   the external / in-table / contentless modes.
-- [`../examples/features/search/fts-search/`](../examples/features/search/fts-search/) — raw `fts.Index`.
-- [`../examples/features/gorm/fts-tagged/`](../examples/features/gorm/fts-tagged/) — the
+- [`../examples/features/search/fts-search/`](../../examples/features/search/fts-search/) — raw `fts.Index`.
+- [`../examples/features/gorm/fts-tagged/`](../../examples/features/gorm/fts-tagged/) — the
   `ftsgorm.Plugin()` flow with a struct-tag-driven FTS5 table.
 
 ---

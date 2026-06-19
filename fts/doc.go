@@ -113,7 +113,7 @@
 //   - examples/features/search/fts-search — runnable demo of the raw fts.Index API.
 //   - examples/features/gorm/fts-tagged — the same flow expressed via the
 //     gorm bridge.
-//   - docs/coverage-fts.md — every documented FTS5 feature with its
+//   - dev/coverage/fts.md — every documented FTS5 feature with its
 //     current status (typed / raw / inherited).
 //   - github.com/go-again/sqlite/vfs/crypto — pure-Go encryption at
 //     rest. Composes with FTS5 — encrypted full-text databases work

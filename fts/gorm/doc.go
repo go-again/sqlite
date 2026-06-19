@@ -120,6 +120,6 @@
 //   - github.com/go-again/sqlite/gorm — gorm dialector and the
 //     DropTableHook interface this package implements.
 //   - examples/features/gorm/fts-tagged — end-to-end demo of this package.
-//   - docs/coverage-gorm.md — tag syntax tables, mode tradeoffs,
+//   - dev/coverage/gorm.md — tag syntax tables, mode tradeoffs,
 //     lifecycle matrix.
 package ftsgorm
