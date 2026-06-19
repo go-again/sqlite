@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-again/sqlite/vfs/crypto"
+	"gosqlite.org/vfs/crypto"
 )
 
 // DB wraps *sql.DB so the caller can `defer db.Close()` without
@@ -158,8 +158,8 @@ func OpenReadOnly(path string) (*DB, error) {
 // to it.
 //
 // For snapshot isolation or richer semantics, use the
-// [github.com/go-again/sqlite/vfs/mvcc] or
-// [github.com/go-again/sqlite/vfs/memdb] sub-packages.
+// [gosqlite.org/vfs/mvcc] or
+// [gosqlite.org/vfs/memdb] sub-packages.
 func OpenShared(name string) (*DB, error) {
 	return Open(Config{Path: name, Mode: ModeMemory, Cache: CacheShared})
 }

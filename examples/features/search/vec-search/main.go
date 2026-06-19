@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"log"
 
-	_ "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vec"
+	_ "gosqlite.org"
+	"gosqlite.org/vec"
 )
 
 func main() {

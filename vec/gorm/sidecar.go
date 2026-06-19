@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/go-again/sqlite/internal/gormbridge"
-	"github.com/go-again/sqlite/vec"
 	"gorm.io/gorm"
+	"gosqlite.org/internal/gormbridge"
+	"gosqlite.org/vec"
 )
 
 // sidecarItem is one row queued for the sidecar: the model's primary key

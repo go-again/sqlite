@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-again/sqlite/fts"
+	"gosqlite.org/fts"
 )
 
 // TestColumnSpec_UnindexedAcceptedInCreate verifies the rich form

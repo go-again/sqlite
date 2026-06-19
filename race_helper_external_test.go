@@ -1,6 +1,6 @@
 package sqlite_test
 
-import "github.com/go-again/sqlite/internal/raceskip"
+import "gosqlite.org/internal/raceskip"
 
 // raceEnabledExt mirrors the internal raceEnabled constant for the
 // external test package. Encryption-touching tests in config_test.go

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-again/sqlite/fts"
+	"gosqlite.org/fts"
 )
 
 // stubRecorder counts observed events. Used to assert the Recorder hook

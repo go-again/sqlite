@@ -18,17 +18,17 @@
 // # Usage
 //
 //	import (
-//	    sqlite "github.com/go-again/sqlite"
-//	    "github.com/go-again/sqlite/ext/zorder"
+//	    sqlite "gosqlite.org"
+//	    "gosqlite.org/ext/zorder"
 //	)
 //
 //	if err := zorder.Register(conn); err != nil { ... }
 //	row := db.QueryRow(`SELECT zorder(10, 20, 30), unzorder(zorder(10, 20, 30), 3, 1)`)
 //
-// For pool-wide install via [github.com/go-again/sqlite.Driver.ConnectHook],
+// For pool-wide install via [gosqlite.org.Driver.ConnectHook],
 // blank-import the auto sub-package:
 //
-//	import _ "github.com/go-again/sqlite/ext/zorder/auto"
+//	import _ "gosqlite.org/ext/zorder/auto"
 //
 // [ncruces/ext/zorder]: https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/zorder
 package zorder
@@ -37,7 +37,7 @@ import (
 	"errors"
 	"fmt"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // Exported names of the SQL functions Register installs.

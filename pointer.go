@@ -117,7 +117,7 @@ func init() {
 	// Use the modernc transpiler's TLS-free CString-equivalent: allocate
 	// a C buffer via Xmalloc and copy the tag bytes. Lifetime is the
 	// process (never freed); the cost is one tag-string-worth of bytes.
-	const tag = "go-again-pointer\x00"
+	const tag = "gosqlite-pointer\x00"
 	p := libc.Xmalloc(nil, libc.Tsize_t(len(tag)))
 	if p == 0 {
 		panic("sqlite: out of memory allocating pointer-binding type tag")

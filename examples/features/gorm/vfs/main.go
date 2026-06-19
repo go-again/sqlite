@@ -17,9 +17,9 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	_ "github.com/go-again/sqlite"
-	sqlite "github.com/go-again/sqlite/gorm"
-	"github.com/go-again/sqlite/vfs"
+	_ "gosqlite.org"
+	sqlitegorm "gosqlite.org/gorm"
+	"gosqlite.org/vfs"
 )
 
 type Note struct {
@@ -50,7 +50,7 @@ INSERT INTO notes (text) VALUES ('alpha'), ('beta'), ('gamma');`); err != nil {
 	// Open gorm against the registered VFS. mode=ro keeps writes out, since
 	// the underlying fs.FS is read-only anyway.
 	dsn := "file:seed.db?vfs=" + vfsName + "&mode=ro"
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+	db, err := gorm.Open(sqlitegorm.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {

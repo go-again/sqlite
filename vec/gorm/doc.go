@@ -10,8 +10,8 @@
 // # Quick start
 //
 //	import (
-//	    sqlitegorm "github.com/go-again/sqlite/gorm"
-//	    vecgorm "github.com/go-again/sqlite/vec/gorm"
+//	    sqlitegorm "gosqlite.org/gorm"
+//	    vecgorm "gosqlite.org/vec/gorm"
 //	    "gorm.io/gorm"
 //	)
 //
@@ -39,7 +39,7 @@
 // Both integer and string primary keys are supported. An integer PK keys the
 // sidecar on the implicit int64 rowid; a string PK (e.g. a UUID or slug) keys
 // it on an explicit `id text primary key` column backed by a
-// [github.com/go-again/sqlite/vec.KeyedTable]. The model's PK type is detected
+// [gosqlite.org/vec.KeyedTable]. The model's PK type is detected
 // at registration — no tag is needed. Composite or non-int/non-string primary
 // keys are not supported.
 //
@@ -100,7 +100,7 @@
 // # DropTable cascade
 //
 // vec/gorm's Plugin implements the DropTableHook interface declared
-// in github.com/go-again/sqlite/gorm. When callers run
+// in gosqlite.org/gorm. When callers run
 // db.Migrator().DropTable(&Model{}), our Migrator iterates plugins
 // and invokes the hook before the source DROP, so the vec0 sidecar
 // goes away without anyone calling DropSidecar separately.
@@ -110,7 +110,7 @@
 //
 // # Side-by-side compatibility
 //
-// vecgorm is layered on top of github.com/go-again/sqlite/vec. The
+// vecgorm is layered on top of gosqlite.org/vec. The
 // raw vec.Table API remains available for callers who want to
 // manage sidecars by hand or use features the bridge does not expose
 // (bit / int8 vectors, partition columns, auxiliary columns).
@@ -118,8 +118,8 @@
 //
 // # See also
 //
-//   - github.com/go-again/sqlite/vec — raw vector-search API.
-//   - github.com/go-again/sqlite/gorm — gorm dialector (Open, New,
+//   - gosqlite.org/vec — raw vector-search API.
+//   - gosqlite.org/gorm — gorm dialector (Open, New,
 //     Dialector, the DropTableHook interface).
 //   - examples/features/gorm/vec-tagged — end-to-end demo of this package.
 //   - dev/coverage/gorm.md — tag syntax tables and lifecycle matrix.

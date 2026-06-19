@@ -1,5 +1,5 @@
 // from-modernc: shows that swapping the blank import from
-// "modernc.org/sqlite" to "github.com/go-again/sqlite" needs no other code
+// "modernc.org/sqlite" to "gosqlite.org" needs no other code
 // changes. The driver name "sqlite" still works, all the modernc DSN flags
 // (_pragma, _time_format, _time_integer_format, _timezone, _txlock,
 // _inttotime, _texttotime, vfs=...) still work, and the modernc-style
@@ -19,7 +19,7 @@ import (
 	// The only line that needs to change in a modernc-based project is this
 	// import path. Everything else — sql.Open("sqlite", ...), DSN flags,
 	// modernc registration helpers — stays the same.
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 func main() {

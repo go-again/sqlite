@@ -7,9 +7,9 @@
 // # Quick example
 //
 //	import (
-//	    sqlite "github.com/go-again/sqlite"
-//	    _ "github.com/go-again/sqlite/ext/regexp/auto"
-//	    rxgorm "github.com/go-again/sqlite/ext/regexp/gorm"
+//	    sqlite "gosqlite.org"
+//	    _ "gosqlite.org/ext/regexp/auto"
+//	    rxgorm "gosqlite.org/ext/regexp/gorm"
 //	)
 //
 //	var docs []Doc
@@ -36,13 +36,13 @@
 // the connection. The simplest wire-up is the blank-import
 // auto-registration:
 //
-//	import _ "github.com/go-again/sqlite/ext/regexp/auto"
+//	import _ "gosqlite.org/ext/regexp/auto"
 package regexpgorm
 
 import (
 	"gorm.io/gorm/clause"
 
-	"github.com/go-again/sqlite/ext/regexp"
+	"gosqlite.org/ext/regexp"
 )
 
 // WhereRegex returns a gorm [clause.Expression] that constrains column

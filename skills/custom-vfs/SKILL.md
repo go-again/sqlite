@@ -1,6 +1,6 @@
 ---
 name: custom-vfs
-description: Use when backing a writable SQLite database with arbitrary Go storage (object store, fault injector, custom in-memory) in a Go app with go-again/sqlite — implementing the vfs.VFS / vfs.File interfaces and vfs.Register.
+description: Use when backing a writable SQLite database with arbitrary Go storage (object store, fault injector, custom in-memory) in a Go app with gosqlite — implementing the vfs.VFS / vfs.File interfaces and vfs.Register.
 ---
 
 # Implementing a custom VFS
@@ -8,7 +8,7 @@ description: Use when backing a writable SQLite database with arbitrary Go stora
 Implement `vfs.VFS` + `vfs.File`, register under a name, reference via `?vfs=`. The dispatcher owns the C-ABI machinery.
 
 ```go
-import "github.com/go-again/sqlite/vfs"
+import "gosqlite.org/vfs"
 
 vfs.Register("myvfs", myImpl)              // once at startup
 db, _ := sql.Open("sqlite", "file:app.db?vfs=myvfs")

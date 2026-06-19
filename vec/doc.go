@@ -1,5 +1,5 @@
 // Package vec adds first-class vector-search support to
-// github.com/go-again/sqlite by bundling the sqlite-vec extension and a small
+// gosqlite.org by bundling the sqlite-vec extension and a small
 // Go API layered on top of it.
 //
 // # Activating the extension
@@ -9,8 +9,8 @@
 //
 //	import (
 //	    "database/sql"
-//	    _ "github.com/go-again/sqlite"
-//	    _ "github.com/go-again/sqlite/vec"
+//	    _ "gosqlite.org"
+//	    _ "gosqlite.org/vec"
 //	)
 //
 //	db, _ := sql.Open("sqlite3", ":memory:")
@@ -115,7 +115,7 @@
 // Practical consequence for downstream consumers: if you compile on a
 // target the upstream `modernc.org/sqlite/vec` does not cover, `go
 // build ./...` against your module will fail at this sub-package
-// while the rest of github.com/go-again/sqlite still compiles. The
+// while the rest of gosqlite.org still compiles. The
 // remaining sub-packages (root driver, fts, gorm, vfs, fts/gorm) work
 // on every supported target. Build with `go build ./... 2>/dev/null
 // || go build ./` if you want to skip vec/ on niche arches, or list
@@ -126,11 +126,11 @@
 // Insert / BatchInsert / Update / Delete / KNN can be wrapped with slog
 // logging or a metrics recorder by composing the optional decorators in
 // observability.go: Wrap, WithLogger, WithRecorder. Parallel to the
-// matching surface in github.com/go-again/sqlite/fts.
+// matching surface in gosqlite.org/fts.
 //
 // # See also
 //
-//   - github.com/go-again/sqlite/vec/gorm — tag-driven sqlite-vec
+//   - gosqlite.org/vec/gorm — tag-driven sqlite-vec
 //     sidecars wired into gorm models. Define an Embedding field on
 //     a gorm model and the plugin owns CRUD sync, soft-delete
 //     filtering, and DropTable cascade.
@@ -139,7 +139,7 @@
 //     the gorm bridge.
 //   - dev/coverage/vec.md — every documented sqlite-vec feature
 //     with its current status (typed / raw / inherited).
-//   - github.com/go-again/sqlite/vfs/crypto — pure-Go encryption at
+//   - gosqlite.org/vfs/crypto — pure-Go encryption at
 //     rest. Composes with vec0 — encrypted vector databases work
 //     end-to-end through the same wrapping VFS. Same Recorder-shaped
 //     observability surface, opted in via Options.Recorder.

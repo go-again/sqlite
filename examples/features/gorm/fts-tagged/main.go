@@ -16,10 +16,10 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	_ "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/fts"
-	ftsgorm "github.com/go-again/sqlite/fts/gorm"
-	sqlitegorm "github.com/go-again/sqlite/gorm"
+	_ "gosqlite.org"
+	"gosqlite.org/fts"
+	ftsgorm "gosqlite.org/fts/gorm"
+	sqlitegorm "gosqlite.org/gorm"
 )
 
 // Article is a typical gorm model with two indexed text fields. Both

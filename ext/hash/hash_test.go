@@ -19,8 +19,8 @@ import (
 	_ "golang.org/x/crypto/ripemd160" //nolint:gosec,staticcheck
 	_ "golang.org/x/crypto/sha3"
 
-	"github.com/go-again/sqlite/ext/hash"
-	"github.com/go-again/sqlite/internal/testhelp"
+	"gosqlite.org/ext/hash"
+	"gosqlite.org/internal/testhelp"
 )
 
 func openDB(t *testing.T) (*sql.DB, *sql.Conn) {

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-again/sqlite/ext/zorder"
-	"github.com/go-again/sqlite/internal/testhelp"
+	"gosqlite.org/ext/zorder"
+	"gosqlite.org/internal/testhelp"
 )
 
 func openDB(t *testing.T) (*sql.DB, *sql.Conn) {

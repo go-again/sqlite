@@ -8,7 +8,7 @@ import (
 
 	"gorm.io/gorm/callbacks"
 
-	rootsqlite "github.com/go-again/sqlite"
+	rootsqlite "gosqlite.org"
 	sqlite3 "modernc.org/sqlite/lib"
 
 	"gorm.io/gorm"
@@ -36,14 +36,14 @@ func applyGormDefaults(dsn string) string {
 }
 
 // DriverName is the default driver name for SQLite. Since
-// github.com/go-again/sqlite registers under both "sqlite" (modernc-style)
+// gosqlite.org registers under both "sqlite" (modernc-style)
 // and "sqlite3" (mattn-style), either name resolves to the same singleton.
 const DriverName = "sqlite"
 
 // Config is the configuration object accepted by New. It mirrors the field
 // set of the official go-gorm/sqlite driver so existing code that does
 // sqlite.New(sqlite.Config{DSN: "..."}) continues to compile after switching
-// the import path to github.com/go-again/sqlite/gorm.
+// the import path to gosqlite.org/gorm.
 type Config struct {
 	DriverName string
 	DSN        string

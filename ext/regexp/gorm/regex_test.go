@@ -7,10 +7,10 @@ import (
 
 	"gorm.io/gorm/clause"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/regexp"
-	regexpgorm "github.com/go-again/sqlite/ext/regexp/gorm"
-	sqlitegorm "github.com/go-again/sqlite/gorm"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/regexp"
+	regexpgorm "gosqlite.org/ext/regexp/gorm"
+	sqlitegorm "gosqlite.org/gorm"
 )
 
 type doc struct {

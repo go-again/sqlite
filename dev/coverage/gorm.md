@@ -174,8 +174,8 @@ The `ext/` vtab modules (`csv`, `lines`, `closure`, `bloom`, `spellfix1`, `array
 
 ## Deep integration: `vec/gorm` and `fts/gorm`
 
-Tag-driven sidecar packages live under `github.com/go-again/sqlite/vec/gorm`
-and `github.com/go-again/sqlite/fts/gorm`. They register as gorm
+Tag-driven sidecar packages live under `gosqlite.org/vec/gorm`
+and `gosqlite.org/fts/gorm`. They register as gorm
 plugins and own the full lifecycle of the sidecar (vec0 virtual table /
 FTS5 external-content table + triggers).
 

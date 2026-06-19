@@ -1,15 +1,15 @@
 ---
 name: migrating
-description: Use when switching an existing Go project to go-again/sqlite from mattn/go-sqlite3, modernc.org/sqlite, glebarez/sqlite, go-gorm/sqlite, or ncruces/go-sqlite3.
+description: Use when switching an existing Go project to gosqlite from mattn/go-sqlite3, modernc.org/sqlite, glebarez/sqlite, go-gorm/sqlite, or ncruces/go-sqlite3.
 ---
 
-# Migrating to go-again/sqlite
+# Migrating to gosqlite
 
 | From | Do this | Driver name |
 |---|---|---|
-| `mattn/go-sqlite3` | swap the blank import to `_ "github.com/go-again/sqlite"` | keep `"sqlite3"` |
+| `mattn/go-sqlite3` | swap the blank import to `_ "gosqlite.org"` | keep `"sqlite3"` |
 | `modernc.org/sqlite` | swap the blank import | keep `"sqlite"` |
-| `glebarez/sqlite` / `go-gorm/sqlite` | swap dialector import to `github.com/go-again/sqlite/gorm` | n/a (gorm) |
+| `glebarez/sqlite` / `go-gorm/sqlite` | swap dialector import to `gosqlite.org/gorm` | n/a (gorm) |
 | `ncruces/go-sqlite3` | partial — see below | `"sqlite3"` |
 
 ## mattn / modernc
@@ -19,7 +19,7 @@ One-line import swap. `sql.Open(...)`, the `_*` DSN flags, custom-driver registr
 ## glebarez / go-gorm dialector
 
 ```go
-import sqlite "github.com/go-again/sqlite/gorm"
+import sqlite "gosqlite.org/gorm"
 db, _ := gorm.Open(sqlite.Open("file:my.db?_pragma=foreign_keys(1)"), &gorm.Config{})
 ```
 

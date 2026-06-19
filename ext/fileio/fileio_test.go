@@ -10,9 +10,9 @@ import (
 	"testing"
 	"testing/fstest"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/fileio"
-	"github.com/go-again/sqlite/internal/testhelp"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/fileio"
+	"gosqlite.org/internal/testhelp"
 )
 
 func openOS(t *testing.T) (*sql.DB, *sql.Conn) {

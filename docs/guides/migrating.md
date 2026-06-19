@@ -9,10 +9,10 @@ sidebar:
 
 | Old import | New import | Notes |
 |---|---|---|
-| `_ "github.com/mattn/go-sqlite3"` | `_ "github.com/go-again/sqlite"` | `sql.Open("sqlite3", ...)` keeps working. |
-| `_ "modernc.org/sqlite"` | `_ "github.com/go-again/sqlite"` | `sql.Open("sqlite", ...)` keeps working. |
-| `"github.com/glebarez/sqlite"` | `"github.com/go-again/sqlite/gorm"` | `sqlite.Open(dsn)` keeps working. |
-| `"github.com/go-gorm/sqlite"` | `"github.com/go-again/sqlite/gorm"` | `sqlite.New(sqlite.Config{...})` keeps working. |
+| `_ "github.com/mattn/go-sqlite3"` | `_ "gosqlite.org"` | `sql.Open("sqlite3", ...)` keeps working. |
+| `_ "modernc.org/sqlite"` | `_ "gosqlite.org"` | `sql.Open("sqlite", ...)` keeps working. |
+| `"github.com/glebarez/sqlite"` | `"gosqlite.org/gorm"` | `sqlite.Open(dsn)` keeps working. |
+| `"github.com/go-gorm/sqlite"` | `"gosqlite.org/gorm"` | `sqlite.New(sqlite.Config{...})` keeps working. |
 
 Runnable migration examples live under [`examples/migrating/`](../../examples/migrating/).
 
@@ -22,7 +22,7 @@ Change one line:
 
 ```diff
 - import _ "github.com/mattn/go-sqlite3"
-+ import _ "github.com/go-again/sqlite"
++ import _ "gosqlite.org"
 ```
 
 Everything else — `sql.Open("sqlite3", ...)`, the `_*` DSN flags, custom-driver registration via `&sqlite3.SQLiteDriver{Extensions, ConnectHook}`, `Conn.RegisterFunc`, `errors.Is(err, sqlite.ErrConstraintUnique)` — works unchanged. The `_auth*` userauth flags are rejected (that feature was dropped upstream). See [`examples/migrating/from-mattn/`](../../examples/migrating/from-mattn/main.go).
@@ -33,7 +33,7 @@ Swap the import; same `"sqlite"` driver name and DSN — nothing else changes.
 
 ```diff
 - import _ "modernc.org/sqlite"
-+ import _ "github.com/go-again/sqlite"
++ import _ "gosqlite.org"
 ```
 
 See [`examples/migrating/from-modernc/`](../../examples/migrating/from-modernc/main.go).
@@ -45,7 +45,7 @@ Swap the dialector import; the `sqlite.Open(dsn)` / `sqlite.New(Config{...})` si
 ```go
 import (
 	"gorm.io/gorm"
-	sqlite "github.com/go-again/sqlite/gorm"
+	sqlite "gosqlite.org/gorm"
 )
 
 db, _ := gorm.Open(sqlite.Open("file:my.db?_pragma=foreign_keys(1)"), &gorm.Config{})
@@ -61,7 +61,7 @@ What works after the import swap:
 
 ```diff
 - import _ "github.com/ncruces/go-sqlite3/driver"
-+ import _ "github.com/go-again/sqlite"
++ import _ "gosqlite.org"
 ```
 
 - `sql.Open("sqlite3", dsn)` — same driver name.

@@ -6,9 +6,9 @@ import (
 	"database/sql"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/blobio"
-	"github.com/go-again/sqlite/internal/testhelp"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/blobio"
+	"gosqlite.org/internal/testhelp"
 )
 
 // openDB pins a single conn, registers blobio on it, and creates a tiny

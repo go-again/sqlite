@@ -29,8 +29,8 @@ import (
 	"math/big"
 	"strconv"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/internal/bigdec"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/internal/bigdec"
 )
 
 // Register installs the decimal_* functions on c.
@@ -38,7 +38,7 @@ import (
 // Per-connection registration. For pool-wide install, blank-import the
 // auto sub-package:
 //
-//	import _ "github.com/go-again/sqlite/ext/decimal/auto"
+//	import _ "gosqlite.org/ext/decimal/auto"
 func Register(c *sqlite.Conn) error {
 	return errors.Join(
 		c.RegisterFunc("decimal", normalize, true),

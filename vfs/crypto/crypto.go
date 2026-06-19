@@ -9,7 +9,7 @@ import (
 	"modernc.org/libc"
 	sqlite3 "modernc.org/sqlite/lib"
 
-	"github.com/go-again/sqlite/internal/cabi"
+	"gosqlite.org/internal/cabi"
 )
 
 // Cipher selects the encryption mode.

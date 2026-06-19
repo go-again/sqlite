@@ -1,5 +1,5 @@
 // Package sqlite provides a gorm Dialector backed by the CGo-free
-// github.com/go-again/sqlite driver. It is a drop-in replacement for
+// gosqlite.org driver. It is a drop-in replacement for
 // both gorm.io/driver/sqlite (the official mattn-based dialector) and
 // github.com/glebarez/sqlite (the modernc-based fork): existing code
 // that does
@@ -8,7 +8,7 @@
 //
 // keeps working when the import is repointed at
 //
-//	import sqlite "github.com/go-again/sqlite/gorm"
+//	import sqlite "gosqlite.org/gorm"
 //
 // with no other source changes — the exported names (Open, New,
 // Config, Dialector, DriverName) match.
@@ -16,8 +16,8 @@
 // # Quick start (recommended — Go-typed Config, no DSN)
 //
 //	import (
-//	    sqlite "github.com/go-again/sqlite"
-//	    sqlitegorm "github.com/go-again/sqlite/gorm"
+//	    sqlite "gosqlite.org"
+//	    sqlitegorm "gosqlite.org/gorm"
 //	)
 //
 //	db, err := sqlitegorm.OpenConfig(sqlite.Config{
@@ -89,7 +89,7 @@
 //     embeds *gorm.DB and bundles the encryption VFS lifecycle.
 //   - sqlitegorm.Open(dsn): the gorm-standard constructor. dsn is passed
 //     verbatim to the driver, so every DSN flag the underlying
-//     github.com/go-again/sqlite supports is available
+//     gosqlite.org supports is available
 //     (_foreign_keys, _busy_timeout, _journal_mode, _pragma, _txlock,
 //     _time_format, _texttotime, _stmt_cache_size, …).
 //   - sqlitegorm.New(sqlitegorm.Config{...}): for callers who want to
@@ -112,11 +112,11 @@
 //
 // # See also
 //
-//   - github.com/go-again/sqlite/vec/gorm — tag-driven sqlite-vec
+//   - gosqlite.org/vec/gorm — tag-driven sqlite-vec
 //     vector-search sidecars wired into gorm models.
-//   - github.com/go-again/sqlite/fts/gorm — tag-driven FTS5 search
+//   - gosqlite.org/fts/gorm — tag-driven FTS5 search
 //     indexes wired into gorm models, with external / in-table /
 //     contentless modes.
-//   - github.com/go-again/sqlite/vfs — io/fs.FS-backed read-only
+//   - gosqlite.org/vfs — io/fs.FS-backed read-only
 //     databases (e.g. shipping seed data inside an embed.FS).
 package sqlite

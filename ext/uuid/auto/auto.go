@@ -2,12 +2,12 @@
 // so every new connection registers the UUID SQL functions. Blank-import
 // to opt in:
 //
-//	import _ "github.com/go-again/sqlite/ext/uuid/auto"
+//	import _ "gosqlite.org/ext/uuid/auto"
 package auto
 
 import (
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/uuid"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/uuid"
 )
 
 func init() {

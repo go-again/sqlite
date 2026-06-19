@@ -222,7 +222,7 @@ jobs:
 
       - name: Write shim module re-exporting our dialector
         # The upstream tests import gorm.io/driver/sqlite. We expose
-        # github.com/go-again/sqlite/gorm under that path via a tiny shim,
+        # gosqlite.org/gorm under that path via a tiny shim,
         # then append WAL + busy_timeout DSN flags so modernc's pure-Go
         # file locks don't return SQLITE_BUSY on concurrent goroutines —
         # mattn/go-sqlite3 (which gorm's tests were written against)
@@ -235,11 +235,11 @@ jobs:
           go 1.25.0
 
           require (
-              github.com/go-again/sqlite v0.0.0
+              gosqlite.org v0.0.0
               gorm.io/gorm $GORM_VERSION
           )
 
-          replace github.com/go-again/sqlite => ${{ github.workspace }}/sqlite
+          replace gosqlite.org => ${{ github.workspace }}/sqlite
           EOF
           cat > "$WORK_DIR/shim/sqlite.go" <<'EOF'
           package sqlite
@@ -247,15 +247,15 @@ jobs:
           import (
               "strings"
 
-              gagorm "github.com/go-again/sqlite/gorm"
+              sqlitegorm "gosqlite.org/gorm"
               "gorm.io/gorm"
           )
 
-          const DriverName = gagorm.DriverName
+          const DriverName = sqlitegorm.DriverName
 
           type (
-              Dialector = gagorm.Dialector
-              Config    = gagorm.Config
+              Dialector = sqlitegorm.Dialector
+              Config    = sqlitegorm.Config
           )
 
           const extraFlags = "_busy_timeout=5000&_journal=WAL&_sync=NORMAL"
@@ -271,10 +271,10 @@ jobs:
               return dsn + sep + extraFlags
           }
 
-          func Open(dsn string) gorm.Dialector { return gagorm.Open(withFlags(dsn)) }
+          func Open(dsn string) gorm.Dialector { return sqlitegorm.Open(withFlags(dsn)) }
           func New(cfg Config) gorm.Dialector {
               cfg.DSN = withFlags(cfg.DSN)
-              return gagorm.New(cfg)
+              return sqlitegorm.New(cfg)
           }
           EOF
           (cd "$WORK_DIR/shim" && go mod tidy)
@@ -284,7 +284,7 @@ jobs:
           cat >> "$WORK_DIR/gorm/tests/go.mod" <<EOF
 
           replace gorm.io/driver/sqlite => $WORK_DIR/shim
-          replace github.com/go-again/sqlite => ${{ github.workspace }}/sqlite
+          replace gosqlite.org => ${{ github.workspace }}/sqlite
           EOF
           (cd "$WORK_DIR/gorm/tests" && go mod tidy)
 

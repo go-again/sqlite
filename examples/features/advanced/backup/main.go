@@ -16,7 +16,7 @@ import (
 	"os"
 	"path/filepath"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 func main() {

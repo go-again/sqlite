@@ -10,7 +10,7 @@ sidebar:
 In a write-heavy program, SQLite's page cache is where most of the heap lives. `pcache.InstallBoundedLRU` swaps it for a fixed-capacity LRU over C-allocated buffers with hit / miss / eviction / live-page counters — making the footprint predictable and observable.
 
 ```go
-import "github.com/go-again/sqlite/pcache"
+import "gosqlite.org/pcache"
 
 stats, err := pcache.InstallBoundedLRU(2000) // ≤2000 pages per cache
 if err != nil { log.Fatal(err) }

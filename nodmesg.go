@@ -4,7 +4,7 @@
 
 //go:build !sqlite.dmesg
 
-package sqlite // import "github.com/go-again/sqlite"
+package sqlite // import "gosqlite.org"
 
 const dmesgs = false
 

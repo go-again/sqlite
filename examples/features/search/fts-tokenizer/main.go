@@ -16,7 +16,7 @@ import (
 	"strings"
 	"unicode"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // identTokenizer splits programming identifiers into lowercased word tokens:

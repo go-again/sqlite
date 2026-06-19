@@ -1,6 +1,6 @@
 package sqlite_test
 
-import "github.com/go-again/sqlite/internal/raceskip"
+import "gosqlite.org/internal/raceskip"
 
 // raceEnabledExt is the gorm-package companion of the root
 // raceEnabledExt constant. OpenConfig tests that exercise the

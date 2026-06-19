@@ -38,8 +38,8 @@
 // # Usage
 //
 //	import (
-//	    sqlite "github.com/go-again/sqlite"
-//	    "github.com/go-again/sqlite/ext/stats"
+//	    sqlite "gosqlite.org"
+//	    "gosqlite.org/ext/stats"
 //	)
 //
 //	if err := stats.Register(conn); err != nil { ... }
@@ -55,10 +55,10 @@
 //	        ORDER BY t ROWS BETWEEN 2 PRECEDING AND 2 FOLLOWING
 //	    ) FROM samples`)
 //
-// For pool-wide install via [github.com/go-again/sqlite.Driver.ConnectHook],
+// For pool-wide install via [gosqlite.org.Driver.ConnectHook],
 // blank-import the auto sub-package:
 //
-//	import _ "github.com/go-again/sqlite/ext/stats/auto"
+//	import _ "gosqlite.org/ext/stats/auto"
 //
 // # Empty-set semantics
 //

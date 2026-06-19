@@ -12,7 +12,7 @@
 //     driver never anticipated, without forking the driver or touching
 //     the transpiled lib/.
 //
-// Pair either with the parent github.com/go-again/sqlite driver and
+// Pair either with the parent gosqlite.org driver and
 // select it from a DSN via ?vfs=<name>.
 //
 // # Read-only fs.FS exposure

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/go-again/sqlite/sqlitex"
+	"gosqlite.org/sqlitex"
 )
 
 func TestExecute_RowCallbackAndNamed(t *testing.T) {

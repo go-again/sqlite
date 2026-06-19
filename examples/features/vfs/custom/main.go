@@ -24,8 +24,8 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vfs"
+	_ "gosqlite.org"
+	"gosqlite.org/vfs"
 )
 
 // memVFS is a writable in-memory VFS. Every file (the main database and

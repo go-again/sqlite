@@ -10,8 +10,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vfs"
+	sqlite "gosqlite.org"
+	"gosqlite.org/vfs"
 )
 
 // TestGormVFS_ReadFromMapFS demonstrates that the vfs sub-package composes

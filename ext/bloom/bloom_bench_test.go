@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/bloom"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/bloom"
 )
 
 func benchSetup(b *testing.B) (*sql.DB, *sql.Conn) {

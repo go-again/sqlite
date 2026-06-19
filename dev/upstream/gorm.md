@@ -16,7 +16,7 @@ comments, GaussDB/Postgres/TiDB/MySQL-specific variants).
 ## Reproduction recipe
 
 The upstream suite expects the dialector to live at the `gorm.io/driver/sqlite`
-import path. We re-export `github.com/go-again/sqlite/gorm` under that
+import path. We re-export `gosqlite.org/gorm` under that
 path via a tiny shim module, then point gorm/tests's `go.mod` at the shim
 with a `replace` directive.
 
@@ -35,10 +35,10 @@ cat > /tmp/gorm-driver-shim/go.mod <<'EOF'
 module gorm.io/driver/sqlite
 go 1.25.0
 require (
-    github.com/go-again/sqlite v0.0.0
+    gosqlite.org v0.0.0
     gorm.io/gorm v1.31.1
 )
-replace github.com/go-again/sqlite => $REPO
+replace gosqlite.org => $REPO
 EOF
 cat > /tmp/gorm-driver-shim/sqlite.go <<'EOF'
 package sqlite
@@ -46,15 +46,15 @@ package sqlite
 import (
     "strings"
 
-    gagorm "github.com/go-again/sqlite/gorm"
+    sqlitegorm "gosqlite.org/gorm"
     "gorm.io/gorm"
 )
 
-const DriverName = gagorm.DriverName
+const DriverName = sqlitegorm.DriverName
 
 type (
-    Dialector = gagorm.Dialector
-    Config    = gagorm.Config
+    Dialector = sqlitegorm.Dialector
+    Config    = sqlitegorm.Config
 )
 
 // extraFlags configure WAL journaling + a busy timeout so concurrent
@@ -74,10 +74,10 @@ func withFlags(dsn string) string {
     return dsn + sep + extraFlags
 }
 
-func Open(dsn string) gorm.Dialector { return gagorm.Open(withFlags(dsn)) }
+func Open(dsn string) gorm.Dialector { return sqlitegorm.Open(withFlags(dsn)) }
 func New(cfg Config) gorm.Dialector {
     cfg.DSN = withFlags(cfg.DSN)
-    return gagorm.New(cfg)
+    return sqlitegorm.New(cfg)
 }
 EOF
 (cd /tmp/gorm-driver-shim && go mod tidy)
@@ -86,7 +86,7 @@ EOF
 cat >> /tmp/gorm/tests/go.mod <<'EOF'
 
 replace gorm.io/driver/sqlite => /tmp/gorm-driver-shim
-replace github.com/go-again/sqlite => $REPO
+replace gosqlite.org => $REPO
 EOF
 (cd /tmp/gorm/tests && go mod tidy)
 
@@ -110,7 +110,7 @@ ergonomics every user needs.
 
 ## What our dialector already injects
 
-`github.com/go-again/sqlite/gorm` applies one DSN flag on every Open:
+`gosqlite.org/gorm` applies one DSN flag on every Open:
 
 - `_texttotime=1` — makes `ColumnTypeScanType` return `time.Time` for
   DATE / DATETIME / TIMESTAMP columns. Without it, gorm's `Table(...).Find(&map)`

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/go-again/sqlite/fts"
+	"gosqlite.org/fts"
 )
 
 func TestVocab_RowAndTop(t *testing.T) {

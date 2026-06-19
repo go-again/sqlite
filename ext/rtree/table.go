@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-again/sqlite/internal/sqlid"
-	"github.com/go-again/sqlite/internal/vtabx"
+	"gosqlite.org/internal/sqlid"
+	"gosqlite.org/internal/vtabx"
 )
 
 // Table is a typed handle to a SQLite R-Tree virtual table — a spatial index
@@ -22,7 +22,7 @@ import (
 // vtab extensions — Table needs no pool-wide registration to Create, Insert,
 // Delete, or run a bounding-box Search. Only SearchCircle (and any other MATCH
 // geometry) needs a geometry registered per connection: blank-import
-// "github.com/go-again/sqlite/ext/rtree/auto" and pin the pool, or call
+// "gosqlite.org/ext/rtree/auto" and pin the pool, or call
 // [Register] on a pinned *sqlite.Conn.
 type Table struct {
 	db   *sql.DB
@@ -173,7 +173,7 @@ func (t *Table) Search(ctx context.Context, query ...float64) ([]int64, error) {
 // SearchCircle returns the ids of every box overlapping the circle of radius r
 // centred at (cx, cy). It is valid only for a 2-dimensional table and requires
 // the circle geometry registered on the connection — blank-import
-// "github.com/go-again/sqlite/ext/rtree/auto" and pin the pool, or call
+// "gosqlite.org/ext/rtree/auto" and pin the pool, or call
 // [Register] on a pinned *sqlite.Conn. For other shapes, register a custom
 // geometry via (*sqlite.Conn).RegisterRTreeGeometry and query MATCH directly.
 func (t *Table) SearchCircle(ctx context.Context, cx, cy, r float64) ([]int64, error) {

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/go-again/sqlite/vec"
+	"gosqlite.org/vec"
 )
 
 // TestCreate_DefaultFailsOnSecondCall pins the default behavior: two

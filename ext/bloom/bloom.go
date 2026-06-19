@@ -11,7 +11,7 @@
 //
 // The bit array is persisted to a shadow table named `<vtab>_storage`
 // on the same schema. Reads and writes go through SQLite's incremental
-// BLOB API ([github.com/go-again/sqlite.Conn.OpenBlob]), so the bit
+// BLOB API ([gosqlite.org.Conn.OpenBlob]), so the bit
 // array survives [database/sql.DB.Close] and reconnects. The shadow
 // table is dropped automatically when the virtual table is dropped.
 //
@@ -43,15 +43,15 @@
 // # Usage
 //
 //	import (
-//	    sqlite "github.com/go-again/sqlite"
-//	    "github.com/go-again/sqlite/ext/bloom"
+//	    sqlite "gosqlite.org"
+//	    "gosqlite.org/ext/bloom"
 //	)
 //
 //	if err := bloom.Register(conn); err != nil { ... }
 //
 // For pool-wide auto-registration via [sqlite.Driver.ConnectHook]:
 //
-//	import _ "github.com/go-again/sqlite/ext/bloom/auto"
+//	import _ "gosqlite.org/ext/bloom/auto"
 //
 // # Acknowledgement
 //
@@ -71,8 +71,8 @@ import (
 	"strconv"
 	"strings"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/internal/sqlid"
+	sqlite "gosqlite.org"
+	"gosqlite.org/internal/sqlid"
 )
 
 // Stable 8-byte salts prepended to the FNV input to derive two

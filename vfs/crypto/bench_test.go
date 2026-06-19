@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vfs/crypto"
+	sqlite "gosqlite.org"
+	"gosqlite.org/vfs/crypto"
 )
 
 // benchInsertN runs a deterministic insert-heavy workload against a

@@ -3,7 +3,7 @@ package cabi_test
 import (
 	"testing"
 
-	"github.com/go-again/sqlite/internal/cabi"
+	"gosqlite.org/internal/cabi"
 	"modernc.org/libc"
 	sqlite3 "modernc.org/sqlite/lib"
 )

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/go-again/sqlite/vec"
+	"gosqlite.org/vec"
 )
 
 // TestQuery_WithFilter_RestrictsToRowidSubset is the canonical filtered-KNN

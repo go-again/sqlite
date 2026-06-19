@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/go-again/sqlite/vec"
+	"gosqlite.org/vec"
 )
 
 func metaTable(t *testing.T, ctx context.Context) (*vec.Table, *sql.DB) {

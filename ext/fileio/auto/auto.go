@@ -3,7 +3,7 @@
 // fsdir vtab. Os-backed mode — for the sandboxed variant call
 // [fileio.RegisterFS] explicitly. Blank-import to opt in:
 //
-//	import _ "github.com/go-again/sqlite/ext/fileio/auto"
+//	import _ "gosqlite.org/ext/fileio/auto"
 //
 // Security: blank-importing this package gives every SQL string executed
 // against the driver pool full filesystem-read and filesystem-write
@@ -12,8 +12,8 @@
 package auto
 
 import (
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/fileio"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/fileio"
 )
 
 func init() {

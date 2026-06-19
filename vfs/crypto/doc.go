@@ -165,8 +165,8 @@
 // Warn-level for anything else). [FileKindName] turns the file-kind
 // byte into a stable human-readable string for log/metric labels.
 //
-// Shape difference from [github.com/go-again/sqlite/vec.Recorder] and
-// [github.com/go-again/sqlite/fts.Recorder]: those packages expose
+// Shape difference from [gosqlite.org/vec.Recorder] and
+// [gosqlite.org/fts.Recorder]: those packages expose
 // Recorder via a `Wrap(table, WithRecorder(...))` decorator because
 // callers wrap individual Table / Index handles. vfs/crypto registers
 // a VFS once at boot, so Recorder lives on Options instead. The
@@ -178,7 +178,7 @@
 // # See also
 //
 //   - examples/features/vfs/crypto — runnable end-to-end demo.
-//   - [github.com/go-again/sqlite/vec] / [github.com/go-again/sqlite/fts]
+//   - [gosqlite.org/vec] / [gosqlite.org/fts]
 //     — both compose with this VFS transparently. The same Recorder-
 //     shaped observability surface is parallel across all three.
 package crypto

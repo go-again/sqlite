@@ -1,5 +1,5 @@
 // from-mattn: shows that swapping the blank import from
-// "github.com/mattn/go-sqlite3" to "github.com/go-again/sqlite" needs no other
+// "github.com/mattn/go-sqlite3" to "gosqlite.org" needs no other
 // code changes. The driver name "sqlite3" still works, all the DSN _* flags
 // you used with mattn still work, and the SQLiteDriver / SQLiteConn / Error
 // types are exposed under the same names via type aliases.
@@ -14,7 +14,7 @@ import (
 	// The only line that needs to change in a mattn-based project is this
 	// import path. Everything else — sql.Open("sqlite3", ...), DSN flags,
 	// SQLiteDriver literals — stays the same.
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 func main() {

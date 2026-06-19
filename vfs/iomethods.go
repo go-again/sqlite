@@ -6,7 +6,7 @@ import (
 	"modernc.org/libc"
 	sqlite3 "modernc.org/sqlite/lib"
 
-	"github.com/go-again/sqlite/internal/cabi"
+	"gosqlite.org/internal/cabi"
 )
 
 // initIoMethods builds the single, shared io-methods table every file

@@ -14,12 +14,12 @@ import (
 	"fmt"
 	"log"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/array"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/array"
 
 	// Blank-import auto-registers the array module on every connection
 	// the driver opens.
-	_ "github.com/go-again/sqlite/ext/array/auto"
+	_ "gosqlite.org/ext/array/auto"
 )
 
 func main() {

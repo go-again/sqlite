@@ -7,8 +7,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	_ "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vec"
+	_ "gosqlite.org"
+	"gosqlite.org/vec"
 )
 
 // docModel is a typical gorm-managed model; the vec sidecar table is keyed

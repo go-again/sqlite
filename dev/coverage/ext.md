@@ -95,11 +95,11 @@ Two entry styles per extension; consumers pick whichever fits their wiring:
 
 ```go
 // Explicit — register on a specific conn (the per-conn idiom for hooks).
-import "github.com/go-again/sqlite/ext/regexp"
+import "gosqlite.org/ext/regexp"
 regexp.Register(c)
 
 // Implicit — blank-import auto-wires via ConnectHook on every open.
-import _ "github.com/go-again/sqlite/ext/regexp/auto"
+import _ "gosqlite.org/ext/regexp/auto"
 ```
 
 The explicit form is the canonical entry; the blank-import `auto` sub-package is a thin shim that calls `Register` from a `ConnectHook` so registration survives connection pool churn.

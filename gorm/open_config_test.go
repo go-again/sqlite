@@ -11,8 +11,8 @@ import (
 
 	"gorm.io/gorm"
 
-	sqlite "github.com/go-again/sqlite"
-	sqlitegorm "github.com/go-again/sqlite/gorm"
+	sqlite "gosqlite.org"
+	sqlitegorm "gosqlite.org/gorm"
 )
 
 type row struct {

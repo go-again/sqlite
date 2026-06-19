@@ -39,8 +39,8 @@ import (
 	"strings"
 	"sync"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/internal/sqlid"
+	sqlite "gosqlite.org"
+	"gosqlite.org/internal/sqlid"
 )
 
 // ModuleName is the name the vtab registers under: `statement`.
@@ -51,7 +51,7 @@ const ModuleName = "statement"
 // Registration is per-connection. For pool-wide install via
 // [sqlite.Driver.ConnectHook], blank-import the auto sub-package:
 //
-//	import _ "github.com/go-again/sqlite/ext/statement/auto"
+//	import _ "gosqlite.org/ext/statement/auto"
 func Register(c *sqlite.Conn) error {
 	return c.CreateModule(ModuleName, ctor)
 }

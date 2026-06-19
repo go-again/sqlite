@@ -11,7 +11,7 @@ import (
 	"errors"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // OpenPinned opens an in-memory *sql.DB on the named driver (typically

@@ -1,14 +1,14 @@
 ---
 name: full-text-search
-description: Use when adding keyword, full-text, or FTS5/BM25 search to a Go app with go-again/sqlite — the typed fts.Index[K, V] API, tokenizers (incl. custom Go tokenizers), query builder, ranking, snippet/highlight.
+description: Use when adding keyword, full-text, or FTS5/BM25 search to a Go app with gosqlite — the typed fts.Index[K, V] API, tokenizers (incl. custom Go tokenizers), query builder, ranking, snippet/highlight.
 ---
 
 # Full-text search (FTS5)
 
 ```go
 import (
-	_ "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/fts"
+	_ "gosqlite.org"
+	"gosqlite.org/fts"
 )
 
 idx, _ := fts.New[int64, string](ctx, db, "docs", fts.Options{

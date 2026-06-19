@@ -16,7 +16,7 @@ import (
 	"os"
 	"strings"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // UTF8BOM is the UTF-8 byte-order mark (U+FEFF encoded as UTF-8). Some

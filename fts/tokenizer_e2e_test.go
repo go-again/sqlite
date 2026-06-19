@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-again/sqlite/fts"
+	"gosqlite.org/fts"
 )
 
 // TestTokenizer_NoInjectionViaTokenchars is the end-to-end proof for sweep #3

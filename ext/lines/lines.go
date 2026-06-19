@@ -20,8 +20,8 @@
 // # Usage
 //
 //	import (
-//	    sqlite "github.com/go-again/sqlite"
-//	    "github.com/go-again/sqlite/ext/lines"
+//	    sqlite "gosqlite.org"
+//	    "gosqlite.org/ext/lines"
 //	)
 //
 //	if err := lines.Register(conn); err != nil { ... }
@@ -32,7 +32,7 @@
 //
 // Blank-import auto-registration uses os-backed file access:
 //
-//	import _ "github.com/go-again/sqlite/ext/lines/auto"
+//	import _ "gosqlite.org/ext/lines/auto"
 //
 // Ported from [ncruces/ext/lines].
 //
@@ -47,9 +47,9 @@ import (
 	"io"
 	"io/fs"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/internal/filevtab"
-	"github.com/go-again/sqlite/internal/sqlid"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/internal/filevtab"
+	"gosqlite.org/internal/sqlid"
 )
 
 // ModuleName is the SQL module name: `lines`.

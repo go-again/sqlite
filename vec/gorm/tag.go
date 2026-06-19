@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-again/sqlite/vec"
+	"gosqlite.org/vec"
 )
 
 // TagName is the struct tag key we look for. We deliberately do NOT

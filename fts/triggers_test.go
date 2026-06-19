@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"testing"
 
-	"github.com/go-again/sqlite/fts"
+	"gosqlite.org/fts"
 )
 
 // setupExternalContent creates a source table and an external-content

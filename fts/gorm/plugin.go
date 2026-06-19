@@ -9,8 +9,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
 
-	"github.com/go-again/sqlite/fts"
-	"github.com/go-again/sqlite/internal/gormbridge"
+	"gosqlite.org/fts"
+	"gosqlite.org/internal/gormbridge"
 )
 
 const pluginName = "ftsgorm"

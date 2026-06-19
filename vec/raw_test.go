@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	_ "github.com/go-again/sqlite"
-	_ "github.com/go-again/sqlite/vec"
+	_ "gosqlite.org"
+	_ "gosqlite.org/vec"
 )
 
 // openRaw returns an in-memory DB pinned to a single connection, with the

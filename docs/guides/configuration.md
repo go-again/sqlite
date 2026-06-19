@@ -21,7 +21,7 @@ Four single-arg constructors cover the cases most consumers want, each with a sy
 | `sqlite.OpenShared(name)` | `sqlitegorm.OpenShared(name)` | `Config{Path: name, Mode: ModeMemory, Cache: CacheShared}` | Multi-conn in-memory tests — every open against the same name sees the same rows. |
 
 ```go
-import sqlite "github.com/go-again/sqlite"
+import sqlite "gosqlite.org"
 
 db, _ := sqlite.OpenWAL("app.db")
 defer db.Close() // db embeds *sql.DB — all database/sql methods work.
@@ -30,7 +30,7 @@ defer db.Close() // db embeds *sql.DB — all database/sql methods work.
 ```go
 import (
 	"gorm.io/gorm"
-	sqlitegorm "github.com/go-again/sqlite/gorm"
+	sqlitegorm "gosqlite.org/gorm"
 )
 
 db, _ := gorm.Open(sqlitegorm.OpenWAL("app.db"), &gorm.Config{})
@@ -41,7 +41,7 @@ db, _ := gorm.Open(sqlitegorm.OpenWAL("app.db"), &gorm.Config{})
 ## The typed Config
 
 ```go
-import sqlite "github.com/go-again/sqlite"
+import sqlite "gosqlite.org"
 
 db, err := sqlite.Open(sqlite.Config{
 	Path:    "myapp.db",

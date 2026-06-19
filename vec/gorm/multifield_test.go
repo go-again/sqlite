@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	vecgorm "github.com/go-again/sqlite/vec/gorm"
+	vecgorm "gosqlite.org/vec/gorm"
 )
 
 // MultiEmbedDoc has two vec-tagged fields. Migrate creates two sidecar

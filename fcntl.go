@@ -2,7 +2,7 @@
 // Use of this source code is governed by the Apache 2.0 license that can be
 // found in the LICENSE file.
 
-package sqlite // import "github.com/go-again/sqlite"
+package sqlite // import "gosqlite.org"
 
 import (
 	"fmt"
@@ -25,7 +25,7 @@ type FileControl interface {
 	// Query (n<0) or set (n>=0) SQLITE_FCNTL_RESERVE_BYTES for dbName.
 	// Returns the resulting reserved-bytes count. Reserved bytes are an
 	// unused area at the end of each page available to extensions like
-	// the checksum VFS (see github.com/go-again/sqlite/vfs/cksm).
+	// the checksum VFS (see gosqlite.org/vfs/cksm).
 	// Setting the value on a non-empty database does not retroactively
 	// rewrite existing pages — VACUUM the database after setting it so
 	// that every page is rebuilt with the new trailer width.
@@ -65,7 +65,7 @@ func (c *conn) FileControlReserveBytes(dbName string, n int) (int, error) {
 // for the primary database) and VACUUMs so every existing page is
 // rewritten with the 8-byte trailer in place. After the call the
 // header's reserved_bytes byte reads 8 and any cksm-flavored VFS
-// wrapping the connection (typically [github.com/go-again/sqlite/vfs/cksm])
+// wrapping the connection (typically [gosqlite.org/vfs/cksm])
 // will start computing + verifying page checksums.
 //
 // Idempotent — if reserved_bytes is already 8 the call is a no-op.

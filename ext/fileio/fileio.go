@@ -58,7 +58,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // Register installs readfile, writefile, lsmode, and the fsdir vtab on c

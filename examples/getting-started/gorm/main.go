@@ -30,9 +30,9 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
-	sqlite "github.com/go-again/sqlite"
-	sqlitegorm "github.com/go-again/sqlite/gorm"
-	"github.com/go-again/sqlite/vfs/crypto"
+	sqlite "gosqlite.org"
+	sqlitegorm "gosqlite.org/gorm"
+	"gosqlite.org/vfs/crypto"
 )
 
 type Note struct {

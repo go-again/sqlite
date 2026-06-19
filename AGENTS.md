@@ -8,7 +8,7 @@ This file is canonical; `CLAUDE.md` is a pointer to it. Deep C-ABI internals liv
 
 ## What this package is
 
-`github.com/go-again/sqlite` is a **CGo-free** SQLite driver for Go, a drop-in replacement for:
+`gosqlite.org` is a **CGo-free** SQLite driver for Go, a drop-in replacement for:
 
 - `github.com/mattn/go-sqlite3` — the C-bound driver; we register as `"sqlite3"`.
 - `modernc.org/sqlite` — the upstream CGo-free driver this fork builds on; we register as `"sqlite"`.

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/go-again/sqlite/internal/gormbridge"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
+	"gosqlite.org/internal/gormbridge"
 )
 
 // pkValue extracts the model's primary key as the value the sidecar binds:

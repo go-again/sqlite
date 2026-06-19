@@ -1,6 +1,6 @@
 ---
 name: vector-search
-description: Use when adding semantic, similarity, embedding, or KNN vector search to a Go app with go-again/sqlite — the typed vec.Table API over sqlite-vec, distance metrics, encodings, quantization, and metadata filters.
+description: Use when adding semantic, similarity, embedding, or KNN vector search to a Go app with gosqlite — the typed vec.Table API over sqlite-vec, distance metrics, encodings, quantization, and metadata filters.
 ---
 
 # Vector search (sqlite-vec)
@@ -9,8 +9,8 @@ Blank-importing `vec` auto-registers the sqlite-vec extension on every connectio
 
 ```go
 import (
-	_ "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vec"
+	_ "gosqlite.org"
+	"gosqlite.org/vec"
 )
 
 tbl, _ := vec.Create(ctx, db, "docs", 8, vec.Options{Metric: vec.Cosine})

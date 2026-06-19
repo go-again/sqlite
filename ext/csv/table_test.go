@@ -9,9 +9,9 @@ import (
 	"testing"
 	"testing/fstest"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/csv"
-	"github.com/go-again/sqlite/internal/testhelp"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/csv"
+	"gosqlite.org/internal/testhelp"
 )
 
 // openCSVDB returns a *sql.DB with the csv module (rooted at fsys) on every

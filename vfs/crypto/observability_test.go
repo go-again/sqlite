@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vfs/crypto"
+	sqlite "gosqlite.org"
+	"gosqlite.org/vfs/crypto"
 )
 
 // captureRecorder collects OnRead / OnWrite / OnSync events for assertion.

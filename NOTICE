@@ -1,5 +1,5 @@
-github.com/go-again/sqlite
-Copyright 2026 The go-again/sqlite Authors
+gosqlite.org
+Copyright 2026 The gosqlite Authors
 
 This product includes software developed at the following projects:
 
@@ -34,7 +34,7 @@ Licensed under the MIT License; see LICENSE.glebarez for the full text.
 ============================================================================
 
 The `gorm/` sub-package ports the gorm.io/driver/sqlite (glebarez) dialector
-to use the go-again driver. The ported files retain glebarez's MIT
+to use the gosqlite driver. The ported files retain glebarez's MIT
 attribution alongside this project's notice.
 
 ============================================================================

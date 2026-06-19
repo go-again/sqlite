@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // Register installs every statistics aggregate / window function plus

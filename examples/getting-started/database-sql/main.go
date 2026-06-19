@@ -16,7 +16,7 @@ import (
 	"fmt"
 	"log"
 
-	_ "github.com/go-again/sqlite" // registers the "sqlite" (and "sqlite3") driver
+	_ "gosqlite.org" // registers the "sqlite" (and "sqlite3") driver
 )
 
 type author struct {

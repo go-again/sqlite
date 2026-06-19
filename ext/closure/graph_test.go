@@ -7,8 +7,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/go-again/sqlite/ext/closure"
-	"github.com/go-again/sqlite/internal/testhelp"
+	"gosqlite.org/ext/closure"
+	"gosqlite.org/internal/testhelp"
 )
 
 // openGraphDB returns a *sql.DB with the transitive_closure module on

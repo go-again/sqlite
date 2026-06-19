@@ -5,8 +5,8 @@
 // # Usage
 //
 //	import (
-//	    sqlite "github.com/go-again/sqlite"
-//	    "github.com/go-again/sqlite/ext/csv"
+//	    sqlite "gosqlite.org"
+//	    "gosqlite.org/ext/csv"
 //	)
 //
 //	if err := csv.Register(conn); err != nil { ... }
@@ -69,7 +69,7 @@
 //
 // # Blank-import auto-registration
 //
-//	import _ "github.com/go-again/sqlite/ext/csv/auto"
+//	import _ "gosqlite.org/ext/csv/auto"
 //
 // Auto-registration uses [Register] (os-backed file access). For
 // sandboxed deployments, call [RegisterFS] from your own ConnectHook.

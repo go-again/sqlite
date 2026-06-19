@@ -2,12 +2,12 @@
 // so every new connection registers the `spellfix1` vtab. Blank-import
 // to opt in:
 //
-//	import _ "github.com/go-again/sqlite/ext/spellfix1/auto"
+//	import _ "gosqlite.org/ext/spellfix1/auto"
 package auto
 
 import (
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/spellfix1"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/spellfix1"
 )
 
 func init() {

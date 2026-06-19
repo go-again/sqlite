@@ -1,6 +1,6 @@
 ---
 title: Build tags
-description: Mattn's SQLite compile-time build tags and their go-again status — most are no-ops because the features are always on.
+description: Mattn's SQLite compile-time build tags and their gosqlite status — most are no-ops because the features are always on.
 sidebar:
   order: 24
 ---
@@ -9,7 +9,7 @@ sidebar:
 
 Mattn used build tags to enable SQLite compile-time features. Here those features are **already enabled by default** (modernc compiles SQLite with them), so the build tags become no-ops:
 
-| mattn build tag | go-again status |
+| mattn build tag | gosqlite status |
 |---|---|
 | `sqlite_fts5` | always on |
 | `sqlite_json` (JSON1) | always on |

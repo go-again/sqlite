@@ -8,7 +8,7 @@ import (
 	"iter"
 	"strings"
 
-	"github.com/go-again/sqlite/internal/sqlid"
+	"gosqlite.org/internal/sqlid"
 )
 
 // Attr is a single (key, value) attribute. K is the rowid mapping (typically

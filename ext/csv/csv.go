@@ -10,9 +10,9 @@ import (
 	"strconv"
 	"strings"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/internal/filevtab"
-	"github.com/go-again/sqlite/internal/sqlid"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/internal/filevtab"
+	"gosqlite.org/internal/sqlid"
 )
 
 // ModuleName is the name the vtab registers under: `csv`.

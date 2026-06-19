@@ -1,11 +1,11 @@
 ---
-name: using-go-again-sqlite
-description: Use when opening a SQLite database in Go with github.com/go-again/sqlite, choosing the "sqlite" vs "sqlite3" driver name, or deciding which sub-package to reach for. The starting point for any task using this driver.
+name: using-gosqlite
+description: Use when opening a SQLite database in Go with gosqlite.org, choosing the "sqlite" vs "sqlite3" driver name, or deciding which sub-package to reach for. The starting point for any task using this driver.
 ---
 
-# Using go-again/sqlite
+# Using gosqlite
 
-A CGo-free SQLite driver + ecosystem for Go. Install: `go get github.com/go-again/sqlite`. No CGo, no C toolchain.
+A CGo-free SQLite driver + ecosystem for Go. Install: `go get gosqlite.org`. No CGo, no C toolchain.
 
 ## Opening a database
 
@@ -13,11 +13,11 @@ The driver registers under two names (same singleton): `"sqlite"` (use for new c
 
 ```go
 // 1. Plain database/sql.
-import _ "github.com/go-again/sqlite"
+import _ "gosqlite.org"
 db, _ := sql.Open("sqlite", "file:app.db")
 
 // 2. One-line presets (root pkg embeds *sql.DB).
-import sqlite "github.com/go-again/sqlite"
+import sqlite "gosqlite.org"
 db, _ := sqlite.OpenWAL("app.db")        // WAL + busy_timeout=5s + foreign_keys=on
 mem, _ := sqlite.OpenInMemory()          // private in-memory
 shared, _ := sqlite.OpenShared("name")   // shared in-memory (multi-conn tests)
@@ -39,14 +39,14 @@ For an in-memory database that multiple connections must share, use `OpenShared(
 
 | Goal | Package | Skill |
 |---|---|---|
-| ORM | `github.com/go-again/sqlite/gorm` | `gorm` |
-| Vector / similarity search | `…/vec` (+ `…/vec/gorm`) | `vector-search` |
-| Full-text search | `…/fts` (+ `…/fts/gorm`) | `full-text-search` |
-| Combine vec + fts results | `…/fusion` | `hybrid-search` |
-| Encryption / checksums / in-memory / custom storage | `…/vfs/...` | `encryption-and-vfs`, `custom-vfs` |
-| Bound the page-cache heap | `…/pcache` | (page cache: `pcache.InstallBoundedLRU(maxPages)` before first open) |
-| SQL functions (regexp, uuid, hash, …) | `…/ext/<name>` | `extensions` |
-| Migrations / savepoints / scalar reads | `…/sqlitex` | — |
+| ORM | `gosqlite.org/gorm` | `gorm` |
+| Vector / similarity search | `gosqlite.org/vec` (+ `gosqlite.org/vec/gorm`) | `vector-search` |
+| Full-text search | `gosqlite.org/fts` (+ `gosqlite.org/fts/gorm`) | `full-text-search` |
+| Combine vec + fts results | `gosqlite.org/fusion` | `hybrid-search` |
+| Encryption / checksums / in-memory / custom storage | `gosqlite.org/vfs/...` | `encryption-and-vfs`, `custom-vfs` |
+| Bound the page-cache heap | `gosqlite.org/pcache` | (page cache: `pcache.InstallBoundedLRU(maxPages)` before first open) |
+| SQL functions (regexp, uuid, hash, …) | `gosqlite.org/ext/<name>` | `extensions` |
+| Migrations / savepoints / scalar reads | `gosqlite.org/sqlitex` | — |
 
 ## Per-connection work (hooks, custom functions, vtab registration)
 

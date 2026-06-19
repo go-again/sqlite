@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/go-again/sqlite/fts"
+	"gosqlite.org/fts"
 )
 
 // TestContentless_RowidsOnly creates an FTS5 table in contentless mode

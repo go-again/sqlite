@@ -2,12 +2,12 @@
 // so every new connection registers the statistical aggregate / window
 // function lineup. Blank-import to opt in:
 //
-//	import _ "github.com/go-again/sqlite/ext/stats/auto"
+//	import _ "gosqlite.org/ext/stats/auto"
 package auto
 
 import (
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/stats"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/stats"
 )
 
 func init() {

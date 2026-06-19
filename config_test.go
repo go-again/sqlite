@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vfs/crypto"
+	sqlite "gosqlite.org"
+	"gosqlite.org/vfs/crypto"
 )
 
 // TestOpen_Plain confirms the new entry works for the no-encryption

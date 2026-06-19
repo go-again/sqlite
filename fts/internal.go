@@ -3,7 +3,7 @@ package fts
 import (
 	"fmt"
 
-	"github.com/go-again/sqlite/internal/sqlid"
+	"gosqlite.org/internal/sqlid"
 )
 
 // QuoteIdent returns name in backticks, escaping any embedded backticks.

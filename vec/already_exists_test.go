@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vec"
+	sqlite "gosqlite.org"
+	"gosqlite.org/vec"
 )
 
 // TestErrAlreadyExists_StableMessageFragment pins the upstream message

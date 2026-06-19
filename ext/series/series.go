@@ -13,7 +13,7 @@
 package series
 
 import (
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // ModuleName is the name the table-valued function registers under.
@@ -24,7 +24,7 @@ const ModuleName = "generate_series"
 // Per-connection registration. For pool-wide install, blank-import the auto
 // sub-package:
 //
-//	import _ "github.com/go-again/sqlite/ext/series/auto"
+//	import _ "gosqlite.org/ext/series/auto"
 func Register(c *sqlite.Conn) error {
 	return c.CreateEponymousModule(ModuleName, ctor)
 }

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/go-again/sqlite/vec"
+	"gosqlite.org/vec"
 )
 
 // TestTable_Accessors pins the public accessor surface (Name / Dim /

@@ -8,8 +8,8 @@ import (
 
 	"gorm.io/gorm"
 
-	rootsqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vfs/crypto"
+	rootsqlite "gosqlite.org"
+	"gosqlite.org/vfs/crypto"
 )
 
 // DB wraps *gorm.DB so the caller can `defer db.Close()` without

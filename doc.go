@@ -11,7 +11,7 @@
 // defer Close that bundles the connection pool AND any encryption
 // VFS lifecycle:
 //
-//	import sqlite "github.com/go-again/sqlite"
+//	import sqlite "gosqlite.org"
 //
 //	db, err := sqlite.Open(sqlite.Config{
 //	    Path:    "myapp.db",
@@ -57,7 +57,7 @@
 //	import (
 //	    "database/sql"
 //
-//	    _ "github.com/go-again/sqlite"
+//	    _ "gosqlite.org"
 //	)
 //
 //	db, _ := sql.Open("sqlite",  ":memory:") // modernc-style name
@@ -120,7 +120,7 @@
 //	    "errors"
 //	    "fmt"
 //
-//	    sqlite "github.com/go-again/sqlite"
+//	    sqlite "gosqlite.org"
 //	)
 //
 //	func main() {
@@ -150,38 +150,38 @@
 // Higher-level capabilities live in sibling packages, each with its
 // own doc:
 //
-//   - github.com/go-again/sqlite/gorm — gorm dialector + Migrator,
+//   - gosqlite.org/gorm — gorm dialector + Migrator,
 //     drop-in for gorm.io/driver/sqlite and glebarez/sqlite.
-//   - github.com/go-again/sqlite/vec — sqlite-vec vector search
+//   - gosqlite.org/vec — sqlite-vec vector search
 //     (auto-registered extension + typed Go API).
-//   - github.com/go-again/sqlite/vec/gorm — tag-driven vec sidecars
+//   - gosqlite.org/vec/gorm — tag-driven vec sidecars
 //     wired into gorm models.
-//   - github.com/go-again/sqlite/fts — typed FTS5 full-text search
+//   - gosqlite.org/fts — typed FTS5 full-text search
 //     (Index[K, V], query builder, tokenizers, BM25 + snippet /
 //     highlight).
-//   - github.com/go-again/sqlite/fts/gorm — tag-driven FTS5 indexes
+//   - gosqlite.org/fts/gorm — tag-driven FTS5 indexes
 //     wired into gorm models (external / in-table / contentless
 //     modes).
-//   - github.com/go-again/sqlite/fusion — rank-fusion helpers
+//   - gosqlite.org/fusion — rank-fusion helpers
 //     (Reciprocal Rank Fusion) for combining vec.KNN and fts.Search
 //     results into a single hybrid-search ranking.
-//   - github.com/go-again/sqlite/vfs — io/fs.FS-backed read-only
+//   - gosqlite.org/vfs — io/fs.FS-backed read-only
 //     databases (e.g. opening a SQLite file out of an embed.FS). Also
 //     exposes vfs.NewReader(io.ReaderAt, size) for the simpler
 //     direct-buffer case.
-//   - github.com/go-again/sqlite/vfs/crypto — pure-Go encryption-at-rest
+//   - gosqlite.org/vfs/crypto — pure-Go encryption-at-rest
 //     VFS (Adiantum or AES-XTS-256, transparent page-level encryption
 //     of main DB + journal + WAL + temp files).
-//   - github.com/go-again/sqlite/vfs/cksm — pure-Go page-level checksum
+//   - gosqlite.org/vfs/cksm — pure-Go page-level checksum
 //     VFS (Fletcher-style 8-byte trailer per page, on-disk compatible
 //     with SQLite's cksumvfs). Composes beneath vfs/crypto.
-//   - github.com/go-again/sqlite/vfs/mvcc — in-memory MVCC VFS with
+//   - gosqlite.org/vfs/mvcc — in-memory MVCC VFS with
 //     snapshot-isolation reads + atomic publish on commit; shared
 //     (file:/name) and private (file:name) DBs.
-//   - github.com/go-again/sqlite/vfs/memdb — plain in-memory VFS with
+//   - gosqlite.org/vfs/memdb — plain in-memory VFS with
 //     direct per-page store, no MVCC; smaller-surface alternative to
 //     vfs/mvcc for tests and scratch DBs.
-//   - github.com/go-again/sqlite/ext — opt-in loadable Go extensions:
+//   - gosqlite.org/ext — opt-in loadable Go extensions:
 //     array, blobio, bloom, closure, csv, fileio, hash, ipaddr, lines,
 //     pivot, regexp, spellfix1, statement, stats, unicode, uuid,
 //     zorder. Each sub-package is independent — pick what you need and

@@ -15,8 +15,8 @@ import (
 	"io/fs"
 	"log"
 
-	_ "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/sqlitex"
+	_ "gosqlite.org"
+	"gosqlite.org/sqlitex"
 )
 
 //go:embed migrations/*.sql

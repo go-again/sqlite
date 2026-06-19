@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	_ "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/fts"
+	_ "gosqlite.org"
+	"gosqlite.org/fts"
 )
 
 // fixtureCorpus is a small but linguistically varied dataset used across

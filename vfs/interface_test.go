@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vfs"
+	sqlite "gosqlite.org"
+	"gosqlite.org/vfs"
 	sqlite3 "modernc.org/sqlite/lib"
 )
 

@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	vecgorm "github.com/go-again/sqlite/vec/gorm"
 	"gorm.io/gorm"
+	vecgorm "gosqlite.org/vec/gorm"
 )
 
 // SoftStringDoc is a string-PK model with gorm soft-delete.

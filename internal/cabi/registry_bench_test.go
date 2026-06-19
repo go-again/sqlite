@@ -3,7 +3,7 @@ package cabi_test
 import (
 	"testing"
 
-	"github.com/go-again/sqlite/internal/cabi"
+	"gosqlite.org/internal/cabi"
 )
 
 type benchEntry struct{ id int }

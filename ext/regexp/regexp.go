@@ -24,18 +24,18 @@
 // # Usage
 //
 //	import (
-//	    sqlite "github.com/go-again/sqlite"
-//	    "github.com/go-again/sqlite/ext/regexp"
+//	    sqlite "gosqlite.org"
+//	    "gosqlite.org/ext/regexp"
 //	)
 //
 //	if err := regexp.Register(conn); err != nil { ... }
 //
 //	rows, _ := db.Query(`SELECT name FROM users WHERE name REGEXP ?`, `^[A-Z]`)
 //
-// For pool-wide install via [github.com/go-again/sqlite.Driver.ConnectHook],
+// For pool-wide install via [gosqlite.org.Driver.ConnectHook],
 // blank-import the auto sub-package:
 //
-//	import _ "github.com/go-again/sqlite/ext/regexp/auto"
+//	import _ "gosqlite.org/ext/regexp/auto"
 //
 // [RE2 syntax]: https://github.com/google/re2/wiki/Syntax
 // [ncruces/ext/regexp]: https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/regexp
@@ -49,7 +49,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // Exported names of the SQL functions Register installs. Exposed as

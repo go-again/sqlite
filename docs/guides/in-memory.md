@@ -13,7 +13,7 @@ Several VFSes back a database with memory or a read-only buffer instead of the O
 
 ```go
 // Snapshot-isolation reads + atomic-publish writes.
-import "github.com/go-again/sqlite/vfs/mvcc"
+import "gosqlite.org/vfs/mvcc"
 name, fs, _ := mvcc.New(mvcc.Options{})
 defer fs.Close()
 db, _ := sql.Open("sqlite", "file:/shared.db?vfs="+name)   // SHARED
@@ -22,7 +22,7 @@ db2, _ := sql.Open("sqlite", "file:scratch.db?vfs="+name)  // PRIVATE
 
 ```go
 // Direct per-page store, no MVCC — writes visible to readers instantly.
-import "github.com/go-again/sqlite/vfs/memdb"
+import "gosqlite.org/vfs/memdb"
 name, fs, _ := memdb.New(memdb.Options{})
 defer fs.Close()
 db, _ := sql.Open("sqlite", "file:/cache.db?vfs="+name)
@@ -35,7 +35,7 @@ For simple shared in-memory tests without a VFS, `sqlite.OpenShared(name)` is th
 ## embed.FS-backed read-only databases
 
 ```go
-import "github.com/go-again/sqlite/vfs"
+import "gosqlite.org/vfs"
 
 //go:embed seed.db
 var seed embed.FS

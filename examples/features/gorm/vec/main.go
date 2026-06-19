@@ -16,9 +16,9 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	_ "github.com/go-again/sqlite"
-	sqlite "github.com/go-again/sqlite/gorm"
-	"github.com/go-again/sqlite/vec"
+	_ "gosqlite.org"
+	sqlitegorm "gosqlite.org/gorm"
+	"gosqlite.org/vec"
 )
 
 // Document is a typical gorm model. The ID is what the vec.Table's rowid
@@ -35,7 +35,7 @@ func main() {
 	// 1. Open gorm normally. Use mode=memory + cache=shared so the gorm
 	//    pool and the *sql.DB we hand to vec.Create see the same database.
 	dsn := "file:gorm-vec-demo?mode=memory&cache=shared"
-	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+	gdb, err := gorm.Open(sqlitegorm.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {

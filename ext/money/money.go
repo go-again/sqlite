@@ -21,8 +21,8 @@ import (
 	"strconv"
 	"strings"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/internal/bigdec"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/internal/bigdec"
 )
 
 const scale = 2 // money is stored to the cent
@@ -32,7 +32,7 @@ const scale = 2 // money is stored to the cent
 // Per-connection registration. For pool-wide install, blank-import the
 // auto sub-package:
 //
-//	import _ "github.com/go-again/sqlite/ext/money/auto"
+//	import _ "gosqlite.org/ext/money/auto"
 func Register(c *sqlite.Conn) error {
 	return errors.Join(
 		c.RegisterFunc("money", normalize, true),

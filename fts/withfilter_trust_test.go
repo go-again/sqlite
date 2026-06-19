@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-again/sqlite/fts"
+	"gosqlite.org/fts"
 )
 
 // TestWithFilter_ArgsAreBoundNotInterpolated pins the round-4 K3 trust

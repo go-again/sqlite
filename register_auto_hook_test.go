@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // TestRegisterAutoHook_ChainsAndPreservesPrior pins the load-bearing

@@ -14,9 +14,9 @@ import (
 	"fmt"
 	"log"
 
-	_ "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/closure"
-	_ "github.com/go-again/sqlite/ext/closure/auto" // registers the vtab module on every conn
+	_ "gosqlite.org"
+	"gosqlite.org/ext/closure"
+	_ "gosqlite.org/ext/closure/auto" // registers the vtab module on every conn
 )
 
 func main() {

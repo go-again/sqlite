@@ -2,12 +2,12 @@
 // so every new connection registers the IP / CIDR helpers. Blank-import to
 // opt in:
 //
-//	import _ "github.com/go-again/sqlite/ext/ipaddr/auto"
+//	import _ "gosqlite.org/ext/ipaddr/auto"
 package auto
 
 import (
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/ipaddr"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/ipaddr"
 )
 
 func init() {

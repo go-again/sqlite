@@ -1,6 +1,6 @@
 ---
 name: hybrid-search
-description: Use when combining vector (semantic) and full-text (lexical) search results into one ranking in a Go app with go-again/sqlite — Reciprocal Rank Fusion via the fusion package.
+description: Use when combining vector (semantic) and full-text (lexical) search results into one ranking in a Go app with gosqlite — Reciprocal Rank Fusion via the fusion package.
 ---
 
 # Hybrid search (semantic + lexical)
@@ -8,7 +8,7 @@ description: Use when combining vector (semantic) and full-text (lexical) search
 The `fusion` package merges two ranked result sets via Reciprocal Rank Fusion (Cormack 2009). Pure Go, no SQLite dependency.
 
 ```go
-import "github.com/go-again/sqlite/fusion"
+import "gosqlite.org/fusion"
 
 vecHits, _ := tbl.KNNSlice(ctx, queryVec, 50)               // see vector-search
 ftsHits, _ := idx.SearchSlice(ctx, fts.Term("brown fox"), fts.WithLimit(50)) // see full-text-search

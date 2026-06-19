@@ -15,7 +15,7 @@
 //
 // Composition note: cksm wraps the default OS-level VFS by intercepting
 // xRead / xWrite at the page boundary. To stack with
-// [github.com/go-again/sqlite/vfs/crypto] for checksummed-then-encrypted
+// [gosqlite.org/vfs/crypto] for checksummed-then-encrypted
 // storage, register cksm first and pass its name as the crypto VFS's
 // [Options.WrapVFS]; cksm itself also accepts an [Options.WrapVFS] when
 // callers want to layer it on top of some other registered VFS instead

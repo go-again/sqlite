@@ -1,6 +1,6 @@
 package cksm_test
 
-import "github.com/go-again/sqlite/internal/raceskip"
+import "gosqlite.org/internal/raceskip"
 
 // raceEnabled mirrors the helper used elsewhere in the repo to skip
 // VFS open paths under -race on darwin: modernc's

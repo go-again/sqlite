@@ -19,8 +19,8 @@
 // # Usage
 //
 //	import (
-//	    sqlite "github.com/go-again/sqlite"
-//	    "github.com/go-again/sqlite/ext/fuzzy"
+//	    sqlite "gosqlite.org"
+//	    "gosqlite.org/ext/fuzzy"
 //	)
 //
 //	fuzzy.Register(conn) // or blank-import ".../ext/fuzzy/auto" for pool-wide
@@ -31,7 +31,7 @@ import (
 	"errors"
 	"fmt"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // Register installs the fuzzy SQL functions on c. All are deterministic.

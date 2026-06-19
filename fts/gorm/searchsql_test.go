@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-again/sqlite/fts"
-	ftsgorm "github.com/go-again/sqlite/fts/gorm"
+	"gosqlite.org/fts"
+	ftsgorm "gosqlite.org/fts/gorm"
 )
 
 // TestSearchSQL_Bridge_IncludesSoftDelete_External confirms the bridge's

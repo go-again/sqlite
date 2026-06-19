@@ -8,10 +8,10 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/go-again/sqlite/internal/gormbridge"
-	"github.com/go-again/sqlite/vec"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
+	"gosqlite.org/internal/gormbridge"
+	"gosqlite.org/vec"
 )
 
 // isIntegerPK reports whether the primary-key field has an integer Go kind (the
@@ -172,7 +172,7 @@ func checkDimMismatch(db *gorm.DB, m meta) error {
 
 // DropSidecar drops the sidecar virtual table(s) for the given model.
 // Use in test cleanup or when removing a model permanently. The
-// gorm.io/go-again Migrator's DropTable path already invokes this
+// gorm Migrator's DropTable path already invokes this
 // via DropTableHook below, so users calling `db.Migrator().DropTable(&Model{})`
 // don't need to call DropSidecar separately.
 func DropSidecar(db *gorm.DB, model any) error {
@@ -183,7 +183,7 @@ func DropSidecar(db *gorm.DB, model any) error {
 	return p.dropSidecar(db, model)
 }
 
-// DropTableHook implements the sqlite-go-again gorm dialector's hook
+// DropTableHook implements the gosqlite gorm dialector's hook
 // interface so `db.Migrator().DropTable(&Model{})` automatically
 // cascades into the vec0 sidecar. The dialector iterates plugins and
 // calls this method before issuing the source-table DROP.

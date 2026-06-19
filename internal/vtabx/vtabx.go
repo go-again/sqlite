@@ -14,7 +14,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/go-again/sqlite/internal/sqlid"
+	"gosqlite.org/internal/sqlid"
 )
 
 // Create runs CREATE VIRTUAL TABLE [IF NOT EXISTS] name USING module(params…)

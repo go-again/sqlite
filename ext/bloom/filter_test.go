@@ -8,9 +8,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/bloom"
-	"github.com/go-again/sqlite/internal/testhelp"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/bloom"
+	"gosqlite.org/internal/testhelp"
 )
 
 // openFilterDB returns a *sql.DB with the bloom module on every connection

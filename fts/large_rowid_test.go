@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/go-again/sqlite/fts"
+	"gosqlite.org/fts"
 )
 
 // TestSearchPreservesInt64RowidAbove2_53 pins the contract that rowids

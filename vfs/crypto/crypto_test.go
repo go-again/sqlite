@@ -14,8 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vfs/crypto"
+	sqlite "gosqlite.org"
+	"gosqlite.org/vfs/crypto"
 )
 
 // isBusy reports whether err is a SQLITE_BUSY result — expected lock

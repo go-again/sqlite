@@ -1,11 +1,11 @@
-# go-again/sqlite
+# gosqlite
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/go-again/sqlite.svg)](https://pkg.go.dev/github.com/go-again/sqlite)
+[![Go Reference](https://pkg.go.dev/badge/gosqlite.org.svg)](https://pkg.go.dev/gosqlite.org)
 
 **The comprehensive, AI-ready, CGo-free SQLite stack for Go.** One module replaces [`mattn/go-sqlite3`](https://github.com/mattn/go-sqlite3) (registers as `"sqlite3"`), [`modernc.org/sqlite`](https://gitlab.com/cznic/sqlite) (`"sqlite"`), and the [`glebarez/sqlite`](https://github.com/glebarez/sqlite) gorm dialector — then adds first-class **typed** APIs for vector search, full-text search, encryption at rest, in-memory MVCC, hybrid ranking, a user-implementable VFS, a bounded page cache, and a catalog of loadable SQL extensions. Designed so that **migrating to CGo-free and adopting advanced SQLite features is a one-line change**, and so your **AI coding agent gets it right the first time** — the repo ships [Agent Skills](skills/) that teach assistants the real API. All pure Go.
 
 ```go
-import sqlite "github.com/go-again/sqlite"
+import sqlite "gosqlite.org"
 
 db, _ := sqlite.OpenWAL("app.db") // WAL + busy_timeout=5s + foreign_keys=on
 defer db.Close()
@@ -14,7 +14,7 @@ defer db.Close()
 
 Existing mattn / modernc / glebarez / ncruces code keeps working after the import swap; the legacy `sql.Open("sqlite3", "file:...?_pragma=…")` form is still accepted. See the **[migration guide](docs/guides/migrating.md)**.
 
-## Why go-again/sqlite
+## Why gosqlite
 
 - **🤖 AI / LLM-ready — your coding agent writes correct code on the first try.** The repo ships [**Agent Skills**](skills/): task-scoped instructions (vector search, FTS5, gorm sidecars, custom VFS, migration, pitfalls) an AI assistant loads on demand, so it reaches for the *real* API instead of hallucinating one — drop `skills/` into your agent and the trial-and-error loop largely disappears. It's backed by structured, task-oriented [docs](docs/) ("I want X → do Y"), an [`AGENTS.md`](AGENTS.md) for agents working *in* the codebase, and `doc.go` on every package for pkg.go.dev. **This is the fastest way to build on SQLite with an AI pair-programmer.**
 
@@ -27,7 +27,7 @@ Existing mattn / modernc / glebarez / ncruces code keeps working after the impor
 ## Documentation
 
 - **[Getting started](docs/getting-started.md)** · **[Guides](docs/index.md)** · **[Extensions](docs/extensions/index.md)** · **[Reference](docs/index.md#reference)** — the full docs under [`docs/`](docs/).
-- **[pkg.go.dev](https://pkg.go.dev/github.com/go-again/sqlite)** — the Go API reference.
+- **[pkg.go.dev](https://pkg.go.dev/gosqlite.org)** — the Go API reference.
 - **[`skills/`](skills/)** — task recipes for AI agents *using* the package; **[`AGENTS.md`](AGENTS.md)** for agents *developing* it.
 
 ## What you get
@@ -82,7 +82,7 @@ The Go SQLite landscape has three camps: CGo bindings (mattn, zombiezen), pure-G
 ## Quick start
 
 ```go
-import sqlite "github.com/go-again/sqlite"
+import sqlite "gosqlite.org"
 
 // One-line presets, no DSN string:
 db, _ := sqlite.OpenWAL("app.db")        // production: WAL + busy_timeout + foreign_keys
@@ -102,23 +102,23 @@ Plain `database/sql` works too: `sql.Open("sqlite", "file:app.db")`. The full se
 
 | Import path | What it gives you |
 |---|---|
-| `github.com/go-again/sqlite` | the driver (registers `"sqlite"` + `"sqlite3"`) + `Config` + hooks + backup/serialize |
-| `…/gorm` | `gorm.Dialector` (drop-in for glebarez and go-gorm/sqlite) |
-| `…/vec` · `…/vec/gorm` | typed sqlite-vec `Table` · tag-driven gorm sidecars |
-| `…/fts` · `…/fts/gorm` | typed FTS5 `Index[K, V]` · tag-driven gorm sidecars |
-| `…/fusion` | RRF rank-fusion helpers (combine vec + fts results) |
-| `…/vfs` (+ `crypto`, `cksm`, `mvcc`, `memdb`) | `fs.FS`/`io.ReaderAt` adapters, the user-implementable VFS, encryption, checksums, in-memory |
-| `…/pcache` | application-controlled bounded page cache |
-| `…/sqlitex` | ergonomic `database/sql` helpers + `embed.FS` migrations |
-| `…/ext/<name>` (+ `/auto`) | opt-in loadable Go extensions — see the [catalog](docs/extensions/index.md) |
+| `gosqlite.org` | the driver (registers `"sqlite"` + `"sqlite3"`) + `Config` + hooks + backup/serialize |
+| `gosqlite.org/gorm` | `gorm.Dialector` (drop-in for glebarez and go-gorm/sqlite) |
+| `gosqlite.org/vec` · `gosqlite.org/vec/gorm` | typed sqlite-vec `Table` · tag-driven gorm sidecars |
+| `gosqlite.org/fts` · `gosqlite.org/fts/gorm` | typed FTS5 `Index[K, V]` · tag-driven gorm sidecars |
+| `gosqlite.org/fusion` | RRF rank-fusion helpers (combine vec + fts results) |
+| `gosqlite.org/vfs` (+ `crypto`, `cksm`, `mvcc`, `memdb`) | `fs.FS`/`io.ReaderAt` adapters, the user-implementable VFS, encryption, checksums, in-memory |
+| `gosqlite.org/pcache` | application-controlled bounded page cache |
+| `gosqlite.org/sqlitex` | ergonomic `database/sql` helpers + `embed.FS` migrations |
+| `gosqlite.org/ext/<name>` (+ `/auto`) | opt-in loadable Go extensions — see the [catalog](docs/extensions/index.md) |
 
 ## Migrating
 
 | Coming from | Change |
 |---|---|
-| `_ "github.com/mattn/go-sqlite3"` | → `_ "github.com/go-again/sqlite"`; `sql.Open("sqlite3", ...)` keeps working |
-| `_ "modernc.org/sqlite"` | → `_ "github.com/go-again/sqlite"`; `sql.Open("sqlite", ...)` keeps working |
-| `"github.com/glebarez/sqlite"` / `"github.com/go-gorm/sqlite"` | → `"github.com/go-again/sqlite/gorm"`; `sqlite.Open(dsn)` keeps working |
+| `_ "github.com/mattn/go-sqlite3"` | → `_ "gosqlite.org"`; `sql.Open("sqlite3", ...)` keeps working |
+| `_ "modernc.org/sqlite"` | → `_ "gosqlite.org"`; `sql.Open("sqlite", ...)` keeps working |
+| `"github.com/glebarez/sqlite"` / `"github.com/go-gorm/sqlite"` | → `"gosqlite.org/gorm"`; `sqlite.Open(dsn)` keeps working |
 | `ncruces/go-sqlite3` | partial — `database/sql` + `_pragma` DSNs swap cleanly; custom UDFs/types need a rewrite |
 
 Full per-package recipes, the `_*` DSN-flag table, and build-tag mapping: **[Migrating](docs/guides/migrating.md)**, **[DSN flags](docs/reference/dsn-flags.md)**, **[Build tags](docs/reference/build-tags.md)**. Runnable: [`examples/migrating/`](examples/migrating/).

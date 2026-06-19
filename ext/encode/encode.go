@@ -20,7 +20,7 @@ import (
 	"net/url"
 	"strings"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // Register installs the encode and decode scalar functions on c.
@@ -28,7 +28,7 @@ import (
 // Per-connection registration. For pool-wide install, blank-import the auto
 // sub-package:
 //
-//	import _ "github.com/go-again/sqlite/ext/encode/auto"
+//	import _ "gosqlite.org/ext/encode/auto"
 func Register(c *sqlite.Conn) error {
 	return errors.Join(
 		c.RegisterFunc("encode", encode, true),

@@ -7,12 +7,12 @@ sidebar:
 
 # gorm
 
-The `github.com/go-again/sqlite/gorm` sub-package is a `gorm.Dialector` — a drop-in for both `glebarez/sqlite` and the official `go-gorm/sqlite`.
+The `gosqlite.org/gorm` sub-package is a `gorm.Dialector` — a drop-in for both `glebarez/sqlite` and the official `go-gorm/sqlite`.
 
 ```go
 import (
 	"gorm.io/gorm"
-	sqlite "github.com/go-again/sqlite/gorm"
+	sqlite "gosqlite.org/gorm"
 )
 
 db, _ := gorm.Open(sqlite.Open("file:my.db?_pragma=foreign_keys(1)"), &gorm.Config{})
@@ -26,11 +26,11 @@ db, _ := gorm.Open(sqlite.Open("file:my.db?_pragma=foreign_keys(1)"), &gorm.Conf
 
 ```go
 import (
-	_ "github.com/go-again/sqlite"
-	sqlitegorm "github.com/go-again/sqlite/gorm"
-	"github.com/go-again/sqlite/fts"
-	ftsgorm "github.com/go-again/sqlite/fts/gorm"
-	vecgorm "github.com/go-again/sqlite/vec/gorm"
+	_ "gosqlite.org"
+	sqlitegorm "gosqlite.org/gorm"
+	"gosqlite.org/fts"
+	ftsgorm "gosqlite.org/fts/gorm"
+	vecgorm "gosqlite.org/vec/gorm"
 )
 
 type Document struct {

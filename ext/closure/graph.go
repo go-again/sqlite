@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/go-again/sqlite/internal/sqlid"
-	"github.com/go-again/sqlite/internal/vtabx"
+	"gosqlite.org/internal/sqlid"
+	"gosqlite.org/internal/vtabx"
 )
 
 // Graph is a typed handle to a transitive_closure virtual table — a
@@ -22,9 +22,9 @@ import (
 //
 // The transitive_closure module must be registered on every connection db
 // hands out. The simplest way is to blank-import the auto sub-package so
-// it installs via a [github.com/go-again/sqlite.Driver.ConnectHook]:
+// it installs via a [gosqlite.org.Driver.ConnectHook]:
 //
-//	import _ "github.com/go-again/sqlite/ext/closure/auto"
+//	import _ "gosqlite.org/ext/closure/auto"
 //
 // or call [Register] on a pinned *sqlite.Conn. Without the module, Create
 // fails with "no such module: transitive_closure".

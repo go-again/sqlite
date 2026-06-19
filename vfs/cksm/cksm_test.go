@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vfs/cksm"
+	sqlite "gosqlite.org"
+	"gosqlite.org/vfs/cksm"
 )
 
 // openDB opens a sql.DB through a fresh cksm VFS, pins one conn, calls

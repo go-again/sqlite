@@ -10,7 +10,7 @@ sidebar:
 When you want the recall of a `vec.KNN` semantic match **and** the precision of an `fts.Index.Search` lexical match, the `fusion` sub-package merges two ranked result sets into one via Reciprocal Rank Fusion (Cormack 2009). No SQL, no extension to load — just Go ranking, no SQLite dependency.
 
 ```go
-import "github.com/go-again/sqlite/fusion"
+import "gosqlite.org/fusion"
 
 vecHits, _ := tbl.KNNSlice(ctx, queryVec, 50)
 ftsHits, _ := idx.SearchSlice(ctx, fts.Term("brown fox"), fts.WithLimit(50))

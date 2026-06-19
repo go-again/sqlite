@@ -14,7 +14,7 @@ import (
 	"fmt"
 	"log"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 const schema = `CREATE TABLE accounts(id INTEGER PRIMARY KEY, owner TEXT, balance INTEGER)`

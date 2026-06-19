@@ -14,11 +14,11 @@ import (
 	"fmt"
 	"log"
 
-	_ "github.com/go-again/sqlite"
-	_ "github.com/go-again/sqlite/ext/decimal/auto"
-	_ "github.com/go-again/sqlite/ext/eval/auto"
-	_ "github.com/go-again/sqlite/ext/money/auto"
-	_ "github.com/go-again/sqlite/ext/time/auto"
+	_ "gosqlite.org"
+	_ "gosqlite.org/ext/decimal/auto"
+	_ "gosqlite.org/ext/eval/auto"
+	_ "gosqlite.org/ext/money/auto"
+	_ "gosqlite.org/ext/time/auto"
 )
 
 func main() {

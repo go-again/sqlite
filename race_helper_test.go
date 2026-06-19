@@ -1,6 +1,6 @@
 package sqlite
 
-import "github.com/go-again/sqlite/internal/raceskip"
+import "gosqlite.org/internal/raceskip"
 
 // raceEnabled is true in -race builds. See [raceskip.Enabled]; this is a
 // thin local alias to keep call sites in this test package terse.

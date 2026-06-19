@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/stats"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/stats"
 )
 
 func benchSetup(b *testing.B, n int) (*sql.DB, *sql.Conn) {

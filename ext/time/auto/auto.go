@@ -2,12 +2,12 @@
 // [sqlite.Driver.ConnectHook] so every new connection registers them.
 // Blank-import to opt in:
 //
-//	import _ "github.com/go-again/sqlite/ext/time/auto"
+//	import _ "gosqlite.org/ext/time/auto"
 package auto
 
 import (
-	sqlite "github.com/go-again/sqlite"
-	timeext "github.com/go-again/sqlite/ext/time"
+	sqlite "gosqlite.org"
+	timeext "gosqlite.org/ext/time"
 )
 
 func init() {

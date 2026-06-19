@@ -5,11 +5,11 @@
 //
 // Blank-import to opt in:
 //
-//	import _ "github.com/go-again/sqlite/ext/hash/auto"
+//	import _ "gosqlite.org/ext/hash/auto"
 //
 // For finer control over which algorithms appear (e.g. omitting MD4/MD5 in
 // a security-conscious deployment), call
-// [github.com/go-again/sqlite/ext/hash.Register] directly and import only
+// [gosqlite.org/ext/hash.Register] directly and import only
 // the implementing packages you want.
 package auto
 
@@ -34,8 +34,8 @@ import (
 	_ "golang.org/x/crypto/ripemd160" //nolint:gosec,staticcheck
 	_ "golang.org/x/crypto/sha3"      //nolint:gosec
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/hash"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/hash"
 )
 
 func init() {

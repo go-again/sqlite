@@ -1,5 +1,5 @@
 // from-glebarez: shows the minimal change to migrate from
-// github.com/glebarez/sqlite to github.com/go-again/sqlite/gorm.
+// github.com/glebarez/sqlite to gosqlite.org/gorm.
 // The sqlite.Open(dsn) call signature is identical; the package name
 // remains `sqlite` so the rest of your code keeps compiling.
 package main
@@ -12,7 +12,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	sqlite "github.com/go-again/sqlite/gorm"
+	sqlite "gosqlite.org/gorm"
 )
 
 type User struct {

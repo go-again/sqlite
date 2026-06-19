@@ -6,7 +6,7 @@ import (
 	"modernc.org/libc"
 	sqlite3 "modernc.org/sqlite/lib"
 
-	"github.com/go-again/sqlite/vfs/internal/memio"
+	"gosqlite.org/vfs/internal/memio"
 )
 
 func xCloseTrampoline(_ *libc.TLS, pFile uintptr) int32 {

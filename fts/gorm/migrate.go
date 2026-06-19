@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/go-again/sqlite/fts"
 	"gorm.io/gorm"
+	"gosqlite.org/fts"
 )
 
 // Migrate creates the source tables (via gorm's AutoMigrate), the
@@ -148,7 +148,7 @@ func DropSidecar(db *gorm.DB, model any) error {
 	return p.dropSidecar(db, model)
 }
 
-// DropTableHook satisfies the sqlite-go-again gorm dialector's hook
+// DropTableHook satisfies the gosqlite gorm dialector's hook
 // interface so db.Migrator().DropTable cascades into the FTS5 table +
 // triggers.
 func (p *plugin) DropTableHook(db *gorm.DB, model any) error {

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/go-again/sqlite/ext/csv"
+	"gosqlite.org/ext/csv"
 )
 
 // TestTable_NULHeaderFallsBackToPositional pins sweep #3 F5: a NUL byte in a

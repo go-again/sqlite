@@ -21,9 +21,9 @@
 //     [sqlite.Pointer] as an [OpenCallback]; the handle is valid only for the
 //     duration of the call.
 //
-// readblob and writeblob open a fresh [github.com/go-again/sqlite.Blob] handle
+// readblob and writeblob open a fresh [gosqlite.org.Blob] handle
 // on every invocation; for hot loops, prefer calling
-// [github.com/go-again/sqlite.Conn.OpenBlob] from Go and holding the handle
+// [gosqlite.org.Conn.OpenBlob] from Go and holding the handle
 // across reads/writes.
 //
 // Ported from [ncruces/ext/blobio].
@@ -37,7 +37,7 @@ import (
 	"fmt"
 	"io"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // OpenCallback is the type for the openblob() callback. Bound via
@@ -52,7 +52,7 @@ type OpenCallback func(*sqlite.Blob, ...any) error
 // Registration is per-connection. For pool-wide install via
 // [sqlite.Driver.ConnectHook], blank-import the auto sub-package:
 //
-//	import _ "github.com/go-again/sqlite/ext/blobio/auto"
+//	import _ "gosqlite.org/ext/blobio/auto"
 func Register(c *sqlite.Conn) error {
 	return errors.Join(
 		c.RegisterFunc(FuncReadBlob, makeReadblob(c), false),

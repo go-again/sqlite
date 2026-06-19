@@ -11,9 +11,9 @@ These add SQL functions, operators, and collations. Blank-import the `/auto` pac
 
 ```go
 import (
-	_ "github.com/go-again/sqlite/ext/hash/auto"
-	_ "github.com/go-again/sqlite/ext/regexp/auto"
-	_ "github.com/go-again/sqlite/ext/uuid/auto"
+	_ "gosqlite.org/ext/hash/auto"
+	_ "gosqlite.org/ext/regexp/auto"
+	_ "gosqlite.org/ext/uuid/auto"
 )
 
 db.Where("email REGEXP ?", `^.*@example\.com$`).Find(&users)

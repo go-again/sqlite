@@ -1,6 +1,6 @@
 ---
 name: encryption-and-vfs
-description: Use when the task needs encryption at rest, page-checksum corruption detection, an in-memory database with isolation, or serving a database from an embed.FS / byte buffer in a Go app with go-again/sqlite.
+description: Use when the task needs encryption at rest, page-checksum corruption detection, an in-memory database with isolation, or serving a database from an embed.FS / byte buffer in a Go app with gosqlite.
 ---
 
 # Encryption, checksums & in-memory VFSes
@@ -10,7 +10,7 @@ All of these are VFSes registered under a name, referenced from the DSN via `?vf
 ## Encryption at rest
 
 ```go
-import "github.com/go-again/sqlite/vfs/crypto"
+import "gosqlite.org/vfs/crypto"
 
 key := make([]byte, 32) // Adiantum: 32 bytes; AES-XTS-256: 64 bytes. Derive from passphrase/keyring.
 name, fs, _ := crypto.New(crypto.Options{Key: key})
@@ -23,7 +23,7 @@ Or via Config: `sqlite.Open(sqlite.Config{Path: "secret.db", Encryption: &sqlite
 ## Checksums (corruption detection)
 
 ```go
-import "github.com/go-again/sqlite/vfs/cksm"
+import "gosqlite.org/vfs/cksm"
 name, fs, _ := cksm.New(cksm.Options{}); defer fs.Close()
 db, _ := sql.Open("sqlite", "file:db.db?vfs="+name)
 sc, _ := db.Conn(ctx)
@@ -35,8 +35,8 @@ A flipped bit then surfaces as `SQLITE_IOERR_DATA` on read. Stack under crypto v
 ## In-memory
 
 ```go
-import "github.com/go-again/sqlite/vfs/mvcc"  // snapshot isolation
-import "github.com/go-again/sqlite/vfs/memdb" // direct, no MVCC
+import "gosqlite.org/vfs/mvcc"  // snapshot isolation
+import "gosqlite.org/vfs/memdb" // direct, no MVCC
 name, fs, _ := mvcc.New(mvcc.Options{}); defer fs.Close()
 db, _  := sql.Open("sqlite", "file:/shared.db?vfs="+name)  // SHARED (leading slash)
 db2, _ := sql.Open("sqlite", "file:scratch.db?vfs="+name)  // PRIVATE (no slash)
@@ -47,7 +47,7 @@ For a simple shared in-memory test without a VFS, `sqlite.OpenShared(name)` is t
 ## embed.FS / byte buffer (read-only)
 
 ```go
-import "github.com/go-again/sqlite/vfs"
+import "gosqlite.org/vfs"
 //go:embed seed.db
 var seed embed.FS
 name, _, _ := vfs.New(seed)

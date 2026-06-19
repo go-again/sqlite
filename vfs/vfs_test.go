@@ -8,8 +8,8 @@ import (
 	"testing"
 	"testing/fstest"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vfs"
+	sqlite "gosqlite.org"
+	"gosqlite.org/vfs"
 )
 
 // TestVFS_OpenFromTestingFS builds a real SQLite file on disk, copies its

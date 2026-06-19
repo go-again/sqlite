@@ -35,13 +35,13 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/fts"
-	ftsgorm "github.com/go-again/sqlite/fts/gorm"
-	"github.com/go-again/sqlite/fusion"
-	sqlitegorm "github.com/go-again/sqlite/gorm"
-	vecgorm "github.com/go-again/sqlite/vec/gorm"
-	"github.com/go-again/sqlite/vfs/crypto"
+	sqlite "gosqlite.org"
+	"gosqlite.org/fts"
+	ftsgorm "gosqlite.org/fts/gorm"
+	"gosqlite.org/fusion"
+	sqlitegorm "gosqlite.org/gorm"
+	vecgorm "gosqlite.org/vec/gorm"
+	"gosqlite.org/vfs/crypto"
 )
 
 // Note is the application model. One field is FTS5-indexed; one is

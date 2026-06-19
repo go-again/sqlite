@@ -8,13 +8,13 @@ import (
 	"path/filepath"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/fts"
+	sqlite "gosqlite.org"
+	"gosqlite.org/fts"
 	// The named vec import below already runs vec's package init, which
 	// auto-registers sqlite-vec on every connection — no separate blank
 	// import needed.
-	"github.com/go-again/sqlite/vec"
-	"github.com/go-again/sqlite/vfs/crypto"
+	"gosqlite.org/vec"
+	"gosqlite.org/vfs/crypto"
 )
 
 // openEncryptedDB is a small helper for the integration tests: spin

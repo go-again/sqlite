@@ -1,6 +1,6 @@
 ---
 name: extensions
-description: Use when the task needs a SQL function or virtual table from the go-again/sqlite ext/ catalog — regexp, uuid, hash, ipaddr, stats, unicode, fuzzy, decimal, money, time, eval, csv, lines, rtree, series, array, bloom, spellfix1, fileio, blobio.
+description: Use when the task needs a SQL function or virtual table from the gosqlite ext/ catalog — regexp, uuid, hash, ipaddr, stats, unicode, fuzzy, decimal, money, time, eval, csv, lines, rtree, series, array, bloom, spellfix1, fileio, blobio.
 ---
 
 # Loadable Go extensions (`ext/`)
@@ -9,10 +9,10 @@ Each extension is an independent sub-package. Two registration shapes:
 
 ```go
 // Pool-wide: blank-import the /auto variant (every conn picks it up).
-import _ "github.com/go-again/sqlite/ext/regexp/auto"
+import _ "gosqlite.org/ext/regexp/auto"
 
 // Per-conn: register explicitly.
-import "github.com/go-again/sqlite/ext/regexp"
+import "gosqlite.org/ext/regexp"
 regexp.Register(conn) // conn is *sqlite.Conn
 ```
 

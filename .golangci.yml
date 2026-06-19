@@ -1,4 +1,4 @@
-# golangci-lint config for go-again/sqlite.
+# golangci-lint config for gosqlite.
 #
 # Goals:
 #   - Catch real bugs without flagging the unsafe.Pointer-heavy patterns we
@@ -85,15 +85,15 @@ linters:
         # Our internal driver types — *conn, *stmt, *rows, *Backup all
         # implement Close. database/sql's pool semantics mean we close on
         # cleanup paths where the prior error already short-circuits.
-        - (*github.com/go-again/sqlite.conn).Close
-        - (*github.com/go-again/sqlite.stmt).Close
-        - (*github.com/go-again/sqlite.rows).Close
-        - (*github.com/go-again/sqlite.Backup).Close
+        - (*gosqlite.org.conn).Close
+        - (*gosqlite.org.stmt).Close
+        - (*gosqlite.org.rows).Close
+        - (*gosqlite.org.Backup).Close
 
   exclusions:
     rules:
       # ST1019 (duplicate import) fires on the modernc-derived files'
-      # `// import "github.com/go-again/sqlite"` comments — those are not
+      # `// import "gosqlite.org"` comments — those are not
       # imports, they're idiomatic Go canonical-import-path declarations.
       - linters: [staticcheck]
         text: "ST1019"

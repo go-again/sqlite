@@ -2,12 +2,12 @@
 // so every new connection registers readblob and writeblob. Blank-import
 // to opt in:
 //
-//	import _ "github.com/go-again/sqlite/ext/blobio/auto"
+//	import _ "gosqlite.org/ext/blobio/auto"
 package auto
 
 import (
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/blobio"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/blobio"
 )
 
 func init() {

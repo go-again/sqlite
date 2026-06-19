@@ -4,7 +4,7 @@
 // representation.
 //
 // memdb is the smaller-surface cousin of
-// [github.com/go-again/sqlite/vfs/mvcc]:
+// [gosqlite.org/vfs/mvcc]:
 //
 //   - **memdb** stores one canonical copy of each page; concurrent
 //     readers see writes the instant the writer's xWrite returns.
@@ -22,8 +22,8 @@
 //
 // memdb is a **terminal** VFS — it owns the page store directly and
 // does not expose `Options.WrapVFS`. The disk-oriented wrappers
-// [github.com/go-again/sqlite/vfs/cksm] and
-// [github.com/go-again/sqlite/vfs/crypto] cannot meaningfully layer
+// [gosqlite.org/vfs/cksm] and
+// [gosqlite.org/vfs/crypto] cannot meaningfully layer
 // over an in-memory store, and there is no inner VFS to chain to.
 //
 // # Naming convention

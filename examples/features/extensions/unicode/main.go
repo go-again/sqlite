@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"log"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/unicode"
-	_ "github.com/go-again/sqlite/ext/unicode/auto"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/unicode"
+	_ "gosqlite.org/ext/unicode/auto"
 )
 
 func main() {

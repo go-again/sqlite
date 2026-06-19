@@ -11,8 +11,8 @@ sidebar:
 
 ```go
 import (
-	"github.com/go-again/sqlite/vfs/cksm"
-	sqlite "github.com/go-again/sqlite"
+	"gosqlite.org/vfs/cksm"
+	sqlite "gosqlite.org"
 )
 
 name, fs, _ := cksm.New(cksm.Options{})

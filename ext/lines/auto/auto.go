@@ -2,16 +2,16 @@
 // so every new connection registers the `lines` vtab module with
 // os-backed file access. Blank-import to opt in:
 //
-//	import _ "github.com/go-again/sqlite/ext/lines/auto"
+//	import _ "gosqlite.org/ext/lines/auto"
 //
 // For sandboxed deployments, call
-// [github.com/go-again/sqlite/ext/lines.RegisterFS] from your own
+// [gosqlite.org/ext/lines.RegisterFS] from your own
 // ConnectHook instead.
 package auto
 
 import (
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/lines"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/lines"
 )
 
 func init() {

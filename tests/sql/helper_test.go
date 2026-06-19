@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // openDB returns an in-memory database pinned to a single connection. Tests

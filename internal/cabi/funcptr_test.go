@@ -3,7 +3,7 @@ package cabi_test
 import (
 	"testing"
 
-	"github.com/go-again/sqlite/internal/cabi"
+	"gosqlite.org/internal/cabi"
 )
 
 // TestFuncPointer_AsFunc_Roundtrip is the minimal direct test for the

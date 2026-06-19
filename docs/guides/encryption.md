@@ -10,7 +10,7 @@ sidebar:
 `vfs/crypto` is a pure-Go, page-level encryption VFS — Adiantum (default, 32-byte key) or AES-XTS-256 (64-byte key). The main DB file, rollback journal, WAL frames, and temp files are all encrypted; the WAL `-shm` index stays plaintext (it's process-local coordination state, not row data).
 
 ```go
-import "github.com/go-again/sqlite/vfs/crypto"
+import "gosqlite.org/vfs/crypto"
 
 key := make([]byte, 32) // derive from passphrase / keyring / HSM
 name, fs, _ := crypto.New(crypto.Options{Key: key})

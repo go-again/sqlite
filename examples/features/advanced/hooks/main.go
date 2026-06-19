@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"log"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 func main() {

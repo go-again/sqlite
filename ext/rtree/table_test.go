@@ -6,9 +6,9 @@ import (
 	"errors"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/rtree"
-	"github.com/go-again/sqlite/internal/testhelp"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/rtree"
+	"gosqlite.org/internal/testhelp"
 )
 
 // openTableDB returns an in-memory *sql.DB. The rtree vtab is built into the

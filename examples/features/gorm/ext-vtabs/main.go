@@ -28,16 +28,16 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/csv"
-	sqlitegorm "github.com/go-again/sqlite/gorm"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/csv"
+	sqlitegorm "gosqlite.org/gorm"
 
-	_ "github.com/go-again/sqlite/ext/array/auto"
-	_ "github.com/go-again/sqlite/ext/bloom/auto"
-	_ "github.com/go-again/sqlite/ext/closure/auto"
-	_ "github.com/go-again/sqlite/ext/lines/auto"
-	_ "github.com/go-again/sqlite/ext/spellfix1/auto"
-	_ "github.com/go-again/sqlite/ext/statement/auto"
+	_ "gosqlite.org/ext/array/auto"
+	_ "gosqlite.org/ext/bloom/auto"
+	_ "gosqlite.org/ext/closure/auto"
+	_ "gosqlite.org/ext/lines/auto"
+	_ "gosqlite.org/ext/spellfix1/auto"
+	_ "gosqlite.org/ext/statement/auto"
 )
 
 // User is a simple model used as the bind / join target across demos.

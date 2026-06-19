@@ -1,6 +1,6 @@
 # Examples
 
-Runnable, smoke-tested programs for `github.com/go-again/sqlite`. They serve two kinds of reader, and the folders are organised around that:
+Runnable, smoke-tested programs for `gosqlite.org`. They serve two kinds of reader, and the folders are organised around that:
 
 - **Migrating** off another SQLite package (mattn, modernc, glebarez, gorm)? Start in [`migrating/`](migrating/) — your existing code works with a one-line import change.
 - **Starting fresh** and want the recommended, modern surface? Start in [`getting-started/`](getting-started/), then dip into [`features/`](features/) for the capability you need.
@@ -50,9 +50,9 @@ An example can be modern on one dial and raw on the other — that's normal. A `
 
 | from | driver name | change you make |
 |---|---|---|
-| mattn/go-sqlite3 | keep `"sqlite3"` | swap the blank import to `_ "github.com/go-again/sqlite"`; `_auth*` userauth flags are rejected (dropped upstream) |
+| mattn/go-sqlite3 | keep `"sqlite3"` | swap the blank import to `_ "gosqlite.org"`; `_auth*` userauth flags are rejected (dropped upstream) |
 | modernc.org/sqlite | keep `"sqlite"` | swap the import; nothing else |
-| glebarez/sqlite | n/a (gorm) | `gorm.Open(sqlite.Open(dsn), …)` with `sqlite "github.com/go-again/sqlite/gorm"` |
+| glebarez/sqlite | n/a (gorm) | `gorm.Open(sqlite.Open(dsn), …)` with `sqlite "gosqlite.org/gorm"` |
 | gorm.io/driver/sqlite | n/a (gorm) | same as glebarez — our dialector is a drop-in for both |
 
 When you're ready to modernize, move connection setup from a DSN string to [`sqlite.Config`](../config.go) (see [`getting-started/config`](getting-started/config/)), and reach for the typed [`vec`](../vec/) / [`fts`](../fts/) handles or [gorm](../gorm/) where they save you hand-written SQL. You gain typed pragmas, built-in encryption, pool knobs in one value, typed search, and gorm sidecars — without giving up `database/sql`.

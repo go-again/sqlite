@@ -8,7 +8,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
 
-	"github.com/go-again/sqlite/internal/gormbridge"
+	"gosqlite.org/internal/gormbridge"
 )
 
 // pluginName matches gorm's Plugin contract (unique per *gorm.DB).

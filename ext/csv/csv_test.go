@@ -11,9 +11,9 @@ import (
 	"testing"
 	"testing/fstest"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/csv"
-	"github.com/go-again/sqlite/ext/internal/filevtab"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/csv"
+	"gosqlite.org/ext/internal/filevtab"
 )
 
 func writeFile(path, content string) error {

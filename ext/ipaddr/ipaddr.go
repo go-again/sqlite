@@ -18,8 +18,8 @@
 // # Usage
 //
 //	import (
-//	    sqlite "github.com/go-again/sqlite"
-//	    "github.com/go-again/sqlite/ext/ipaddr"
+//	    sqlite "gosqlite.org"
+//	    "gosqlite.org/ext/ipaddr"
 //	)
 //
 //	if err := ipaddr.Register(conn); err != nil { ... }
@@ -27,10 +27,10 @@
 //	rows, _ := db.QueryContext(ctx,
 //	    `SELECT ip FROM events WHERE ipcontains('10.0.0.0/8', ip)`)
 //
-// For pool-wide install via [github.com/go-again/sqlite.Driver.ConnectHook],
+// For pool-wide install via [gosqlite.org.Driver.ConnectHook],
 // blank-import the auto sub-package:
 //
-//	import _ "github.com/go-again/sqlite/ext/ipaddr/auto"
+//	import _ "gosqlite.org/ext/ipaddr/auto"
 //
 // [ncruces/ext/ipaddr]: https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/ipaddr
 package ipaddr
@@ -40,7 +40,7 @@ import (
 	"fmt"
 	"net/netip"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // Exported names of the SQL functions Register installs.

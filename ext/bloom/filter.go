@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/go-again/sqlite/internal/sqlid"
-	"github.com/go-again/sqlite/internal/vtabx"
+	"gosqlite.org/internal/sqlid"
+	"gosqlite.org/internal/vtabx"
 )
 
 // Filter is a typed handle to a bloom virtual table — a probabilistic
@@ -18,9 +18,9 @@ import (
 //
 // The bloom vtab module must be registered on every connection db hands
 // out. The simplest way is to blank-import the auto sub-package so it
-// installs via a [github.com/go-again/sqlite.Driver.ConnectHook]:
+// installs via a [gosqlite.org.Driver.ConnectHook]:
 //
-//	import _ "github.com/go-again/sqlite/ext/bloom/auto"
+//	import _ "gosqlite.org/ext/bloom/auto"
 //
 // or call [Register] on a pinned *sqlite.Conn. Without the module, Create
 // fails with "no such module: bloom".

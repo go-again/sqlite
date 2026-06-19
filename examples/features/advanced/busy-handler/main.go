@@ -17,7 +17,7 @@ import (
 	"path/filepath"
 	"time"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 func main() {

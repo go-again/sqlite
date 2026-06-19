@@ -1,6 +1,6 @@
 package blobio_test
 
-import "github.com/go-again/sqlite/internal/raceskip"
+import "gosqlite.org/internal/raceskip"
 
 // raceEnabled mirrors the helper used at the root of the module to
 // skip BLOB-API-touching tests under -race on darwin. modernc's

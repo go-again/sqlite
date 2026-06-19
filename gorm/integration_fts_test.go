@@ -9,8 +9,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	_ "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/fts"
+	_ "gosqlite.org"
+	"gosqlite.org/fts"
 )
 
 // articleModel is a typical gorm model; the FTS5 sidecar references it via

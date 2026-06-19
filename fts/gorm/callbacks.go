@@ -5,10 +5,10 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/go-again/sqlite/fts"
-	"github.com/go-again/sqlite/internal/gormbridge"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
+	"gosqlite.org/fts"
+	"gosqlite.org/internal/gormbridge"
 )
 
 // afterCreate runs after a source-table INSERT. In ModeExternal the

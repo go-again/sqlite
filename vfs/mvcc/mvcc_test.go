@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vfs/mvcc"
+	sqlite "gosqlite.org"
+	"gosqlite.org/vfs/mvcc"
 )
 
 func TestMVCC_RoundTrip(t *testing.T) {

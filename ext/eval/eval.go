@@ -33,7 +33,7 @@ import (
 	"strconv"
 	"strings"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // Register installs eval() on c, closing over c so the dynamic SQL runs
@@ -42,7 +42,7 @@ import (
 // Per-connection registration. For pool-wide install, blank-import the
 // auto sub-package:
 //
-//	import _ "github.com/go-again/sqlite/ext/eval/auto"
+//	import _ "gosqlite.org/ext/eval/auto"
 func Register(c *sqlite.Conn) error {
 	// Not deterministic: it reads (and may mutate) database state.
 	return c.RegisterFunc("eval", func(sql string, sep ...string) (any, error) {

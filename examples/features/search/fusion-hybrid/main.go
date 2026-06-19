@@ -13,10 +13,10 @@ import (
 	"fmt"
 	"log"
 
-	_ "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/fts"
-	"github.com/go-again/sqlite/fusion"
-	"github.com/go-again/sqlite/vec"
+	_ "gosqlite.org"
+	"gosqlite.org/fts"
+	"gosqlite.org/fusion"
+	"gosqlite.org/vec"
 )
 
 func main() {

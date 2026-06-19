@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-again/sqlite/fts"
-	"github.com/go-again/sqlite/internal/gormbridge"
 	"gorm.io/gorm"
+	"gosqlite.org/fts"
+	"gosqlite.org/internal/gormbridge"
 )
 
 // Hit pairs a typed model T with the FTS5 rank score and the optional

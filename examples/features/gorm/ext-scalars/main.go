@@ -19,19 +19,19 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	_ "github.com/go-again/sqlite"
-	sqlitegorm "github.com/go-again/sqlite/gorm"
+	_ "gosqlite.org"
+	sqlitegorm "gosqlite.org/gorm"
 
 	// Each blank import registers its module on every connection the
 	// pool opens via Driver.ConnectHook. Plain gorm calls then see the
 	// functions / operators / collations as if they were built in.
-	_ "github.com/go-again/sqlite/ext/hash/auto"
-	_ "github.com/go-again/sqlite/ext/ipaddr/auto"
-	_ "github.com/go-again/sqlite/ext/regexp/auto"
-	_ "github.com/go-again/sqlite/ext/stats/auto"
-	_ "github.com/go-again/sqlite/ext/unicode/auto"
-	_ "github.com/go-again/sqlite/ext/uuid/auto"
-	_ "github.com/go-again/sqlite/ext/zorder/auto"
+	_ "gosqlite.org/ext/hash/auto"
+	_ "gosqlite.org/ext/ipaddr/auto"
+	_ "gosqlite.org/ext/regexp/auto"
+	_ "gosqlite.org/ext/stats/auto"
+	_ "gosqlite.org/ext/unicode/auto"
+	_ "gosqlite.org/ext/uuid/auto"
+	_ "gosqlite.org/ext/zorder/auto"
 )
 
 // Event is a typical observability-style row that lets us showcase

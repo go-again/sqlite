@@ -14,8 +14,8 @@ import (
 	"os"
 	"path/filepath"
 
-	_ "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vfs/crypto"
+	_ "gosqlite.org"
+	"gosqlite.org/vfs/crypto"
 )
 
 func main() {

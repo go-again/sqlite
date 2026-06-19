@@ -1,6 +1,6 @@
 package bloom_test
 
-import "github.com/go-again/sqlite/internal/raceskip"
+import "gosqlite.org/internal/raceskip"
 
 // raceEnabled — see ext/blobio/race_helper_test.go for the rationale.
 // ext/bloom persists its bit array via (*Conn).OpenBlob, which trips

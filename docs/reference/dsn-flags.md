@@ -32,3 +32,21 @@ Every `_*` DSN flag mattn supported is translated transparently — usually into
 | `cache`, `mode`, `immutable`, `vfs` | URI-level, passed through |
 | `_auth*` | **rejected** — userauth was removed upstream |
 | `_strict=1` | unknown flags become hard errors |
+
+## Typed equivalents (`sqlite.Config`)
+
+For new code, prefer the typed [`sqlite.Config`](../guides/configuration.md) over a DSN string — it's compile-checked and self-documenting. The common flags map to fields on `Config.Pragmas` (with typed enum values); anything without a dedicated field goes through `Pragmas.Extra`, which fires `PRAGMA <key> = <value>` exactly like `_pragma=`.
+
+| DSN flag | Typed field | Values |
+|---|---|---|
+| `_journal` / `_journal_mode` | `Pragmas.JournalMode` | `JournalWAL` · `JournalDelete` · `JournalTruncate` · `JournalPersist` · `JournalMemory` · `JournalOff` |
+| `_sync` / `_synchronous` | `Pragmas.Synchronous` | `SynchronousNormal` · `SynchronousOff` · `SynchronousFull` · `SynchronousExtra` |
+| `_busy_timeout` / `_timeout` | `Pragmas.BusyTimeout` | a `time.Duration` (mapped to ms) |
+| `_fk` / `_foreign_keys` | `Pragmas.ForeignKeys` | `true` / `false` |
+| `_cache_size` | `Pragmas.CacheSize` | pages (positive) or KiB (negative) |
+| `mode` (URI) | `Config.Mode` | `ModeReadWriteCreate` · `ModeReadWrite` · `ModeReadOnly` · `ModeMemory` |
+| `cache` (URI) | `Config.Cache` | `CacheShared` · `CachePrivate` |
+| `vfs` (URI) | `Config.VFS` | a registered VFS name |
+| *any other* `_pragma=foo(v)` | `Pragmas.Extra` | `map[string]string` → `PRAGMA foo = v` |
+
+Typed-only (no legacy DSN flag): `Pragmas.TempStore` (`TempStoreMemory` · `TempStoreFile` · `TempStoreDefault`) and `Config.Encryption` (transparent at-rest encryption via the [crypto VFS](../guides/encryption.md)). `Config.Pragmas` is applied in struct-declaration order after open; [`RecommendedPragmas()`](../guides/configuration.md) is the production preset (WAL + `busy_timeout=5s` + `foreign_keys=on`). Full field semantics live in the [Configuration guide](../guides/configuration.md) and [pkg.go.dev/gosqlite.org](https://pkg.go.dev/gosqlite.org#Config).

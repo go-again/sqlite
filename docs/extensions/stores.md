@@ -14,7 +14,7 @@ Persistent specialised stores. Both are virtual tables whose data survives `db.C
 A probabilistic set-membership store. Add many items cheaply, then test membership with a tunable false-positive rate; the filter persists across reopens.
 
 ```go
-import "github.com/go-again/sqlite/ext/bloom"
+import "gosqlite.org/ext/bloom"
 // typed handle: bloom.Filter (Create / Add / Contains / Drop)
 ```
 

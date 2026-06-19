@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"testing"
 
-	_ "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/fts"
+	_ "gosqlite.org"
+	"gosqlite.org/fts"
 )
 
 // openBenchDB mirrors openDB but takes testing.TB.

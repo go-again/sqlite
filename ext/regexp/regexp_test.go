@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-again/sqlite/ext/regexp"
-	"github.com/go-again/sqlite/internal/testhelp"
+	"gosqlite.org/ext/regexp"
+	"gosqlite.org/internal/testhelp"
 )
 
 func openDB(t *testing.T) (*sql.DB, *sql.Conn) {

@@ -1,11 +1,11 @@
-package sqlite // import "github.com/go-again/sqlite"
+package sqlite // import "gosqlite.org"
 
 import (
 	"errors"
 	"fmt"
 	"unsafe"
 
-	"github.com/go-again/sqlite/internal/cabi"
+	"gosqlite.org/internal/cabi"
 	"modernc.org/libc"
 	"modernc.org/libc/sys/types"
 	sqlite3 "modernc.org/sqlite/lib"

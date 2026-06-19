@@ -1,4 +1,4 @@
-package sqlite // import "github.com/go-again/sqlite"
+package sqlite // import "gosqlite.org"
 
 import (
 	"unsafe"

@@ -7,8 +7,8 @@ import (
 	"math"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vec"
+	sqlite "gosqlite.org"
+	"gosqlite.org/vec"
 )
 
 // openDB returns an in-memory DB pre-loaded with the sqlite-vec extension

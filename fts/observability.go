@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/go-again/sqlite/internal/obs"
+	"gosqlite.org/internal/obs"
 )
 
 // Observable wraps an Index with optional logging and metrics hooks. Callers

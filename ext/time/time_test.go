@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"testing"
 
-	timeext "github.com/go-again/sqlite/ext/time"
-	"github.com/go-again/sqlite/internal/testhelp"
+	timeext "gosqlite.org/ext/time"
+	"gosqlite.org/internal/testhelp"
 )
 
 func openDB(t *testing.T) (context.Context, *sql.DB) {

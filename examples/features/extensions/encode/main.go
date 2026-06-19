@@ -13,8 +13,8 @@ import (
 	"fmt"
 	"log"
 
-	_ "github.com/go-again/sqlite"
-	_ "github.com/go-again/sqlite/ext/encode/auto"
+	_ "gosqlite.org"
+	_ "gosqlite.org/ext/encode/auto"
 )
 
 func main() {

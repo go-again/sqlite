@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	vecgorm "github.com/go-again/sqlite/vec/gorm"
+	vecgorm "gosqlite.org/vec/gorm"
 )
 
 // TestPlugin_ConcurrentSchemaRegistration spawns several goroutines

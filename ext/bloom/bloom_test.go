@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/bloom"
-	"github.com/go-again/sqlite/internal/testhelp"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/bloom"
+	"gosqlite.org/internal/testhelp"
 )
 
 // openFileSessionNoCleanup opens a file-backed DB at path, pins one

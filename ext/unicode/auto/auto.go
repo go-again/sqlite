@@ -3,21 +3,21 @@
 // plus the NOCASE_UNICODE / NOCASE_ACCENT collations. Blank-import to
 // opt in:
 //
-//	import _ "github.com/go-again/sqlite/ext/unicode/auto"
+//	import _ "gosqlite.org/ext/unicode/auto"
 //
 // The LIKE override is NOT installed by this auto wiring — leaving
 // SQLite's LIKE optimization intact. To opt in, install via your own
-// ConnectHook with [github.com/go-again/sqlite/ext/unicode.WithLike]:
+// ConnectHook with [gosqlite.org/ext/unicode.WithLike]:
 //
 //	unicode.Register(conn, unicode.WithLike())
 //
-// Or call [github.com/go-again/sqlite/ext/unicode.RegisterLikeOnly]
+// Or call [gosqlite.org/ext/unicode.RegisterLikeOnly]
 // separately.
 package auto
 
 import (
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/unicode"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/unicode"
 )
 
 func init() {

@@ -14,11 +14,11 @@ import (
 	"fmt"
 	"log"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 
 	// Blank-import auto-registers readblob and writeblob on every
 	// connection.
-	_ "github.com/go-again/sqlite/ext/blobio/auto"
+	_ "gosqlite.org/ext/blobio/auto"
 )
 
 func main() {

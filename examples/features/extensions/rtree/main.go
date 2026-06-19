@@ -18,9 +18,9 @@ import (
 	"fmt"
 	"log"
 
-	_ "github.com/go-again/sqlite"                // registers the "sqlite" driver
-	"github.com/go-again/sqlite/ext/rtree"        // typed Table API
-	_ "github.com/go-again/sqlite/ext/rtree/auto" // circle geometry on every conn
+	_ "gosqlite.org"                // registers the "sqlite" driver
+	"gosqlite.org/ext/rtree"        // typed Table API
+	_ "gosqlite.org/ext/rtree/auto" // circle geometry on every conn
 )
 
 func main() {

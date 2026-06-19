@@ -1,4 +1,4 @@
-module github.com/go-again/sqlite
+module gosqlite.org
 
 go 1.25.0
 

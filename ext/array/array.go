@@ -12,8 +12,8 @@
 // statement finalizes — no caller-side cleanup needed.
 //
 //	import (
-//	    sqlite "github.com/go-again/sqlite"
-//	    "github.com/go-again/sqlite/ext/array"
+//	    sqlite "gosqlite.org"
+//	    "gosqlite.org/ext/array"
 //	)
 //
 //	if err := array.Register(conn); err != nil { ... }
@@ -50,10 +50,10 @@
 //
 // # Blank-import auto-registration
 //
-// For a pool-wide install via [github.com/go-again/sqlite.Driver.ConnectHook],
+// For a pool-wide install via [gosqlite.org.Driver.ConnectHook],
 // blank-import the auto sub-package:
 //
-//	import _ "github.com/go-again/sqlite/ext/array/auto"
+//	import _ "gosqlite.org/ext/array/auto"
 package array
 
 import (
@@ -63,7 +63,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // ModuleName is the SQL module name the vtab registers under: `array`.

@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	_ "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/fts"
-	ftsgorm "github.com/go-again/sqlite/fts/gorm"
-	sqlitegorm "github.com/go-again/sqlite/gorm"
+	_ "gosqlite.org"
+	"gosqlite.org/fts"
+	ftsgorm "gosqlite.org/fts/gorm"
+	sqlitegorm "gosqlite.org/gorm"
 
 	"gorm.io/gorm"
 )

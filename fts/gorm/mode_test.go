@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-again/sqlite/fts"
-	ftsgorm "github.com/go-again/sqlite/fts/gorm"
+	"gosqlite.org/fts"
+	ftsgorm "gosqlite.org/fts/gorm"
 
 	"gorm.io/gorm"
 )

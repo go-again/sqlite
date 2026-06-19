@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/array"
-	"github.com/go-again/sqlite/internal/testhelp"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/array"
+	"gosqlite.org/internal/testhelp"
 )
 
 // openDB opens an in-memory database, pins to MaxOpenConns=1, returns

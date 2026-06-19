@@ -8,7 +8,7 @@ import (
 	"modernc.org/libc"
 	sqlite3 "modernc.org/sqlite/lib"
 
-	"github.com/go-again/sqlite/internal/cabi"
+	"gosqlite.org/internal/cabi"
 )
 
 // fileHandles maps the (untracked-via-modernc) pFile address to its

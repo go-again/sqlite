@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"time"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // Register installs the time_* functions on c.
@@ -30,7 +30,7 @@ import (
 // Per-connection registration. For pool-wide install, blank-import the
 // auto sub-package:
 //
-//	import _ "github.com/go-again/sqlite/ext/time/auto"
+//	import _ "gosqlite.org/ext/time/auto"
 func Register(c *sqlite.Conn) error {
 	return errors.Join(
 		c.RegisterFunc("time_now", now, false), // wall-clock: not deterministic

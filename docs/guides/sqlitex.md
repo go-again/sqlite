@@ -17,7 +17,7 @@ sidebar:
 - **`Migrate`** — an `embed.FS` migration runner tracked via `PRAGMA user_version`: applies `NNNN_*.sql` files in order, idempotently.
 
 ```go
-import "github.com/go-again/sqlite/sqlitex"
+import "gosqlite.org/sqlitex"
 
 //go:embed migrations/*.sql
 var migrations embed.FS

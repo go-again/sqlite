@@ -22,7 +22,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
 
-	"github.com/go-again/sqlite/internal/sqlid"
+	"gosqlite.org/internal/sqlid"
 )
 
 // IndirectType strips pointers, slices, and arrays so reflect.TypeOf(&[]Doc{})

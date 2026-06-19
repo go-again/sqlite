@@ -59,8 +59,8 @@ import (
 	"strings"
 	"sync"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/internal/sqlid"
+	sqlite "gosqlite.org"
+	"gosqlite.org/internal/sqlid"
 )
 
 // ModuleName is the name the vtab registers under: `spellfix1`.

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // TestInMemoryConstantIsValidDSN: the bare constant must work with

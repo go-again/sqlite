@@ -9,8 +9,8 @@ import (
 
 	gid "github.com/google/uuid"
 
-	"github.com/go-again/sqlite/ext/uuid"
-	"github.com/go-again/sqlite/internal/testhelp"
+	"gosqlite.org/ext/uuid"
+	"gosqlite.org/internal/testhelp"
 )
 
 var rfc4122re = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)

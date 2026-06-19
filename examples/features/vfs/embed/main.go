@@ -15,8 +15,8 @@ import (
 	"log"
 	"testing/fstest"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vfs"
+	sqlite "gosqlite.org"
+	"gosqlite.org/vfs"
 )
 
 func main() {

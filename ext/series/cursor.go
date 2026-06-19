@@ -3,7 +3,7 @@ package series
 import (
 	"errors"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 type seriesCursor struct {

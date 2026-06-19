@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // Regression: (*Conn).Close drains the six per-conn hook handler maps.

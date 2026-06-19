@@ -9,9 +9,9 @@ import (
 	"testing"
 	"testing/fstest"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/internal/filevtab"
-	"github.com/go-again/sqlite/ext/lines"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/internal/filevtab"
+	"gosqlite.org/ext/lines"
 )
 
 func withLines(t *testing.T, fsys fs.FS) (*sql.DB, *sql.Conn) {

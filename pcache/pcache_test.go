@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/pcache"
+	sqlite "gosqlite.org"
+	"gosqlite.org/pcache"
 )
 
 // stats is installed once, before any database opens — the only moment

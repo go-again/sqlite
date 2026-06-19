@@ -14,8 +14,8 @@ import (
 	"fmt"
 	"log"
 
-	_ "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vfs/mvcc"
+	_ "gosqlite.org"
+	"gosqlite.org/vfs/mvcc"
 )
 
 func main() {

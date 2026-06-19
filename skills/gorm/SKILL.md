@@ -1,24 +1,33 @@
 ---
 name: gorm
-description: Use when using gorm with go-again/sqlite — the dialector (drop-in for glebarez/go-gorm-sqlite) and the tag-driven vec/FTS5 sidecars that maintain vector and full-text indexes from a struct tag.
+description: Use when using gorm with gosqlite — the dialector (drop-in for glebarez/go-gorm-sqlite) and the tag-driven vec/FTS5 sidecars that maintain vector and full-text indexes from a struct tag.
 ---
 
-# gorm with go-again/sqlite
+# gorm with gosqlite
 
-The `github.com/go-again/sqlite/gorm` package is a `gorm.Dialector` — a drop-in for `glebarez/sqlite` and `go-gorm/sqlite`.
+The `gosqlite.org/gorm` package is a `gorm.Dialector` — a drop-in for `glebarez/sqlite` and `go-gorm/sqlite`.
 
 ```go
 import (
 	"gorm.io/gorm"
-	sqlite "github.com/go-again/sqlite/gorm"
+	sqlite "gosqlite.org/gorm" // package is `sqlite` — drop-in for glebarez/go-gorm
 )
 
 db, _ := gorm.Open(sqlite.Open("file:my.db?_pragma=foreign_keys(1)"), &gorm.Config{})
-// or, modern typed config:
-db, _ := sqlite.OpenConfig(sqlitepkg.Config{Path: "my.db", Pragmas: sqlitepkg.RecommendedPragmas()})
 ```
 
-`sqlite.Open(dsn)` and `sqlite.New(Config{...})` both exist for either upstream import path.
+The package name is `sqlite`, so existing glebarez / go-gorm call sites compile unchanged: `sqlite.Open(dsn)` and `sqlite.New(Config{...})` both exist for either upstream import path.
+
+For the modern typed config you also need the root `gosqlite.org` (also `package sqlite`), so alias the dialector `sqlitegorm` to avoid the name clash — this is the convention everywhere the two are imported together:
+
+```go
+import (
+	sqlite "gosqlite.org"
+	sqlitegorm "gosqlite.org/gorm"
+)
+
+db, _ := sqlitegorm.OpenConfig(sqlite.Config{Path: "my.db", Pragmas: sqlite.RecommendedPragmas()})
+```
 
 ## Tag-driven vec & FTS5 sidecars
 
@@ -26,9 +35,9 @@ Tag a field, register the plugin, migrate — gorm Create/Update/Delete then mai
 
 ```go
 import (
-	vecgorm "github.com/go-again/sqlite/vec/gorm"
-	ftsgorm "github.com/go-again/sqlite/fts/gorm"
-	"github.com/go-again/sqlite/fts"
+	vecgorm "gosqlite.org/vec/gorm"
+	ftsgorm "gosqlite.org/fts/gorm"
+	"gosqlite.org/fts"
 )
 
 type Document struct {

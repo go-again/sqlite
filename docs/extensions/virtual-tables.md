@@ -11,8 +11,8 @@ These expose data through `CREATE VIRTUAL TABLE name USING module(...)`; some ac
 
 ```go
 import (
-	sqlite "github.com/go-again/sqlite"
-	_ "github.com/go-again/sqlite/ext/array/auto"
+	sqlite "gosqlite.org"
+	_ "gosqlite.org/ext/array/auto"
 )
 
 // Bind a Go slice as a SQL table:

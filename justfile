@@ -1,4 +1,4 @@
-# go-again/sqlite — common operations.
+# gosqlite — common operations.
 #
 # Install just from https://just.systems. Run `just` (no args) for the
 # default recipe (build + test + lint).

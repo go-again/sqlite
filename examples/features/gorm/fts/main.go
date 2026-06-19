@@ -17,9 +17,9 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	_ "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/fts"
-	sqlite "github.com/go-again/sqlite/gorm"
+	_ "gosqlite.org"
+	"gosqlite.org/fts"
+	sqlitegorm "gosqlite.org/gorm"
 )
 
 type Article struct {
@@ -32,7 +32,7 @@ func main() {
 	ctx := context.Background()
 
 	dsn := "file:gorm-fts-demo?mode=memory&cache=shared"
-	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+	gdb, err := gorm.Open(sqlitegorm.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {

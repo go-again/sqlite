@@ -1,5 +1,5 @@
 // Package fts is a typed, generics-aware wrapper around SQLite's FTS5
-// full-text-search virtual table, layered on top of github.com/go-again/sqlite.
+// full-text-search virtual table, layered on top of gosqlite.org.
 //
 // FTS5 is compiled into modernc.org/sqlite/lib (this package's underlying
 // engine) by default — no extension to load. Blank-importing the parent
@@ -7,8 +7,8 @@
 //
 //	import (
 //	    "database/sql"
-//	    _ "github.com/go-again/sqlite"
-//	    "github.com/go-again/sqlite/fts"
+//	    _ "gosqlite.org"
+//	    "gosqlite.org/fts"
 //	)
 //
 // # Key types
@@ -105,7 +105,7 @@
 //
 // # See also
 //
-//   - github.com/go-again/sqlite/fts/gorm — tag-driven FTS5 indexes
+//   - gosqlite.org/fts/gorm — tag-driven FTS5 indexes
 //     wired into gorm models. Tag string fields with fts5:"…" and the
 //     plugin manages CREATE, AFTER INSERT/UPDATE/DELETE triggers,
 //     external / in-table / contentless mode selection, soft-delete
@@ -115,7 +115,7 @@
 //     gorm bridge.
 //   - dev/coverage/fts.md — every documented FTS5 feature with its
 //     current status (typed / raw / inherited).
-//   - github.com/go-again/sqlite/vfs/crypto — pure-Go encryption at
+//   - gosqlite.org/vfs/crypto — pure-Go encryption at
 //     rest. Composes with FTS5 — encrypted full-text databases work
 //     end-to-end through the same wrapping VFS. Same Recorder-shaped
 //     observability surface, opted in via Options.Recorder.

@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/go-again/sqlite/fusion"
+	"gosqlite.org/fusion"
 )
 
 // approxEq returns true when two floats are within a small epsilon.

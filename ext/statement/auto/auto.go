@@ -2,12 +2,12 @@
 // so every new connection registers the `statement` vtab. Blank-import
 // to opt in:
 //
-//	import _ "github.com/go-again/sqlite/ext/statement/auto"
+//	import _ "gosqlite.org/ext/statement/auto"
 package auto
 
 import (
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/statement"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/statement"
 )
 
 func init() {

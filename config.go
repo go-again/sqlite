@@ -3,7 +3,7 @@ package sqlite
 import (
 	"time"
 
-	"github.com/go-again/sqlite/vfs/crypto"
+	"gosqlite.org/vfs/crypto"
 )
 
 // InMemory is the canonical SQLite path for a private per-conn
@@ -16,7 +16,7 @@ import (
 // For a quicker no-Config entry, see [OpenInMemory]. For an in-memory
 // database shared across multiple connections in the same process,
 // pair an empty Path with one of the in-memory VFSes — see
-// [github.com/go-again/sqlite/vfs/memdb] / [github.com/go-again/sqlite/vfs/mvcc].
+// [gosqlite.org/vfs/memdb] / [gosqlite.org/vfs/mvcc].
 const InMemory = ":memory:"
 
 // Config is the modern, struct-typed way to describe a SQLite open.

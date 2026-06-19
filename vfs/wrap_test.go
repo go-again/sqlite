@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vfs"
+	sqlite "gosqlite.org"
+	"gosqlite.org/vfs"
 )
 
 // countRec is a Recorder that tallies observed operations.

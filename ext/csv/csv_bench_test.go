@@ -9,8 +9,8 @@ import (
 	"testing"
 	"testing/fstest"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/csv"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/csv"
 )
 
 func benchSetup(b *testing.B, rows int) (*sql.DB, *sql.Conn) {

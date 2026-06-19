@@ -16,9 +16,9 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	_ "github.com/go-again/sqlite"
-	sqlitegorm "github.com/go-again/sqlite/gorm"
-	vecgorm "github.com/go-again/sqlite/vec/gorm"
+	_ "gosqlite.org"
+	sqlitegorm "gosqlite.org/gorm"
+	vecgorm "gosqlite.org/vec/gorm"
 )
 
 // Document is a typical gorm model with one tagged embedding field.

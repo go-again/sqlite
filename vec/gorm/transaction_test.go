@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	vecgorm "github.com/go-again/sqlite/vec/gorm"
 	"gorm.io/gorm"
+	vecgorm "gosqlite.org/vec/gorm"
 )
 
 // TestTransaction_RollbackCascadesToSidecar pins down the BLOCKER fix:

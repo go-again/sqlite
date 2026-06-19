@@ -8,7 +8,7 @@ import (
 	"iter"
 	"strings"
 
-	"github.com/go-again/sqlite/internal/sqlid"
+	"gosqlite.org/internal/sqlid"
 )
 
 // Table is a typed handle to a sqlite-vec virtual table backed by an

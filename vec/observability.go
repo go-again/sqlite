@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/go-again/sqlite/internal/obs"
+	"gosqlite.org/internal/obs"
 )
 
 // Recorder is the metrics/tracing hook surface for vec.Observable. Each

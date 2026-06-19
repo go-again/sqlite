@@ -36,18 +36,18 @@
 // # Usage
 //
 //	import (
-//	    sqlite "github.com/go-again/sqlite"
-//	    "github.com/go-again/sqlite/ext/hash"
+//	    sqlite "gosqlite.org"
+//	    "gosqlite.org/ext/hash"
 //	)
 //
 //	if err := hash.Register(conn); err != nil { ... }
 //	row := db.QueryRow(`SELECT lower(hex(sha256('hello')))`)
 //
-// For pool-wide install via [github.com/go-again/sqlite.Driver.ConnectHook],
+// For pool-wide install via [gosqlite.org.Driver.ConnectHook],
 // blank-import the auto sub-package (which also blank-imports every
 // supported hash algorithm so all functions register):
 //
-//	import _ "github.com/go-again/sqlite/ext/hash/auto"
+//	import _ "gosqlite.org/ext/hash/auto"
 //
 // [ncruces/ext/hash]: https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/hash
 package hash
@@ -59,7 +59,7 @@ import (
 	"fmt"
 
 	"github.com/cespare/xxhash/v2"
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 	"lukechampine.com/blake3"
 )
 

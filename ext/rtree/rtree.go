@@ -1,6 +1,6 @@
 // Package rtree adds ready-made custom geometry callbacks for SQLite's
 // built-in R-Tree module, layered on
-// [github.com/go-again/sqlite.Conn.RegisterRTreeGeometry].
+// [gosqlite.org.Conn.RegisterRTreeGeometry].
 //
 // The `rtree` and `geopoly` virtual tables are compiled into the underlying
 // library and need no registration — `CREATE VIRTUAL TABLE … USING rtree(…)`
@@ -12,8 +12,8 @@
 //	SELECT id FROM demo WHERE id MATCH circle(10, 10, 5);
 //
 // For arbitrary custom geometry, call
-// [github.com/go-again/sqlite.Conn.RegisterRTreeGeometry] (single bounding-box
-// overlap test) or [github.com/go-again/sqlite.Conn.RegisterRTreeQuery] (the
+// [gosqlite.org.Conn.RegisterRTreeGeometry] (single bounding-box
+// overlap test) or [gosqlite.org.Conn.RegisterRTreeQuery] (the
 // richer query-callback form) directly.
 //
 // For a typed handle that hides the `CREATE VIRTUAL TABLE … USING rtree(…)`
@@ -23,8 +23,8 @@
 // # Usage
 //
 //	import (
-//	    sqlite "github.com/go-again/sqlite"
-//	    "github.com/go-again/sqlite/ext/rtree"
+//	    sqlite "gosqlite.org"
+//	    "gosqlite.org/ext/rtree"
 //	)
 //
 //	if err := rtree.Register(conn); err != nil { ... }
@@ -32,13 +32,13 @@
 // Geometry functions are per-connection. For pool-wide install, blank-import
 // the auto sub-package:
 //
-//	import _ "github.com/go-again/sqlite/ext/rtree/auto"
+//	import _ "gosqlite.org/ext/rtree/auto"
 package rtree
 
 import (
 	"fmt"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // Register installs this package's geometry functions on c:

@@ -6,8 +6,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/go-again/sqlite/ext/closure"
-	"github.com/go-again/sqlite/internal/testhelp"
+	"gosqlite.org/ext/closure"
+	"gosqlite.org/internal/testhelp"
 )
 
 func openDB(t *testing.T) (*sql.DB, *sql.Conn) {

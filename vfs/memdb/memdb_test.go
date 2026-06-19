@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vfs/memdb"
+	sqlite "gosqlite.org"
+	"gosqlite.org/vfs/memdb"
 )
 
 func TestMemdb_RoundTrip(t *testing.T) {

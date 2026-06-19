@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vfs/cksm"
-	"github.com/go-again/sqlite/vfs/crypto"
+	sqlite "gosqlite.org"
+	"gosqlite.org/vfs/cksm"
+	"gosqlite.org/vfs/crypto"
 )
 
 // TestChain_CksmWrappedByCrypto stacks crypto on top of cksm: every

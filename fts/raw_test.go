@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // openRaw returns an in-memory DB pinned to a single connection. FTS5

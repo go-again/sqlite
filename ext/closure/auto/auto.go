@@ -2,12 +2,12 @@
 // [sqlite.Driver.ConnectHook] so every new connection registers the
 // vtab. Blank-import to opt in:
 //
-//	import _ "github.com/go-again/sqlite/ext/closure/auto"
+//	import _ "gosqlite.org/ext/closure/auto"
 package auto
 
 import (
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/closure"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/closure"
 )
 
 func init() {

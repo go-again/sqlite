@@ -10,7 +10,7 @@ sidebar:
 ## Install
 
 ```sh
-go get github.com/go-again/sqlite
+go get gosqlite.org
 ```
 
 No CGo, no C toolchain, no `apk add`. It builds in `golang:alpine` and distroless images out of the box, and cross-compiles like any pure-Go module.
@@ -24,7 +24,7 @@ import (
 	"database/sql"
 	"log"
 
-	_ "github.com/go-again/sqlite" // registers the "sqlite" and "sqlite3" drivers
+	_ "gosqlite.org" // registers the "sqlite" and "sqlite3" drivers
 )
 
 func main() {
@@ -55,7 +55,7 @@ See [Driver names](reference/driver-names.md) for the full story and [Migrating]
 ## A production preset, no DSN string
 
 ```go
-import sqlite "github.com/go-again/sqlite"
+import sqlite "gosqlite.org"
 
 db, _ := sqlite.OpenWAL("app.db") // WAL + busy_timeout=5s + foreign_keys=on
 defer db.Close()

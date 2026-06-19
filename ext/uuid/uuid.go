@@ -39,17 +39,17 @@
 // # Usage
 //
 //	import (
-//	    sqlite "github.com/go-again/sqlite"
-//	    "github.com/go-again/sqlite/ext/uuid"
+//	    sqlite "gosqlite.org"
+//	    "gosqlite.org/ext/uuid"
 //	)
 //
 //	if err := uuid.Register(conn); err != nil { ... }
 //	row := db.QueryRow(`SELECT uuid(4)`) // random v4
 //
-// For pool-wide install via [github.com/go-again/sqlite.Driver.ConnectHook],
+// For pool-wide install via [gosqlite.org.Driver.ConnectHook],
 // blank-import the auto sub-package:
 //
-//	import _ "github.com/go-again/sqlite/ext/uuid/auto"
+//	import _ "gosqlite.org/ext/uuid/auto"
 //
 // [ncruces/ext/uuid]: https://pkg.go.dev/github.com/ncruces/go-sqlite3/ext/uuid
 package uuid
@@ -63,7 +63,7 @@ import (
 
 	gid "github.com/google/uuid"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // Exported names of the SQL functions Register installs. Exposed as

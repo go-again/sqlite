@@ -1,6 +1,6 @@
 ---
 name: pitfalls
-description: Use when debugging surprising behaviour with go-again/sqlite, or as a pre-ship checklist — the gotchas around per-conn hooks, the connection pool, vec quirks, bind limits, and what is not supported.
+description: Use when debugging surprising behaviour with gosqlite, or as a pre-ship checklist — the gotchas around per-conn hooks, the connection pool, vec quirks, bind limits, and what is not supported.
 ---
 
 # Pitfalls & gotchas

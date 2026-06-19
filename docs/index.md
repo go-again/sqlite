@@ -1,5 +1,5 @@
 ---
-title: go-again/sqlite documentation
+title: gosqlite documentation
 description: Guides, feature reference, and the extension catalog for the CGo-free SQLite driver + ecosystem for Go.
 sidebar:
   order: 0
@@ -7,7 +7,7 @@ sidebar:
 
 # Documentation
 
-`github.com/go-again/sqlite` is a CGo-free SQLite **driver + ecosystem** for Go — a drop-in replacement for `mattn/go-sqlite3`, `modernc.org/sqlite`, and the `glebarez/sqlite` gorm dialector, with first-class typed APIs for vector search, full-text search, encryption at rest, in-memory MVCC, hybrid ranking, a user-implementable VFS, a bounded page cache, and a catalog of loadable Go SQL extensions — all in one module, all pure Go.
+`gosqlite.org` is a CGo-free SQLite **driver + ecosystem** for Go — a drop-in replacement for `mattn/go-sqlite3`, `modernc.org/sqlite`, and the `glebarez/sqlite` gorm dialector, with first-class typed APIs for vector search, full-text search, encryption at rest, in-memory MVCC, hybrid ranking, a user-implementable VFS, a bounded page cache, and a catalog of loadable Go SQL extensions — all in one module, all pure Go.
 
 The [README](../README.md) is the high-level landing page. These docs are the deep reference.
 
@@ -34,4 +34,4 @@ The loadable `ext/` catalog: [overview](extensions/index.md) · [scalars & aggre
 
 [Driver names](reference/driver-names.md) · [DSN flags](reference/dsn-flags.md) · [Build tags](reference/build-tags.md) · [Limits](reference/limits.md) · [Performance](reference/performance.md) · [Supported Go](reference/supported-go.md) · [SQLite version](reference/sqlite-version.md)
 
-The Go API reference (every type and function) is on [pkg.go.dev](https://pkg.go.dev/github.com/go-again/sqlite). AI agents integrating the package should look at the [`skills/`](../skills/) folder.
+The Go API reference (every type and function) is on [pkg.go.dev](https://pkg.go.dev/gosqlite.org). AI agents integrating the package should look at the [`skills/`](../skills/) folder.

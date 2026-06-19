@@ -7,8 +7,8 @@ import (
 	"math/rand/v2"
 	"testing"
 
-	_ "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vec"
+	_ "gosqlite.org"
+	"gosqlite.org/vec"
 )
 
 // openBenchDB mirrors openDB but takes testing.TB so benchmarks and

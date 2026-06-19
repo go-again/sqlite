@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/go-again/sqlite/fusion"
+	"gosqlite.org/fusion"
 )
 
 // buildKeys returns N distinct string keys, suitable as RRF rank input.

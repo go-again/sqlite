@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/go-again/sqlite/vec"
+	"gosqlite.org/vec"
 )
 
 // TestL2Distance asserts L2 distance against a hand-computed value:

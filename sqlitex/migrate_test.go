@@ -5,7 +5,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/go-again/sqlite/sqlitex"
+	"gosqlite.org/sqlitex"
 )
 
 func migrationsFS() fstest.MapFS {

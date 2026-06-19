@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-again/sqlite/vfs/cksm"
+	"gosqlite.org/vfs/cksm"
 )
 
 // TestNew_WrapVFSNotRegistered pins the negative-path error for the

@@ -12,8 +12,8 @@ import (
 	"fmt"
 	"log"
 
-	sqlite "github.com/go-again/sqlite"
-	_ "github.com/go-again/sqlite/ext/statement/auto"
+	sqlite "gosqlite.org"
+	_ "gosqlite.org/ext/statement/auto"
 )
 
 func main() {

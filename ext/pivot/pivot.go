@@ -39,8 +39,8 @@ import (
 	"io"
 	"strings"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/internal/sqlid"
+	sqlite "gosqlite.org"
+	"gosqlite.org/internal/sqlid"
 )
 
 // ModuleName is the name the vtab registers under: `pivot`.
@@ -51,7 +51,7 @@ const ModuleName = "pivot"
 // Registration is per-connection. For pool-wide install via
 // [sqlite.Driver.ConnectHook], blank-import the auto sub-package:
 //
-//	import _ "github.com/go-again/sqlite/ext/pivot/auto"
+//	import _ "gosqlite.org/ext/pivot/auto"
 func Register(c *sqlite.Conn) error {
 	return c.CreateModule(ModuleName, ctor)
 }

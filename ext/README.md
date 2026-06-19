@@ -6,12 +6,12 @@ Two registration shapes per extension:
 
 ```go
 // Explicit — register on a specific *sqlite.Conn (the per-conn idiom).
-import "github.com/go-again/sqlite/ext/regexp"
+import "gosqlite.org/ext/regexp"
 regexp.Register(conn)
 
 // Implicit — blank-import auto-wires via Driver.ConnectHook so every
 // connection the driver opens picks the extension up.
-import _ "github.com/go-again/sqlite/ext/regexp/auto"
+import _ "gosqlite.org/ext/regexp/auto"
 ```
 
 The explicit form is canonical; the `/auto` blank-import is a thin shim that calls `Register` from a `ConnectHook` so the extension survives connection pool churn.

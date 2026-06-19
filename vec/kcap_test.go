@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/go-again/sqlite/vec"
+	"gosqlite.org/vec"
 )
 
 // TestKNN_KCapUpperBound_NoOOM pins round-4 K2: vec.KNNSlice with a

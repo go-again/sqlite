@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"log"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // runningSum keeps the moving sum over a numeric column. Inverse

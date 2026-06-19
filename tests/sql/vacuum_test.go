@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 func TestVacuum_Basic(t *testing.T) {

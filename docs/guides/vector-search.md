@@ -11,8 +11,8 @@ The `vec/` sub-package is a typed `Table` API over [sqlite-vec](https://github.c
 
 ```go
 import (
-	_ "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vec"
+	_ "gosqlite.org"
+	"gosqlite.org/vec"
 )
 
 tbl, _ := vec.Create(ctx, db, "docs", 8, vec.Options{Metric: vec.Cosine})

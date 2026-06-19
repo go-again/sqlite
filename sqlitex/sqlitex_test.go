@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	_ "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/sqlitex"
+	_ "gosqlite.org"
+	"gosqlite.org/sqlitex"
 )
 
 func openDB(t *testing.T) *sql.DB {

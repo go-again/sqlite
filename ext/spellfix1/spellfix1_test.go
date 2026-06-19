@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/go-again/sqlite/ext/spellfix1"
-	"github.com/go-again/sqlite/internal/testhelp"
+	"gosqlite.org/ext/spellfix1"
+	"gosqlite.org/internal/testhelp"
 )
 
 func openDB(t *testing.T) (*sql.DB, *sql.Conn) {

@@ -51,18 +51,18 @@
 // # Usage
 //
 //	import (
-//	    sqlite "github.com/go-again/sqlite"
-//	    "github.com/go-again/sqlite/ext/unicode"
+//	    sqlite "gosqlite.org"
+//	    "gosqlite.org/ext/unicode"
 //	)
 //
 //	if err := unicode.Register(conn); err != nil { ... }
 //
 //	row := db.QueryRow(`SELECT casefold(?), unaccent(?)`, "GROẞER", "café")
 //
-// For pool-wide install via [github.com/go-again/sqlite.Driver.ConnectHook],
+// For pool-wide install via [gosqlite.org.Driver.ConnectHook],
 // blank-import the auto sub-package:
 //
-//	import _ "github.com/go-again/sqlite/ext/unicode/auto"
+//	import _ "gosqlite.org/ext/unicode/auto"
 //
 // # Compatibility notes
 //

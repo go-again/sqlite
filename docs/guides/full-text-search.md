@@ -11,8 +11,8 @@ The `fts/` sub-package is a typed `Index[K, V]` over FTS5.
 
 ```go
 import (
-	_ "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/fts"
+	_ "gosqlite.org"
+	"gosqlite.org/fts"
 )
 
 idx, _ := fts.New[int64, string](ctx, db, "docs", fts.Options{

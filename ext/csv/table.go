@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/go-again/sqlite/internal/sqlid"
-	"github.com/go-again/sqlite/internal/vtabx"
+	"gosqlite.org/internal/sqlid"
+	"gosqlite.org/internal/vtabx"
 )
 
 // Table is a typed handle to a csv virtual table — a CSV file (or inline
@@ -18,7 +18,7 @@ import (
 // use as long as the *sql.DB is.
 //
 // The csv module must be registered on every connection db hands out:
-// blank-import "github.com/go-again/sqlite/ext/csv/auto", or call
+// blank-import "gosqlite.org/ext/csv/auto", or call
 // [Register] / [RegisterFS] on a pinned *sqlite.Conn. File access (os vs a
 // sandbox fs.FS) is fixed at registration; WithFilename resolves against
 // whatever was registered. Without the module, Create fails "no such

@@ -41,7 +41,7 @@ func openInMemory(t *testing.T) *gorm.DB {
 }
 
 // TestGorm_SQLite3DriverName verifies the dialector also accepts the mattn-style
-// "sqlite3" driver name, since github.com/go-again/sqlite registers under both
+// "sqlite3" driver name, since gosqlite.org registers under both
 // names. Existing go-gorm/sqlite users typically pass DriverName="sqlite3".
 func TestGorm_SQLite3DriverName(t *testing.T) {
 	db, err := gorm.Open(New(Config{

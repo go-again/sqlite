@@ -27,7 +27,7 @@ This package and `mattn/go-sqlite3` both claim `"sqlite3"` by default, so blank-
 import (
 	"database/sql"
 	_ "github.com/mattn/go-sqlite3" // claims "sqlite3"
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 func init() {

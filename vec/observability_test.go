@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-again/sqlite/vec"
+	"gosqlite.org/vec"
 )
 
 // stubRecorder counts observed events. Used to assert the Recorder hook

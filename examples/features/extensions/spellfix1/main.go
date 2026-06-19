@@ -15,9 +15,9 @@ import (
 	"fmt"
 	"log"
 
-	_ "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/spellfix1"
-	_ "github.com/go-again/sqlite/ext/spellfix1/auto" // registers the vtab module on every conn
+	_ "gosqlite.org"
+	"gosqlite.org/ext/spellfix1"
+	_ "gosqlite.org/ext/spellfix1/auto" // registers the vtab module on every conn
 )
 
 func main() {

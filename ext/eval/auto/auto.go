@@ -3,12 +3,12 @@
 // Blank-import to opt in — eval() runs arbitrary SQL, so only do this
 // when every caller of eval() is trusted:
 //
-//	import _ "github.com/go-again/sqlite/ext/eval/auto"
+//	import _ "gosqlite.org/ext/eval/auto"
 package auto
 
 import (
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/eval"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/eval"
 )
 
 func init() {

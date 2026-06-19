@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"log"
 
-	_ "github.com/go-again/sqlite"
-	_ "github.com/go-again/sqlite/ext/ipaddr/auto"
+	_ "gosqlite.org"
+	_ "gosqlite.org/ext/ipaddr/auto"
 )
 
 func main() {

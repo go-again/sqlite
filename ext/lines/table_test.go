@@ -9,9 +9,9 @@ import (
 	"testing"
 	"testing/fstest"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/lines"
-	"github.com/go-again/sqlite/internal/testhelp"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/lines"
+	"gosqlite.org/internal/testhelp"
 )
 
 // openLinesDB returns a *sql.DB with the lines module (rooted at fsys) on

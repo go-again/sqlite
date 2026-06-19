@@ -5,8 +5,8 @@ import (
 	"sync"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vfs"
+	sqlite "gosqlite.org"
+	"gosqlite.org/vfs"
 )
 
 // walVFS is refMemVFS upgraded for WAL: its files additionally implement

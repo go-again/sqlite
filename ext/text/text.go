@@ -16,7 +16,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 // maxResult caps the size of text_repeat / text_*pad output to keep a hostile
@@ -28,7 +28,7 @@ const maxResult = 1 << 28 // 256 MiB
 // Per-connection registration. For pool-wide install, blank-import the auto
 // sub-package:
 //
-//	import _ "github.com/go-again/sqlite/ext/text/auto"
+//	import _ "gosqlite.org/ext/text/auto"
 func Register(c *sqlite.Conn) error {
 	return errors.Join(
 		c.RegisterFunc("text_reverse", textReverse, true),

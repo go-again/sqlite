@@ -5,7 +5,7 @@ package sqlite
 //
 // Existing code that uses *sqlite3.SQLiteDriver, *sqlite3.SQLiteConn,
 // sqlite3.SQLiteError etc. continues to work when the import path is changed
-// to "github.com/go-again/sqlite".
+// to "gosqlite.org".
 
 // Conn is the SQLite database connection type. It is exposed for use inside
 // ConnectHook callbacks and for low-level operations such as custom function

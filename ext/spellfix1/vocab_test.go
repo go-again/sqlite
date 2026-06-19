@@ -7,9 +7,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/spellfix1"
-	"github.com/go-again/sqlite/internal/testhelp"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/spellfix1"
+	"gosqlite.org/internal/testhelp"
 )
 
 // openVocabDB returns a *sql.DB with the spellfix1 module installed on

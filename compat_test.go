@@ -638,7 +638,7 @@ func TestGetLimit_RoundTrip(t *testing.T) {
 // The README's "Coexistence with mattn/go-sqlite3" section points readers
 // at this test for a working example.
 func TestCoexistence_CustomNameAlongsideMattn(t *testing.T) {
-	const customName = "go-again-sqlite-coexist"
+	const customName = "gosqlite-coexist"
 
 	// Pretend mattn is also linked in and has registered "sqlite3". We
 	// can't actually import mattn here (would re-register and panic), but
@@ -682,7 +682,7 @@ func TestCoexistence_CustomNameAlongsideMattn(t *testing.T) {
 // TestSQLite3DriverLiteral exercises the mattn idiom of registering a custom
 // driver name via &sqlite3.SQLiteDriver{ConnectHook: ...}.
 func TestSQLite3DriverLiteral(t *testing.T) {
-	const custom = "go-again-custom-1"
+	const custom = "gosqlite-custom-1"
 	var hookFired atomic.Int32
 	sql.Register(custom, &SQLiteDriver{
 		ConnectHook: func(c *SQLiteConn) error {

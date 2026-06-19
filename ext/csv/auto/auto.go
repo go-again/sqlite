@@ -2,16 +2,16 @@
 // so every new connection auto-registers the `csv` module with os-backed
 // file access. Blank-import to opt in:
 //
-//	import _ "github.com/go-again/sqlite/ext/csv/auto"
+//	import _ "gosqlite.org/ext/csv/auto"
 //
 // For sandboxed filesystems (embed.FS / fstest.MapFS / os.DirFS), call
-// [github.com/go-again/sqlite/ext/csv.RegisterFS] from your own
+// [gosqlite.org/ext/csv.RegisterFS] from your own
 // ConnectHook instead.
 package auto
 
 import (
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/csv"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/csv"
 )
 
 func init() {

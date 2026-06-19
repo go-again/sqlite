@@ -16,7 +16,7 @@ import (
 	"regexp"
 	"sync/atomic"
 
-	sqlite "github.com/go-again/sqlite"
+	sqlite "gosqlite.org"
 )
 
 func main() {

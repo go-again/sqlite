@@ -15,8 +15,8 @@ import (
 	"os"
 	"path/filepath"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/vfs/cksm"
+	sqlite "gosqlite.org"
+	"gosqlite.org/vfs/cksm"
 )
 
 func main() {

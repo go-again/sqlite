@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"testing"
 
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/encode"
-	"github.com/go-again/sqlite/internal/testhelp"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/encode"
+	"gosqlite.org/internal/testhelp"
 )
 
 func openDB(t *testing.T) (context.Context, *sql.DB) {

@@ -2,12 +2,12 @@
 // so every new connection registers the REGEXP operator and the regexp_*
 // SQL function family. Blank-import to opt in:
 //
-//	import _ "github.com/go-again/sqlite/ext/regexp/auto"
+//	import _ "gosqlite.org/ext/regexp/auto"
 package auto
 
 import (
-	sqlite "github.com/go-again/sqlite"
-	"github.com/go-again/sqlite/ext/regexp"
+	sqlite "gosqlite.org"
+	"gosqlite.org/ext/regexp"
 )
 
 func init() {

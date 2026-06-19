@@ -14,7 +14,7 @@ import (
 //
 // The supplied db can be any *sql.DB that has loaded the sqlite-vec
 // extension (any *sql.DB obtained from this package's parent driver after
-// `import _ "github.com/go-again/sqlite/vec"` qualifies).
+// `import _ "gosqlite.org/vec"` qualifies).
 func L2Distance(ctx context.Context, db *sql.DB, a, b []float32) (float64, error) {
 	return distance(ctx, db, "vec_distance_l2", a, b)
 }

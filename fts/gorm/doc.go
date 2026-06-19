@@ -10,9 +10,9 @@
 // # Quick start
 //
 //	import (
-//	    sqlitegorm "github.com/go-again/sqlite/gorm"
-//	    "github.com/go-again/sqlite/fts"
-//	    ftsgorm "github.com/go-again/sqlite/fts/gorm"
+//	    sqlitegorm "gosqlite.org/gorm"
+//	    "gosqlite.org/fts"
+//	    ftsgorm "gosqlite.org/fts/gorm"
 //	    "gorm.io/gorm"
 //	)
 //
@@ -101,7 +101,7 @@
 // # DropTable cascade
 //
 // fts/gorm's Plugin implements the DropTableHook interface declared
-// in github.com/go-again/sqlite/gorm. db.Migrator().DropTable(&Model{})
+// in gosqlite.org/gorm. db.Migrator().DropTable(&Model{})
 // drops the source plus the FTS5 table plus all three triggers
 // (external mode) without anyone calling DropSidecar separately.
 // Explicit DropSidecar(db, &Model{}) remains available and is
@@ -109,15 +109,15 @@
 //
 // # Side-by-side compatibility
 //
-// ftsgorm is layered on top of github.com/go-again/sqlite/fts. The
+// ftsgorm is layered on top of gosqlite.org/fts. The
 // raw fts.Index API remains available for callers who want lower-level
 // control (custom tokenizers, multi-index models, manual Rebuild
 // after bulk loads). Both can coexist on the same *gorm.DB.
 //
 // # See also
 //
-//   - github.com/go-again/sqlite/fts — raw FTS5 API.
-//   - github.com/go-again/sqlite/gorm — gorm dialector and the
+//   - gosqlite.org/fts — raw FTS5 API.
+//   - gosqlite.org/gorm — gorm dialector and the
 //     DropTableHook interface this package implements.
 //   - examples/features/gorm/fts-tagged — end-to-end demo of this package.
 //   - dev/coverage/gorm.md — tag syntax tables, mode tradeoffs,
