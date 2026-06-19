@@ -1,6 +1,14 @@
+<div align="center">
+
+<img src="https://github.com/gosqlite/.github/raw/main/profile/logo.png" alt="gosqlite" width="128" />
+
 # gosqlite
 
+[**Website**](https://gosqlite.com) &nbsp;·&nbsp; [**Docs**](https://gosqlite.com/docs) &nbsp;·&nbsp; [**Get started**](https://gosqlite.com/docs/getting-started/) &nbsp;·&nbsp; [**API reference**](https://pkg.go.dev/gosqlite.org)
+
 [![Go Reference](https://pkg.go.dev/badge/gosqlite.org.svg)](https://pkg.go.dev/gosqlite.org)
+
+</div>
 
 **The comprehensive, AI-ready, CGo-free SQLite stack for Go.** One module replaces [`mattn/go-sqlite3`](https://github.com/mattn/go-sqlite3) (registers as `"sqlite3"`), [`modernc.org/sqlite`](https://gitlab.com/cznic/sqlite) (`"sqlite"`), and the [`glebarez/sqlite`](https://github.com/glebarez/sqlite) gorm dialector — then adds first-class **typed** APIs for vector search, full-text search, encryption at rest, in-memory MVCC, hybrid ranking, a user-implementable VFS, a bounded page cache, and a catalog of loadable SQL extensions. Designed so that **migrating to CGo-free and adopting advanced SQLite features is a one-line change**, and so your **AI coding agent gets it right the first time** — the repo ships [Agent Skills](skills/) that teach assistants the real API. All pure Go.
 
@@ -26,8 +34,9 @@ Existing mattn / modernc / glebarez / ncruces code keeps working after the impor
 
 ## Documentation
 
-- **[Getting started](docs/getting-started.md)** · **[Guides](docs/index.md)** · **[Extensions](docs/extensions/index.md)** · **[Reference](docs/index.md#reference)** — the full docs under [`docs/`](docs/).
-- **[pkg.go.dev](https://pkg.go.dev/gosqlite.org)** — the Go API reference.
+- **[gosqlite.com](https://gosqlite.com)** — the documentation site. Start at **[gosqlite.com/docs](https://gosqlite.com/docs)** ([Getting started](https://gosqlite.com/docs/getting-started/) · [Guides](https://gosqlite.com/docs) · [Extensions](https://gosqlite.com/docs/extensions/)).
+- **[pkg.go.dev/gosqlite.org](https://pkg.go.dev/gosqlite.org)** — the Go API reference.
+- Browsing the repo directly? The same docs live under [`docs/`](docs/) — [Getting started](docs/getting-started.md) · [Guides](docs/index.md) · [Extensions](docs/extensions/index.md).
 - **[`skills/`](skills/)** — task recipes for AI agents *using* the package; **[`AGENTS.md`](AGENTS.md)** for agents *developing* it.
 
 ## What you get
