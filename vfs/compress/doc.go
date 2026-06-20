@@ -15,30 +15,59 @@
 // [Pack] and [Unpack] are the same transform without a session — compress an
 // existing .db for shipping or storage, and inflate it back.
 //
-// # Model: snapshot, not live
+// [OpenLive] is the live alternative: it keeps the database compressed on disk
+// and queries it in place — durable per transaction, never materialising the
+// whole database in the clear. Pick between the two with the model below.
 //
-// This package compresses a database AT REST. While the database is open it
-// runs from a full, uncompressed working copy (under the OS temp dir, or
-// Options.TempDir); the compressed file is (re)written only at Close. Two
-// consequences follow, and they are the reason to reach for this over a live
-// compressing VFS:
+// # Two models: snapshot ([Open]) vs live ([OpenLive])
+//
+// [Open] compresses a database AT REST. While it is open the database runs from
+// a full, uncompressed working copy (under the OS temp dir, or Options.TempDir);
+// the compressed file is (re)written only at Close. Two consequences follow:
 //
 //   - Durability is per-SESSION, not per-transaction. The durable artifact is
 //     the snapshot written at Close. A crash while the database is open leaves
 //     the on-disk file at its previous Close — no corruption, but changes made
-//     in the interrupted session are lost. (A plain database, or an encrypting
-//     VFS, is durable per committed transaction.)
+//     in the interrupted session are lost.
 //   - The working copy is the full uncompressed database and exists in
 //     plaintext on disk for the lifetime of the handle. So this is NOT a
 //     substitute for at-rest encryption.
 //
-// That makes it a good fit for archival, distribution, backups, and
-// open-modify-close tooling over compressible data — and a poor fit for a
-// large database that must stay open continuously or be durable across a crash
-// mid-session.
+// That makes [Open] a good fit for archival, distribution, backups, and
+// open-modify-close tooling over compressible data.
 //
-// Opening a raw (uncompressed) database file with [Open] adopts it: the file
-// is rewritten compressed on Close.
+// [OpenLive] instead keeps the on-disk file compressed throughout and translates
+// SQLite's page reads and writes to compressed, block-aligned slots in a
+// block-structured container — a real storage engine (page directory + block
+// allocator + a crash-safe copy-on-write commit). Durability is per-TRANSACTION:
+// each commit atomically flips a ping-pong superblock, so a crash leaves the
+// previous committed state intact and SQLite's rollback journal recovers the
+// rest. Nothing is ever written to disk uncompressed. It fits a large,
+// compressible database that must stay open continuously and survive crashes.
+//
+//	db, err := compress.OpenLive(sqlite.Config{Path: "app.db.az"}, compress.Options{})
+//	if err != nil { ... }
+//	defer db.Close()
+//
+// [OpenLive] is single-connection and rollback-journal in this release: it
+// forces MaxOpenConns(1), sets a large page size to match the container, and
+// selects a rollback journal (overriding any WAL request). WAL and
+// multi-connection concurrency need additional VFS capabilities and are not yet
+// implemented; for those workloads use a plain database or the snapshot [Open].
+// [NewVFS] exposes the underlying [LiveVFS] for advanced wiring; most callers
+// want [OpenLive].
+//
+// Opening a raw (uncompressed) database file with [Open] adopts it (rewritten
+// compressed on Close); [OpenLive] instead refuses a non-container file rather
+// than risk clobbering it.
+//
+// # Untrusted input
+//
+// Opening a compressed file from an untrusted source (a downloaded or
+// distributed artifact) can inflate a tiny crafted frame into an arbitrarily
+// large working copy — a decompression bomb that fills the disk. Set
+// [Options.MaxInflatedSize] to cap how much Open will inflate, so a malformed
+// or hostile file fails instead.
 //
 // # Compression
 //
@@ -49,11 +78,12 @@
 //
 // # Combining with encryption
 //
-// At-rest encryption of the compressed artifact is not built in here: because
-// the working copy is plaintext, encrypting it live would have to happen
-// underneath this package, and compressing already-encrypted data saves
-// nothing. Transparent, per-transaction compression AND encryption together —
-// where the on-disk bytes are always both — is the job of a live compressing
-// VFS composed with [gosqlite.org/vfs/crypto]; it is planned separately. For a
-// shipped artifact, [Pack] output can be piped through any encryptor.
+// The snapshot [Open] does not encrypt: its working copy is plaintext, and
+// compressing already-encrypted data saves nothing. The live [OpenLive] writes
+// only compressed bytes, but does not yet encrypt them either — its
+// block-aligned container is designed so per-block encryption can be added in
+// the block read/write path (a later increment), giving on-disk bytes that are
+// always BOTH compressed and encrypted without VFS chaining. Until then, for a
+// shipped artifact, [Pack] output can be piped through any encryptor; for a live
+// encrypted database without compression, use [gosqlite.org/vfs/crypto].
 package compress // import "gosqlite.org/vfs/compress"

@@ -61,7 +61,7 @@ func Open(cfg sqlite.Config, opts Options) (*sqlite.DB, error) {
 	}
 	workPath := filepath.Join(workDir, "data.db")
 
-	if err := inflate(dest, workPath); err != nil {
+	if err := inflate(dest, workPath, opts.MaxInflatedSize); err != nil {
 		os.RemoveAll(workDir)
 		return nil, err
 	}
@@ -94,7 +94,7 @@ func Open(cfg sqlite.Config, opts Options) (*sqlite.DB, error) {
 //   - missing or empty dest      → leave workPath absent (SQLite creates a fresh DB)
 //   - raw SQLite database at dest → copy it (adopted; becomes compressed on Close)
 //   - otherwise                  → treat dest as a compressed frame and decompress it
-func inflate(dest, workPath string) error {
+func inflate(dest, workPath string, max int64) error {
 	f, err := os.Open(dest)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil // fresh database
@@ -127,7 +127,7 @@ func inflate(dest, workPath string) error {
 			return fmt.Errorf("compress: copy %q: %w", dest, err)
 		}
 	} else {
-		dn, err := decompressStream(out, f)
+		dn, err := decompressStream(out, f, max)
 		if err != nil {
 			return fmt.Errorf("compress: %q is neither a compressed nor a SQLite database: %w", dest, err)
 		}
@@ -220,7 +220,7 @@ func Unpack(dst, src string) error {
 	}
 	defer in.Close()
 	return atomicWrite(dst, func(w io.Writer) error {
-		_, err := decompressStream(w, in)
+		_, err := decompressStream(w, in, 0)
 		return err
 	})
 }

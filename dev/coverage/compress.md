@@ -1,6 +1,6 @@
 # Coverage: vfs/compress
 
-`gosqlite.org/vfs/compress` — a SQLite database stored compressed at rest. Phase 0 is a **snapshot** model (not a live VFS): `Open` inflates the compressed file into a private temp working copy, opens it as a normal database, and recompresses it back over the path on `Close` (wired through the root `Config.VFSCloser` seam). Built on the public driver surface (`sqlite.Open`/`Config`) plus `github.com/go-again/az`; all codec contact is confined to `codec.go`. Origin: the compressed-database request; full design in `.plans/plan-compress-vfs.md`.
+`gosqlite.org/vfs/compress` — a SQLite database stored compressed at rest, in two models. **Snapshot** (`Open`, Phase 0): inflates the compressed file into a private temp working copy, opens it as a normal database, and recompresses it back over the path on `Close` (wired through the root `Config.VFSCloser` seam); durable per session. **Live** (`OpenLive`, Phase 1): a pure-Go, file-backed `vfs.VFS` whose main database is a block-structured compressed container queried in place, durable per transaction. Built on the public driver surface (`sqlite.Open`/`Config`/`gosqlite.org/vfs`) plus `github.com/go-again/az`; all codec contact is confined to `codec.go`. Origin: the compressed-database request; full design in `.plans/plan-compress-vfs.md` (+ `.plans/plan-compress-vfs-phase1.md`).
 
 ## Status legend
 
@@ -24,7 +24,38 @@
 | Double `Close` is idempotent | ✓ typed | `TestDoubleCloseIdempotent` | Second `Close` returns nil and leaves the on-disk file unchanged. |
 | Empty (0-byte) file treated as fresh | ✓ typed | `TestEmptyFileTreatedAsFresh` | Writable; compressed on Close. |
 | WAL session persists through Close→reopen | ✓ typed | `TestWALPersistence` | `consolidate` folds uncheckpointed frames into the main file before compressing. |
+| `Options.MaxInflatedSize` caps inflation (bomb guard) | ✓ typed | `TestMaxInflatedSizeCapsInflation` | Untrusted-input safety: a tiny cap rejects a large inflation and leaves dest untouched; a generous cap opens normally. 0 = unlimited. |
 | `Level` ladder (`Fastest`…`Best`) + auto-detect decode | ✓ typed | `TestRoundTrip` (Best), `TestPackUnpack` (Better) | `CompressionNone`/zero → default level; decode auto-detects LZ4 vs zstd. |
+
+## Live VFS API (Phase 1)
+
+| Feature | Status | Test | Notes |
+|---|---|---|---|
+| `OpenLive(cfg, opts)` round-trip (create → write across txns → Close → reopen) | ✓ typed | `TestLiveRoundTrip` | DB stays compressed on disk; reopen reads all rows; `integrity_check == ok`; `page_size` matches the container. |
+| At-rest file is the container, not raw SQLite | ✓ typed | `TestLiveRoundTrip` | On-disk bytes begin with the `goSQLZv1` superblock magic, never the SQLite magic. |
+| Compression at rest (logical ≫ physical) | ✓ typed | `TestLiveRoundTrip` | Physical container is a fraction of `page_count*page_size` (≈41% on repetitive rows at 64 KiB pages). |
+| Updates + deletes persist (COW slot supersession) | ✓ typed | `TestLiveUpdatesAndDeletesPersist` | Rewrites + deletes across transactions survive reopen with correct counts; `integrity_check == ok`. |
+| Foreign (raw `.db`) file rejected, no clobber | ✓ typed | `TestLiveRejectsForeignFile` | A non-container file has no valid superblock → `OpenLive` errors and the file is left byte-for-byte unchanged. |
+| `NewVFS` geometry validation + idempotent `Close` | ✓ typed | `TestNewVFSRejectsBadGeometry` | Non-power-of-two page size and `BlockSize > PageSize` are rejected; `LiveVFS.Close` unregisters and is idempotent. |
+| Container format: superblock/directory round-trip + ping-pong + CRC rejection | ✓ typed | `TestSuperblock*`, `TestPickSuperblock*`, `TestDirectory*` | Pure encode/decode; highest-generation valid superblock wins; corruption rejected by CRC. |
+| Block allocator: first-fit carve, grow, free + coalesce, reuse | ✓ typed | `TestAllocator*`, `TestBlocksFor` | First-fit from the free list, tail-grow on miss, neighbour-coalescing release, freed-run reuse. |
+| Allocator rebuilt from directory on open (self-healing) | ✓ typed | `TestRebuildAllocatorFromDirectory` | No persisted free-map; scanning the committed directory reclaims any crash-orphaned block automatically. |
+| Crash at EVERY commit step → consistent reopen (never torn) | ✓ typed | `TestCommitCrashAtEveryStep` | A `crashBacking` drops all writes since the last fsync; injecting a crash at each commit op proves reopen yields the previous OR new committed state, never a torn mix. |
+| Torn newer superblock → fall back to previous generation | ✓ typed | `TestTornSuperblockFallsBackToPrevGen` | Corrupting the newer superblock's CRC region makes reopen select the older valid generation. |
+| Corrupted committed directory rejected | ✓ typed | `TestDirectoryCorruptionRejected` | The superblock's `dirChecksum` catches a corrupted directory at open rather than handing back garbage page mappings. |
+| End-to-end recovery through `OpenLive` | ✓ typed | `TestLiveRecoversFromCorruptLatestSuperblock` | A real database whose newest superblock is corrupted reopens at the previous committed transaction with `integrity_check == ok`. |
+| VACUUM (rewrites every page) | ✓ typed | `TestLiveVacuum` | The allocator's hardest workout — mass allocation + supersession; reopen is intact with `integrity_check == ok`. |
+| Churn does not grow the file unbounded | ✓ typed | `TestLiveChurnDoesNotGrowUnbounded` | Repeated insert/delete/VACUUM cycles plateau at a constant at-rest size — freed blocks are reused, not leaked. |
+| Truncate (shrink then regrow) | ✓ typed | `TestMainFileTruncateShrinkAndGrow` | Shrinking frees slots and reports the smaller logical size; regrowth zero-fills the gap; both survive reopen. |
+| Sparse pages zero-fill | ✓ typed | `TestMainFileSparsePages` | A page never written reads back as zeros across a reopen. |
+| Compression ratio vs raw | ✓ typed | `TestLiveCompressionRatioVsRaw` | At the same page size, the compressed container is far smaller than a raw database on log/JSON rows (≈9% of raw); write throughput measured by `BenchmarkLiveInsert`/`BenchmarkRawInsert`. |
+
+### Live VFS design invariants
+
+- **Crash-safe commit (fault-injection proven).** `Sync` writes the new directory to fresh blocks (COW), fsyncs, writes the *alternate* superblock with `generation+1` and a directory checksum, fsyncs, and only then releases superseded extents. A crash before the second fsync leaves the prior generation authoritative; SQLite's rollback journal recovers the logical transaction. `TestCommitCrashAtEveryStep` injects a crash at every commit op and confirms reopen is always a consistent committed generation.
+- **Single-connection, rollback-journal.** `OpenLive` forces `MaxOpenConns(1)`, `page_size` = container page size, `mmap_size=0`, and a rollback journal (overriding WAL). The files embed `vfs.NoLock`. WAL/multi-connection are later increments.
+- **Only the main DB is compressed.** Journals and temp files route to a plain pass-through `File`; the main DB routes to the page-translating compressing `File`.
+- **All `az` use is confined to `codec.go`** (`encodePage`/`decodePage`), mirroring the snapshot path.
 
 ## Design invariants (asserted by the tests above)
 
@@ -32,8 +63,9 @@
 - **Self-contained working file.** `consolidate` runs `PRAGMA wal_checkpoint(TRUNCATE)` before compressing, so `packFile` compresses a single complete `data.db` (sidecar `-wal`/`-shm` are ignored).
 - **All `az` use is confined to `codec.go`**, mirroring `blobstore`.
 
-## Non-goals (Phase 0)
+## Non-goals
 
-- **Live, per-transaction compression** (querying a large DB compressed in place, crash-durable mid-session) — that is a page-translation VFS (a storage engine: directory + free-space allocator + atomic metadata commit), planned separately in `.plans/plan-compress-vfs.md` (Phase 1).
-- **Combined compression + encryption that is always both on disk** — also Phase 1/2 (compose the compressing VFS over `vfs/crypto`). Phase 0's working copy is plaintext, so it is not a substitute for at-rest encryption.
+- **WAL / multi-connection on the live VFS** — `OpenLive` is single-connection, rollback-journal in this increment (it forces `MaxOpenConns(1)`). WAL needs the shm capability; real multi-connection locking needs a lock implementation. Both are later increments (Inc 5).
+- **Encryption on the live VFS** — `OpenLive` writes only compressed bytes but does not yet encrypt them; per-block encryption in the container read/write path is a later increment (Inc 6 / Phase 2). The snapshot `Open`'s working copy is plaintext, so it is not a substitute for at-rest encryption either.
+- **Returning freed space to the OS** — under churn the container reuses freed blocks (so the at-rest file plateaus rather than growing), but it does not shrink the physical file back to the filesystem mid-session; rebuilding the free list on reopen reclaims space for reuse. Returning bytes to the OS is an offline compaction (a future container→container rewrite), not yet implemented.
 - **Compressing an in-use database via `Pack`** — the file must not be open.

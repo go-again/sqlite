@@ -363,3 +363,42 @@ func TestEmptyFileTreatedAsFresh(t *testing.T) {
 		t.Fatalf("got (%d, %v), want (1, nil)", v, err)
 	}
 }
+
+func TestMaxInflatedSizeCapsInflation(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "big.db.az")
+	db, err := Open(sqlite.Config{Path: dest}, Options{})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	mustExec(t, db, `CREATE TABLE t (v TEXT)`)
+	big := strings.Repeat("x", 200000) // compresses tiny, inflates to MBs
+	for range 50 {
+		mustExec(t, db, `INSERT INTO t VALUES (?)`, big)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	before, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A tiny cap must reject the inflation (the DB is many MB) and leave dest
+	// untouched — the decompression-bomb guard.
+	if _, err := Open(sqlite.Config{Path: dest}, Options{MaxInflatedSize: 64 << 10}); err == nil {
+		t.Fatal("Open with a tiny MaxInflatedSize succeeded, want error")
+	}
+	if after, _ := os.ReadFile(dest); !bytes.Equal(before, after) {
+		t.Fatal("a capped open that should have failed clobbered dest")
+	}
+	// A generous cap opens normally.
+	db2, err := Open(sqlite.Config{Path: dest}, Options{MaxInflatedSize: 1 << 30})
+	if err != nil {
+		t.Fatalf("generous cap: %v", err)
+	}
+	defer db2.Close()
+	var n int
+	if err := db2.QueryRow(`SELECT count(*) FROM t`).Scan(&n); err != nil || n != 50 {
+		t.Fatalf("got (%d, %v), want (50, nil)", n, err)
+	}
+}

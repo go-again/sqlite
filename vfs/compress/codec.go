@@ -5,6 +5,7 @@ package compress
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 
 	"github.com/go-again/az"
@@ -47,16 +48,56 @@ func compressStream(dst io.Writer, src io.Reader, c Compression) error {
 	return w.Close()
 }
 
+// encodePage compresses a single logical page for storage in a slot. It
+// returns the bytes to store and whether they are stored verbatim — the page
+// did not shrink, so the raw page is kept and decode must skip the codec. The
+// stored bytes are therefore never larger than the page itself.
+func encodePage(page []byte, c Compression) (stored []byte, verbatim bool, err error) {
+	var buf bytes.Buffer
+	if err := compressStream(&buf, bytes.NewReader(page), c); err != nil {
+		return nil, false, err
+	}
+	if buf.Len() >= len(page) {
+		return page, true, nil
+	}
+	return buf.Bytes(), false, nil
+}
+
+// decodePage decompresses a stored slot into dst, which must be exactly the
+// logical page size; decoding is bounded to it (a slot that inflates past the
+// page size is corrupt). It is the inverse of [encodePage]'s non-verbatim path.
+func decodePage(dst, stored []byte) error {
+	var buf bytes.Buffer
+	buf.Grow(len(dst))
+	if _, err := decompressStream(&buf, bytes.NewReader(stored), int64(len(dst))); err != nil {
+		return err
+	}
+	if buf.Len() != len(dst) {
+		return fmt.Errorf("compress: decoded page is %d bytes, want %d", buf.Len(), len(dst))
+	}
+	copy(dst, buf.Bytes())
+	return nil
+}
+
 // decompressStream writes the decompressed contents of the az frame in src into
 // dst, auto-detecting LZ4 vs zstd from the frame magic, and returns the number
-// of bytes written. A source too short to carry a frame magic (1–3 bytes) is
-// seen by the codec as a cleanly empty stream — it returns (0, nil) — so callers
-// that must not treat that as a valid empty database check the count.
-func decompressStream(dst io.Writer, src io.Reader) (int64, error) {
-	r := az.NewReader(src)
-	n, err := io.Copy(dst, r)
-	if cerr := r.Close(); err == nil {
+// of bytes written. If max > 0, decoding errors once the output would exceed
+// max bytes — a decompression-bomb guard for untrusted sources. A source too
+// short to carry a frame magic (1–3 bytes) is seen by the codec as a cleanly
+// empty stream — it returns (0, nil) — so callers that must not treat that as a
+// valid empty database check the count.
+func decompressStream(dst io.Writer, src io.Reader, max int64) (int64, error) {
+	ar := az.NewReader(src)
+	var rd io.Reader = ar
+	if max > 0 {
+		rd = io.LimitReader(ar, max+1)
+	}
+	n, err := io.Copy(dst, rd)
+	if cerr := ar.Close(); err == nil {
 		err = cerr
+	}
+	if err == nil && max > 0 && n > max {
+		return n, fmt.Errorf("compress: decompressed output exceeds the %d-byte MaxInflatedSize — refusing (possible decompression bomb)", max)
 	}
 	return n, err
 }
