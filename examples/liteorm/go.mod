@@ -3,8 +3,8 @@ module liteormexample
 go 1.25.0
 
 require (
-	gosqlite.org v0.7.1
-	liteorm.org v0.8.0
+	gosqlite.org v0.8.0
+	liteorm.org v0.9.0
 	liteorm.org/dialect/sqlite v0.0.0
 )
 
