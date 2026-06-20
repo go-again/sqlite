@@ -11,7 +11,7 @@ These are [Agent Skills](https://docs.claude.com/en/docs/agents-and-tools/agent-
 | [`hybrid-search`](hybrid-search/SKILL.md) | combining vector + keyword results |
 | [`liteorm`](liteorm/SKILL.md) | an ORM with native vector / full-text / hybrid search, built on gosqlite |
 | [`gorm`](gorm/SKILL.md) | using `gorm.io/gorm` with the gosqlite dialector |
-| [`encryption-and-vfs`](encryption-and-vfs/SKILL.md) | encryption, checksums, in-memory, or `embed.FS` databases |
+| [`encryption-and-vfs`](encryption-and-vfs/SKILL.md) | encryption, compression at rest, checksums, in-memory, or `embed.FS` databases |
 | [`custom-vfs`](custom-vfs/SKILL.md) | backing a DB with custom Go storage |
 | [`extensions`](extensions/SKILL.md) | needing a SQL function/vtab (regexp, uuid, hash, csv, …) |
 | [`blob-storage`](blob-storage/SKILL.md) | storing large / growable / streamed byte objects (files, uploads) in SQLite |

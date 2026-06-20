@@ -1,6 +1,6 @@
 ---
 name: encryption-and-vfs
-description: Use when the task needs encryption at rest, page-checksum corruption detection, an in-memory database with isolation, or serving a database from an embed.FS / byte buffer in a Go app with gosqlite.
+description: Use when the task needs encryption at rest, storing a database compressed at rest, page-checksum corruption detection, an in-memory database with isolation, or serving a database from an embed.FS / byte buffer in a Go app with gosqlite.
 ---
 
 # Encryption, checksums & in-memory VFSes
@@ -55,4 +55,14 @@ db, _ := sql.Open("sqlite", "file:seed.db?vfs="+name+"&mode=ro")
 // or from a []byte: vfs.NewReader(bytes.NewReader(bs), int64(len(bs))) — file is named "db"
 ```
 
-To back a WRITABLE database with your own Go storage, see the `custom-vfs` skill. Full reference: [`docs/guides/encryption.md`](../../docs/guides/encryption.md) and siblings.
+## Compressed at rest (snapshot, not a `?vfs=` VFS)
+
+```go
+import "gosqlite.org/vfs/compress"
+db, _ := compress.Open(sqlite.Config{Path: "app.db.az"}, compress.Options{})
+defer db.Close() // inflates the compressed file on open, recompresses on close
+```
+
+Stores the database compressed on disk. Unlike the VFSes above, this is **not** a `?vfs=` VFS: it inflates the file into a temp working copy for the session and recompresses on `Close`. So durability is **per-session, not per-transaction** — a crash while open reverts to the last `Close`, and the working copy is **plaintext** (not a substitute for encryption). `compress.Pack(dst, src, level)` / `compress.Unpack(dst, src)` do the same transform on a `.db` without a session. Own module (`gosqlite.org/vfs/compress`). Fits archival / distribution / open-modify-close over compressible data; not a large always-open or crash-critical database.
+
+To back a WRITABLE database with your own Go storage, see the `custom-vfs` skill. Full reference: [`docs/guides/encryption.md`](../../docs/guides/encryption.md), [`docs/guides/compression.md`](../../docs/guides/compression.md), and siblings.

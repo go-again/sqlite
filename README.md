@@ -26,7 +26,7 @@ Existing mattn / modernc / glebarez / ncruces code keeps working after the impor
 
 - **🤖 AI / LLM-ready — your coding agent writes correct code on the first try.** The repo ships [**Agent Skills**](skills/): task-scoped instructions (vector search, FTS5, the gorm dialector, LiteORM, custom VFS, migration, pitfalls) an AI assistant loads on demand, so it reaches for the *real* API instead of hallucinating one — drop `skills/` into your agent and the trial-and-error loop largely disappears. It's backed by structured, task-oriented [docs](docs/) ("I want X → do Y"), an [`AGENTS.md`](AGENTS.md) for agents working *in* the codebase, and `doc.go` on every package for pkg.go.dev. **This is the fastest way to build on SQLite with an AI pair-programmer.**
 
-- **📦 Comprehensive — the whole stack, one project.** Driver + typed sqlite-vec + FTS5 + rank fusion + checksums + in-memory & custom VFSes + a bounded page cache + the `ext/` catalog all ship and version **together** in the core `gosqlite.org` module; encryption (`vfs/crypto`), blob storage (`blobstore`), and the gorm dialector (`gosqlite.org/gorm`) are opt-in companion modules in the same repo on the same release cadence, so the core stays dependency-free for everyone who doesn't use them. No stitching `modernc.org/sqlite` + `glebarez/sqlite` + `asg017/sqlite-vec` + a separate encryption/vtab module and reconciling four release cadences — and your agent reasons about *one* surface, not four.
+- **📦 Comprehensive — the whole stack, one project.** Driver + typed sqlite-vec + FTS5 + rank fusion + checksums + in-memory & custom VFSes + a bounded page cache + the `ext/` catalog all ship and version **together** in the core `gosqlite.org` module; encryption (`vfs/crypto`), blob storage (`blobstore`), compression (`vfs/compress`), and the gorm dialector (`gosqlite.org/gorm`) are opt-in companion modules in the same repo on the same release cadence, so the core stays dependency-free for everyone who doesn't use them. No stitching `modernc.org/sqlite` + `glebarez/sqlite` + `asg017/sqlite-vec` + a separate encryption/vtab module and reconciling four release cadences — and your agent reasons about *one* surface, not four.
 
 - **🔀 CGo-free migration in one line.** Swap the import; keep your `sql.Open("sqlite3", …)` calls and `_*` DSN flags (translated transparently). Two driver names (`"sqlite"` + `"sqlite3"`) mean code from either lineage compiles unchanged. You drop the C toolchain, cross-compile with plain `GOOS=… go build`, and ship static distroless/alpine binaries.
 
@@ -57,6 +57,7 @@ The driver itself — CGo-free, mattn-API + glebarez-gorm drop-in, registered un
 - **[Modern Go-typed Config](docs/guides/configuration.md)** — `sqlite.Config{Path, Pragmas, …}` flows uniformly to raw `database/sql`, gorm, and `crypto.Open`; plus typed pragma enums and one-line open shortcuts.
 - **[sqlitex ergonomics](docs/guides/sqlitex.md)** — `Save`, `Transaction`, `Execute`, scalar reads, and an `embed.FS` migration runner.
 - **[Blob storage](docs/guides/blobstore.md)** — pure-Go `blobstore` (a separate module) keeps a large, growable byte object (files, uploads, streamed content) as an `io.ReaderAt` / `io.WriterAt`, O(chunk) memory, with sparse holes, truncate, and optional transparent per-object compression.
+- **[Compressed databases](docs/guides/compression.md)** — pure-Go `vfs/compress` (a separate module) stores a database compressed at rest via `compress.Open`, inflating it for a session and recompressing on close; plus `Pack` / `Unpack` for shipping a compressed `.db`.
 
 ## Declarative models with native search: LiteORM
 
@@ -94,7 +95,7 @@ The Go SQLite landscape has three camps: CGo bindings (mattn, zombiezen), pure-G
 | Loadable Go SQL extensions | catalog under `ext/` | math/regexp via build-tag | ✗ | similar catalog | ✗ |
 | Hot UDF-row throughput | == modernc | fastest (CGo) | baseline | slowest (wazero) | == modernc |
 
-**Better here:** it's the only Go SQLite package that ships AI Agent Skills + task-oriented docs, so an AI assistant builds against it correctly without trial and error; one project ships the whole stack (driver + vec + FTS5 + fusion + cksm + VFSes + page cache + `ext/`, plus the `vfs/crypto`, `blobstore`, and gorm companion modules) on one release cadence; one driver under two SQL names makes migration a one-line swap; typed vec/FTS5 are first-class where every other driver needs DIY plumbing; custom Go FTS5 tokenizers and the typed `sqlite.Config` are unique to this module; and [LiteORM](https://liteorm.org), built on this driver, is the only Go SQLite data layer with native vector / full-text / hybrid search wired straight in.
+**Better here:** it's the only Go SQLite package that ships AI Agent Skills + task-oriented docs, so an AI assistant builds against it correctly without trial and error; one project ships the whole stack (driver + vec + FTS5 + fusion + cksm + VFSes + page cache + `ext/`, plus the `vfs/crypto`, `blobstore`, `vfs/compress`, and gorm companion modules) on one release cadence; one driver under two SQL names makes migration a one-line swap; typed vec/FTS5 are first-class where every other driver needs DIY plumbing; custom Go FTS5 tokenizers and the typed `sqlite.Config` are unique to this module; and [LiteORM](https://liteorm.org), built on this driver, is the only Go SQLite data layer with native vector / full-text / hybrid search wired straight in.
 
 **The trade-offs are narrow:** mattn's CGo binding is ~3% faster on hot per-row UDF paths (a few extra allocs/op on a no-op authorizer — invisible once you let SQL do the work); the support window tracks the two newest Go releases; and `vfs/crypto` is confidentiality-only (no SQLCipher on-disk format or per-page MAC). None is a dealbreaker for typical use; details in [Performance](docs/reference/performance.md).
 
@@ -131,6 +132,7 @@ Plain `database/sql` works too: `sql.Open("sqlite", "file:app.db")`. The full se
 | `gosqlite.org/pcache` | application-controlled bounded page cache |
 | `gosqlite.org/sqlitex` | ergonomic `database/sql` helpers + `embed.FS` migrations |
 | `gosqlite.org/blobstore` | large, growable byte objects as `io.ReaderAt`/`io.WriterAt` (files, uploads), optional transparent compression — **separate module** |
+| `gosqlite.org/vfs/compress` | a SQLite database compressed at rest (`compress.Open`, plus `Pack` / `Unpack`) — **separate module** |
 | `gosqlite.org/ext/<name>` (+ `/auto`) | opt-in loadable Go extensions — see the [catalog](docs/extensions/index.md) |
 
 ## Migrating
