@@ -41,4 +41,4 @@ for m, err := range tbl.KNN(ctx, query, 5) { // streaming iter.Seq2
 - `bit[N]` needs `N % 8 == 0`; `chunk_size` must be a multiple of 8.
 - The `LIMIT`/`k` is inlined as a literal because sqlite-vec's planner needs it visible.
 
-The full matrix of column options, metrics, encodings, and KNN forms is in [`dev/coverage/vec.md`](../../dev/coverage/vec.md). For combining vector + lexical results, see [Hybrid search](hybrid-search.md). For the gorm sidecar, see [gorm](gorm.md).
+The full matrix of column options, metrics, encodings, and KNN forms is in [`dev/coverage/vec.md`](../../dev/coverage/vec.md). For combining vector + lexical results, see [Hybrid search](hybrid-search.md). For vector search inside an ORM, see [LiteORM](https://liteorm.org).

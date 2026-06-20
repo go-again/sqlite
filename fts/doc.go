@@ -105,14 +105,10 @@
 //
 // # See also
 //
-//   - gosqlite.org/fts/gorm — tag-driven FTS5 indexes
-//     wired into gorm models. Tag string fields with fts5:"…" and the
-//     plugin manages CREATE, AFTER INSERT/UPDATE/DELETE triggers,
-//     external / in-table / contentless mode selection, soft-delete
-//     filtering, and DropTable cascade.
 //   - examples/features/search/fts-search — runnable demo of the raw fts.Index API.
-//   - examples/features/gorm/fts-tagged — the same flow expressed via the
-//     gorm bridge.
+//   - LiteORM (liteorm.org) — an ORM with native, tag-driven full-text search built on
+//     this fts primitive (declarative fts: tags, AutoMigrate-provisioned
+//     sidecars, typed ranked results).
 //   - dev/coverage/fts.md — every documented FTS5 feature with its
 //     current status (typed / raw / inherited).
 //   - gosqlite.org/vfs/crypto — pure-Go encryption at

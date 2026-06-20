@@ -22,6 +22,7 @@ just examples                        # build + run all of them (smoke test)
 | coming from `modernc.org/sqlite` | [`migrating/from-modernc`](migrating/from-modernc/) | same `sqlite` driver name and DSN — you already work |
 | coming from `glebarez/sqlite` or `gorm.io/driver/sqlite` | [`gorm/examples/from-glebarez`](../gorm/examples/from-glebarez/) | swap the dialector import to the `gosqlite.org/gorm` module; the `sqlite.Open(dsn)` signature is identical |
 | new, using `database/sql` | [`getting-started/database-sql`](getting-started/database-sql/) then [`getting-started/config`](getting-started/config/) | the idiomatic foundation, then the typed `sqlite.Config` entry |
+| new, want an ORM with native vector / FTS / hybrid search | [`liteorm/`](liteorm/) | an ORM with declarative `vec:` / `fts:` model indexes and typed ranked search, all on this driver |
 | new, using gorm | [`gorm/examples/getting-started`](../gorm/examples/getting-started/) | the `gosqlite.org/gorm` dialector module, opened from a typed `sqlite.Config` |
 | after a specific capability | [`features/`](features/) | vector / FTS5 search, custom VFS, the `ext/` catalog, hooks, sessions, … |
 
@@ -42,7 +43,7 @@ just examples                        # build + run all of them (smoke test)
 | | looks like | when |
 |---|---|---|
 | raw | `rows, _ := db.Query(...); for rows.Next() { rows.Scan(...) }` | full control; the base every example builds on |
-| high-level | `vec.Table` / `fts.Index` typed handles, or gorm models | vector / FTS5 search and ORM ergonomics without hand-written DDL |
+| high-level | `vec.Table` / `fts.Index` typed handles, or gorm / LiteORM models | vector / FTS5 search and ORM ergonomics without hand-written DDL |
 
 An example can be modern on one dial and raw on the other — that's normal. A `hooks` or `session` example uses raw SQL because the *feature* is connection-level; that raw SQL is the right tool, not legacy. The only genuinely "legacy" markers are the `sqlite3` driver alias and the `_`-prefixed DSN flags, and those appear **only** under [`migrating/`](migrating/), where they're the point.
 
@@ -55,7 +56,7 @@ An example can be modern on one dial and raw on the other — that's normal. A `
 | glebarez/sqlite | n/a (gorm) | `gorm.Open(sqlite.Open(dsn), …)` with `sqlite "gosqlite.org/gorm"` |
 | gorm.io/driver/sqlite | n/a (gorm) | same as glebarez — our dialector is a drop-in for both |
 
-When you're ready to modernize, move connection setup from a DSN string to [`sqlite.Config`](../config.go) (see [`getting-started/config`](getting-started/config/)), and reach for the typed [`vec`](../vec/) / [`fts`](../fts/) handles or [gorm](../gorm/) where they save you hand-written SQL. You gain typed pragmas, built-in encryption, pool knobs in one value, typed search, and gorm sidecars — without giving up `database/sql`.
+When you're ready to modernize, move connection setup from a DSN string to [`sqlite.Config`](../config.go) (see [`getting-started/config`](getting-started/config/)), and reach for the typed [`vec`](../vec/) / [`fts`](../fts/) handles or [gorm](../gorm/) where they save you hand-written SQL. You gain typed pragmas, built-in encryption, pool knobs in one value, and typed search — without giving up `database/sql`.
 
 ## Folders
 
@@ -66,3 +67,4 @@ When you're ready to modernize, move connection setup from a DSN string to [`sql
   - [`vfs/`](features/vfs/) — custom + built-in virtual file systems (in-memory, encrypted, checksummed, fs.FS-backed)
   - [`extensions/`](features/extensions/) — the loadable `ext/` catalog (scalars, aggregates, vtabs, stores)
   - [`advanced/`](features/advanced/) — hooks, sessions/changesets, backup, page cache, window functions, and more
+- **[`liteorm/`](liteorm/)** — [LiteORM](https://liteorm.org), an ORM with native vector / full-text / hybrid search built on this driver. *(Separate module — see its README.)*

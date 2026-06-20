@@ -70,7 +70,7 @@ doc.go                  package doc (pkg.go.dev landing)
 - `sqlitex/` — ergonomic `database/sql` helpers (Save, Transaction, ExecScript, Execute, Result*, Migrate) in the zombiezen/crawshaw lineage.
 - `vfs/` — `vfs.New(fs.FS)` + `vfs.NewReader`; the public user-implementable VFS (`vfs.Register` with `vfs.VFS`/`vfs.File`, optional `vfs.ShmFile` for WAL, `vfs.NoLock`, `vfs.Wrap` instrumentation; dispatcher in `register.go`/`iomethods.go`/`shm.go`); `vfs/crypto` (encryption), `vfs/cksm` (page checksums), `vfs/mvcc` (snapshot-isolation in-memory), `vfs/memdb` (plain in-memory).
 - `pcache/` — application-controlled page cache (`InstallBoundedLRU` over `SQLITE_CONFIG_PCACHE2`, off-heap blocks + the 11 PCACHE2 trampolines via `internal/cabi`).
-- `internal/` — `cabi/` (the C-ABI primitives), `sqlid/` (SQL-identifier toolkit), `gormbridge/` (shared reflect/gorm plumbing), `obs/` (slog level-dispatch), `raceskip/`, `testhelp/`.
+- `internal/` — `cabi/` (the C-ABI primitives), `sqlid/` (SQL-identifier toolkit), `obs/` (slog level-dispatch), `raceskip/`, `testhelp/`.
 - `ext/` — loadable Go extensions, one sub-package per ext, each with an `auto/` blank-import. Inventory + status: [`dev/coverage/ext.md`](dev/coverage/ext.md). `ext/internal/filevtab/` holds the file-vtab scaffolding shared by `ext/csv` + `ext/lines`.
 - `tests/sql/` — SQL conformance suite, organized by SQLite Language Reference category.
 - `examples/` — runnable examples grouped by reader intent: `migrating/`, `getting-started/`, `features/{search,vfs,extensions,advanced}/`. `examples/README.md` is the router. Smoke-tested by `just examples`; run one with `just example <leaf-or-subpath>`. (gorm examples live in the `gorm/` module under `gorm/examples/`.)
@@ -126,7 +126,7 @@ Dot-prefixed top-level dirs (e.g. `.plans/`) are local-only working state, gitig
 First: **does the typed API or the raw SQL path own this?**
 
 - **Raw SQL / conn-level** (DSN flag, hook, `Conn.Raw` method) → root package; touches modernc-derived files, be conservative.
-- **Vector** → `vec/` (typed `Table`). **Full-text** → `fts/`. **gorm** dialector/Migrator → the separate `gosqlite.org/gorm` module. **Rank fusion** → `fusion/` (pure Go). ORM-level vector/FTS search lives in the sibling **liteorm** project, not here.
+- **Vector** → `vec/` (typed `Table`). **Full-text** → `fts/`. **gorm** dialector/Migrator → the separate `gosqlite.org/gorm` module. **Rank fusion** → `fusion/` (pure Go). ORM-level vector/FTS search lives in the **liteorm** project, not here.
 - **Encryption / VFS** → `vfs/crypto/` or the public `vfs/` interface; do not patch the transpilation pipeline; honor the struct-drift discipline.
 - **Loadable extension** → `ext/<name>/` with a `Register(*Conn) error` + a sibling `ext/<name>/auto/` blank-import; track status in [`dev/coverage/ext.md`](dev/coverage/ext.md).
 - **SQL conformance tests** → `tests/sql/`. **Observability** → `Wrap(...)` decorators (the per-package `Recorder` shape difference is intentional).

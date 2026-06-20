@@ -201,7 +201,7 @@ modernc bump.
 ## See also
 
 - [`../examples/features/search/fts-search/`](../../examples/features/search/fts-search/) — raw `fts.Index`.
-- ORM-level FTS5 (declarative tags + `AutoMigrate` + typed search) lives in the sibling **liteorm** project; the old `fts/gorm` sidecar plugin was removed.
+- ORM-level FTS5 (declarative tags + `AutoMigrate` + typed search) lives in the **liteorm** project; the old `fts/gorm` sidecar plugin was removed.
 
 ---
 

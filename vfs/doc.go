@@ -99,5 +99,5 @@
 //
 //   - examples/features/vfs/custom/ — a writable in-memory VFS on the public interface.
 //   - examples/features/vfs/embed/ — minimal read-only embed.FS demonstration.
-//   - examples/features/gorm/vfs/ — the read-only flow with a gorm dialector on top.
+//   - gorm/examples/vfs/ — the read-only flow with a gorm dialector on top.
 package vfs

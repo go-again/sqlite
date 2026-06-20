@@ -13,4 +13,4 @@ Runnable examples for the `gosqlite.org/gorm` dialector module — a CGo-free dr
 | [`vec`](vec/) | gorm alongside the gorm-free `vec` primitive (sqlite-vec KNN) driven via raw SQL |
 | [`fts`](fts/) | gorm alongside the gorm-free `fts` primitive (FTS5 search) driven via raw SQL |
 
-For an ORM with **native**, tag-driven vector / full-text search (declarative `vec:` / `fts:` tags, `AutoMigrate`-provisioned sidecars, typed ranked results), see the sibling **liteorm** project (`liteorm.org`).
+For an ORM with **native**, tag-driven vector / full-text search (declarative `vec:` / `fts:` tags, `AutoMigrate`-provisioned sidecars, typed ranked results), see [**LiteORM**](https://liteorm.org).

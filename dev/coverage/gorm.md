@@ -174,7 +174,7 @@ The `ext/` vtab modules (`csv`, `lines`, `closure`, `bloom`, `spellfix1`, `array
 
 ## ORM-level vector / full-text search
 
-The tag-driven `vec/gorm` and `fts/gorm` sidecar plugins were **removed** — that capability now lives, first-class, in the sibling **liteorm** project (`liteorm.org`): declarative `vec:` / `fts:` tags, `AutoMigrate`-provisioned sidecars, and typed `search.For[T]` helpers. On plain `gorm.io/gorm`, drive the gorm-free `vec` / `fts` primitives via raw SQL.
+The tag-driven `vec/gorm` and `fts/gorm` sidecar plugins were **removed** — that capability now lives, first-class, in the **liteorm** project (`liteorm.org`): declarative `vec:` / `fts:` tags, `AutoMigrate`-provisioned sidecars, and typed `search.For[T]` helpers. On plain `gorm.io/gorm`, drive the gorm-free `vec` / `fts` primitives via raw SQL.
 
 For the coverage of the old tag-driven sidecar plugins, see the liteorm project — they were removed here (see above).
 

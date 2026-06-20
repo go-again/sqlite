@@ -36,4 +36,4 @@ Runnable: [`examples/features/search/fts-search/`](../../examples/features/searc
 - **Content modes:** external-content (default), in-table, or contentless.
 - **Vocab:** `fts.Vocab` exposes term frequencies + autocomplete from the FTS5 vocabulary tables — see [`examples/features/search/fts-vocab/`](../../examples/features/search/fts-vocab/main.go).
 
-The full matrix of index options, query operators, search options, auxiliary functions, maintenance commands, and tokenizers is in [`dev/coverage/fts.md`](../../dev/coverage/fts.md). For combining lexical + vector results, see [Hybrid search](hybrid-search.md); for the gorm sidecar, see [gorm](gorm.md).
+The full matrix of index options, query operators, search options, auxiliary functions, maintenance commands, and tokenizers is in [`dev/coverage/fts.md`](../../dev/coverage/fts.md). For combining lexical + vector results, see [Hybrid search](hybrid-search.md); for full-text search inside an ORM, see [LiteORM](https://liteorm.org).

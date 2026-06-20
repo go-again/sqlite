@@ -37,7 +37,7 @@
 // Same [sqlite.Config] type the root package exposes — set
 // [sqlite.Encryption] for transparent encryption at rest, or
 // MaxOpenConns / MaxIdleConns / ConnMaxLifetime to tune the pool.
-// See examples/getting-started/gorm for the plain + encrypted demos.
+// See examples/getting-started for the plain + encrypted demos.
 //
 // # Quick start (legacy DSN, still supported)
 //
@@ -60,9 +60,9 @@
 //     requires for column type / constraint changes: SQLite's ALTER TABLE
 //     cannot change a column's type or its constraints in place, so the
 //     table is rebuilt — an inherent SQLite limitation, not a version concern.
-//   - DropTableHook interface: third-party gorm plugins (this module's
-//     vec/gorm and fts/gorm bridges, for example) can implement
-//     DropTableHook to cascade their sidecar cleanup when callers run
+//   - DropTableHook interface: third-party gorm plugins that own a sidecar
+//     table or triggers tied to a gorm-managed source table can implement
+//     DropTableHook to cascade their cleanup when callers run
 //     db.Migrator().DropTable(&Model{}). No second helper call needed.
 //
 // # Virtual-table extensions (ext/)
@@ -76,11 +76,10 @@
 // VIRTUAL TABLE, db.Raw / db.Table(...).Scan / Where for reads. gorm's
 // AutoMigrate can't emit CREATE VIRTUAL TABLE … USING …, so create the
 // vtab out-of-band — raw db.Exec, or the typed csv.Create / lines.Create
-// over db.DB(). There is deliberately no csv/gorm or lines/gorm sidecar:
-// those vtabs are the table, not a companion index, so the bridge-plugin
-// shape used by vec/gorm and fts/gorm does not apply. See
-// examples/features/gorm/ext-vtabs for csv / lines / closure / bloom / spellfix1
-// each driven through gorm.
+// over db.DB(). There is deliberately no csv/gorm or lines/gorm sidecar
+// plugin: those vtabs are the table, not a companion index, so there is
+// nothing to keep in sync. See examples/ext-vtabs for csv / lines /
+// closure / bloom / spellfix1 each driven through gorm.
 //
 // # Configuration knobs
 //
@@ -113,11 +112,10 @@
 //
 // # See also
 //
-//   - gosqlite.org/vec/gorm — tag-driven sqlite-vec
-//     vector-search sidecars wired into gorm models.
-//   - gosqlite.org/fts/gorm — tag-driven FTS5 search
-//     indexes wired into gorm models, with external / in-table /
-//     contentless modes.
-//   - gosqlite.org/vfs — io/fs.FS-backed read-only
-//     databases (e.g. shipping seed data inside an embed.FS).
+//   - gosqlite.org — the root driver: the shared sqlite.Config type and
+//     the ext/ catalog of loadable SQL functions and virtual tables.
+//   - gosqlite.org/vfs — io/fs.FS-backed read-only databases (e.g. shipping
+//     seed data inside an embed.FS), usable under this dialector.
+//   - examples/ in this module — getting-started, from-glebarez, crypto,
+//     vfs, ext-scalars, ext-vtabs.
 package sqlite

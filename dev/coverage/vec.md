@@ -30,7 +30,7 @@ The core construct. `CREATE VIRTUAL TABLE name USING vec0(...)`.
 | `vec.Create(..., vec.WithIfNotExists())` idempotent | ✓ typed | `TestCreate_WithIfNotExists_Succeeds`, `TestCreate_WithIfNotExists_DimMismatchUndetected` | Schema mismatch is NOT validated under WithIfNotExists. |
 | `vec.ErrAlreadyExists` sentinel for `errors.Is` | ✓ typed | `TestCreate_DefaultFailsOnSecondCall` |
 | `vec.Open` for an existing table | ✓ typed | `TestTyped_Open_OnExistingTable` | Strict schema match (caller asserts dim / metric). |
-| Explicit primary key (`id text/integer primary key`) | ✓ typed | `TestKeyed_StringKeys`, `TestKeyed_Int64Keys` | Generic `KeyedTable[K]` (`CreateKeyed[K]` / `OpenKeyed[K]`, `K = int64 \| string`) for UUID/slug keys; `WithKeyColumn` overrides the column name (default `id`). Unblocks the gorm sidecar's non-int64 keys. |
+| Explicit primary key (`id text/integer primary key`) | ✓ typed | `TestKeyed_StringKeys`, `TestKeyed_Int64Keys` | Generic `KeyedTable[K]` (`CreateKeyed[K]` / `OpenKeyed[K]`, `K = int64 \| string`) for UUID/slug keys; `WithKeyColumn` overrides the column name (default `id`). Enables UUID / slug primary keys for ORM models on non-int64 keys. |
 
 ### Column options
 
@@ -153,7 +153,7 @@ fixture verbatim; a delta there means upstream changed numeric output.
 ## See also
 
 - [`../examples/features/search/vec-search/`](../../examples/features/search/vec-search/) — raw `vec.Table`.
-- ORM-level vector search (declarative tags + `AutoMigrate` + typed KNN) lives in the sibling **liteorm** project; the old `vec/gorm` sidecar plugin was removed.
+- ORM-level vector search (declarative tags + `AutoMigrate` + typed KNN) lives in the **liteorm** project; the old `vec/gorm` sidecar plugin was removed.
 
 ---
 

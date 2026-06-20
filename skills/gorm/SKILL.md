@@ -29,6 +29,12 @@ import (
 db, _ := sqlitegorm.OpenConfig(sqlite.Config{Path: "my.db", Pragmas: sqlite.RecommendedPragmas()})
 ```
 
-## Vector / full-text search
+## Good to know
 
-There are **no vec/FTS gorm sidecar plugins** in gosqlite — do not reach for `vec/gorm` or `fts/gorm` (removed). For an ORM with native vector/full-text search, use **liteorm** (`liteorm.org`): declarative `vec:` / `fts:` tags + `AutoMigrate` + typed `search.For[T](db).Vector/.FullText/.Hybrid` helpers. On plain `gorm.io/gorm`, drive gosqlite's gorm-free `vec` / `fts` primitives via raw SQL (`db.Exec` / `db.Raw`).
+- **`OpenConfig` returns a `*sqlitegorm.DB`** that embeds `*gorm.DB`; `defer db.Close()` drains the pool *and* unregisters any encryption VFS — no separate `*sql.DB` teardown.
+- **Encryption at rest**: set `sqlite.Config{Encryption: &sqlite.Encryption{Key: key}}` — the dialector wires and tears down the VFS for you.
+- **Error translation** is on through the dialector: unique / primary-key violations map to `gorm.ErrDuplicatedKey`, foreign-key violations to `gorm.ErrForeignKeyViolated`.
+- **`time.Time` columns**: the dialector injects `_texttotime=1` so `DATE` / `DATETIME` / `TIMESTAMP` scan back as `time.Time`; opt out with `_texttotime=0` in the DSN.
+- **ext/ virtual tables** (`csv`, `lines`, `closure`, `bloom`, `spellfix1`, …) work through gorm: register the module on the pool, pin it with `sqlDB.SetMaxOpenConns(1)`, create the vtab with `db.Exec` (AutoMigrate can't emit `CREATE VIRTUAL TABLE`), then read with `db.Raw` / `db.Table(...).Scan`. See [`gorm/examples/ext-vtabs`](../../gorm/examples/ext-vtabs/main.go).
+
+Runnable demos: [`gorm/examples/`](../../gorm/examples/) (getting-started, from-glebarez, crypto, vfs, ext-scalars, ext-vtabs).

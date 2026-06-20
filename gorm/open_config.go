@@ -21,7 +21,7 @@ import (
 //	defer db.Close()
 //
 //	db.AutoMigrate(&Model{})  // *gorm.DB methods
-//	db.Use(vecgorm.Plugin())  // plugins compose normally
+//	db.Use(myPlugin)          // gorm plugins compose normally
 type DB struct {
 	*gorm.DB
 	fs *crypto.FS // nil unless Encryption was set

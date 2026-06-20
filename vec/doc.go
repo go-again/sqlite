@@ -62,8 +62,8 @@
 // strings (or you want an explicit key column), use [CreateKeyed] /
 // [OpenKeyed] to get a [KeyedTable][K] (K = int64 | string): Insert / KNN take
 // and return K-typed keys. [WithKeyColumn] names the key column (default "id").
-// This is the form the gorm sidecar needs for models with non-int64 primary
-// keys.
+// This is the form an ORM needs for models with non-int64 (UUID / slug)
+// primary keys.
 //
 // # Filtered KNN
 //
@@ -116,7 +116,7 @@
 // target the upstream `modernc.org/sqlite/vec` does not cover, `go
 // build ./...` against your module will fail at this sub-package
 // while the rest of gosqlite.org still compiles. The
-// remaining sub-packages (root driver, fts, gorm, vfs, fts/gorm) work
+// remaining sub-packages (root driver, fts, vfs, ext/) work
 // on every supported target. Build with `go build ./... 2>/dev/null
 // || go build ./` if you want to skip vec/ on niche arches, or list
 // the packages you actually consume explicitly.
@@ -130,13 +130,10 @@
 //
 // # See also
 //
-//   - gosqlite.org/vec/gorm — tag-driven sqlite-vec
-//     sidecars wired into gorm models. Define an Embedding field on
-//     a gorm model and the plugin owns CRUD sync, soft-delete
-//     filtering, and DropTable cascade.
 //   - examples/features/search/vec-search — runnable demo of the raw vec.Table API.
-//   - examples/features/gorm/vec-tagged — the same data flow expressed via
-//     the gorm bridge.
+//   - LiteORM (liteorm.org) — an ORM with native, tag-driven vector search built on
+//     this vec primitive (declarative vec: tags, AutoMigrate-provisioned
+//     sidecars, typed ranked results).
 //   - dev/coverage/vec.md — every documented sqlite-vec feature
 //     with its current status (typed / raw / inherited).
 //   - gosqlite.org/vfs/crypto — pure-Go encryption at

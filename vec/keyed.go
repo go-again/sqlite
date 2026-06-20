@@ -19,8 +19,8 @@ type Key interface {
 
 // KeyedTable is a sqlite-vec table whose rows are addressed by an explicit
 // primary-key column of type K, instead of the implicit int64 rowid that
-// [Table] uses. Use it when your keys are strings (UUIDs, slugs) — the form the
-// gorm sidecar needs for models with non-int64 primary keys.
+// [Table] uses. Use it when your keys are strings (UUIDs, slugs) — the form an
+// ORM needs for models with non-int64 primary keys.
 //
 // It mirrors [Table]'s lifecycle and KNN surface (and the same [QueryOption]s)
 // but its Insert / KNN take and return K-typed keys. Construct it with

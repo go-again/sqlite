@@ -38,10 +38,9 @@ func (m Migrator) HasTable(value any) bool {
 // table or set of triggers tied to a gorm-managed source table. Our
 // Migrator's DropTable iterates db.Config.Plugins and calls
 // DropTableHook on each implementer BEFORE issuing the source DROP,
-// so the cascade is transparent to the user.
-//
-// vec/gorm and fts/gorm both implement this so
-// `db.Migrator().DropTable(&Model{})` cleans up sidecars + triggers.
+// so the cascade is transparent to the user. A plugin that maintains
+// sidecar tables or triggers tied to the source table implements this
+// to clean them up under `db.Migrator().DropTable(&Model{})`.
 type DropTableHook interface {
 	DropTableHook(db *gorm.DB, model any) error
 }

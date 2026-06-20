@@ -3,6 +3,8 @@
 # Install just from https://just.systems. Run `just` (no args) for the
 # default recipe (build + test + lint).
 
+set dotenv-load := true
+
 # Default recipe: a fast pre-commit gate.
 default: build test lint
 
@@ -122,20 +124,23 @@ example NAME:
     c=$(printf '%s\n' "$m" | grep -c . || true); \
     if [ "$c" -eq 0 ]; then echo "no example matching '{{NAME}}' — see: just examples-list"; exit 1; \
     elif [ "$c" -gt 1 ]; then echo "ambiguous '{{NAME}}', pick one:"; printf '  %s\n' $m; exit 1; \
+    elif [ -f "examples/$m/go.mod" ]; then ( cd "examples/$m" && go run . ); \
     else go run "./examples/$m/"; fi
 
 # List every runnable example (its sub-path under examples/).
 examples-list:
-    @find examples -name main.go | sed 's|/main.go||; s|^examples/||' | sort
+    @find examples -name main.go | while read -r f; do [ -f "${f%/main.go}/go.mod" ] || echo "$f"; done | sed 's|/main.go||; s|^examples/||' | sort
 
 # Examples that write .db files (crypto/cksm/backup) would otherwise leave
 # debris in the repo PWD — we redirect each one into a per-example temp
 # dir and clean up afterwards.
 # Smoke-test every example (each prints something to stdout when working).
-# Discovery is depth-agnostic (find main.go) so the grouped layout works.
+# Discovery is depth-agnostic (find main.go) so the grouped layout works; an
+# example with its own go.mod (e.g. examples/liteorm, a separate module) is
+# skipped here and built on its own (`just example liteorm`).
 examples:
     @repo="$(pwd)"; \
-    for ex in $(find examples -name main.go | sed 's|/main.go||' | sort); do \
+    for ex in $(find examples -name main.go | while read -r f; do [ -f "${f%/main.go}/go.mod" ] || echo "${f%/main.go}"; done | sort); do \
         echo "=== $ex ==="; \
         sandbox="$(mktemp -d)"; \
         ( cd "$repo" && go build -o "$sandbox/example" "./$ex" ) && ( cd "$sandbox" && ./example ) \
@@ -193,3 +198,60 @@ modernc-versions:
 # Quick reference for downstream consumers: print the libc version we pin.
 libc-pin:
     @go list -m modernc.org/libc | awk '{print "modernc.org/libc " $2}'
+
+# Prepare a release: pin every intra-repo gosqlite.org require to VERSION across
+# the publishable modules (the root and gorm/), verify they still build, then
+# PRINT the exact ordered tag/push plan. It edits go.mod only — it never commits,
+# tags, or pushes (run the printed git commands yourself). The dev-only `replace
+# gosqlite.org => ..` directives are ignored by consumers, so they stay. Modules
+# are discovered from each go.mod, so this adapts as modules come and go; the
+# xorm-compat and examples/* modules are not `gosqlite.org/*`, so they are never
+# tagged or imported and are left untouched.
+#
+#   just release v0.8.0
+release VERSION:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    v='{{VERSION}}'
+    semver='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'
+    [[ "$v" =~ $semver ]] || { echo "✗ VERSION must look like v1.2.3 or v1.2.3-rc.1 (got '$v')" >&2; exit 1; }
+
+    # Publishable = module path is gosqlite.org or gosqlite.org/*. (xorm-compat is
+    # module 'xormcompat', examples/liteorm is 'liteormexample' — neither matches,
+    # so both are skipped automatically. Hidden dirs like .liteorm are excluded.)
+    pub=()
+    while IFS= read -r gomod; do
+        mp=$(awk '/^module /{print $2; exit}' "$gomod")
+        case "$mp" in gosqlite.org|gosqlite.org/*) pub+=("$(dirname "$gomod")") ;; esac
+    done < <(find . -name go.mod -not -path './.*/*' | sort)
+
+    echo "→ publishable modules: ${pub[*]}"
+    echo "→ pinning intra-repo gosqlite.org requires to $v"
+    bumped=0
+    for d in "${pub[@]}"; do
+        # Each REQUIRED gosqlite.org* path (require lines read "<path> v<ver>"; the
+        # 'module' line and '=>' replace lines carry no " v<ver>", so neither matches).
+        for p in $(grep -oE "gosqlite\.org(/[A-Za-z0-9._/-]+)? v[0-9][^[:space:]]*" "$d/go.mod" | sed -E 's/ v.*//' | sort -u); do
+            (cd "$d" && go mod edit -require="$p@$v"); echo "    $d: $p → $v"; bumped=1
+        done
+    done
+    [ "$bumped" -eq 1 ] || echo "    (no intra-repo gosqlite.org requires to bump)"
+
+    echo "→ verifying every publishable module still builds (replace directives resolve locally)"
+    for d in "${pub[@]}"; do ( cd "$d" && go build ./... ); done
+
+    echo
+    echo "→ go.mod changes:"
+    git diff --stat -- '*go.mod' 2>/dev/null || echo "    (not a git repo — review go.mod diffs by hand)"
+
+    echo
+    echo "════════ RELEASE PLAN — run these yourself; nothing below was executed ════════"
+    echo "  git add -A && git commit -m 'release $v'"
+    for d in "${pub[@]}"; do
+        case "$d" in .) echo "  git tag $v                       # root module: gosqlite.org" ;; \
+                      *) echo "  git tag ${d#./}/$v                  # ${d#./} module: $(awk '/^module /{print $2; exit}' "$d/go.mod")" ;; esac
+    done
+    echo "  git push origin HEAD --tags        # commit + every tag pushed together"
+    echo
+    echo "  Consumers can 'go get' these once the gosqlite.org go-import vanity meta"
+    echo "  resolves the module path to the GitHub repo and $v is a published tag."

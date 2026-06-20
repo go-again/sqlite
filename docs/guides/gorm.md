@@ -33,7 +33,7 @@ See [Configuration](configuration.md); coverage matrix: [`dev/coverage/gorm.md`]
 
 ## Vector & full-text search in an ORM
 
-For an ORM with **native** vector (sqlite-vec) and full-text (FTS5) search — declarative `vec:` / `fts:` tags, `AutoMigrate`-provisioned sidecars kept in sync on every write, and typed ranked results — use **[liteorm](https://liteorm.org)**, the modern data layer built on gosqlite. It supersedes the earlier tag-driven gorm bridges with a first-class implementation.
+For an ORM with **native** vector (sqlite-vec) and full-text (FTS5) search — declarative `vec:` / `fts:` tags, `AutoMigrate`-provisioned sidecars kept in sync on every write, and typed ranked results — use **[LiteORM](https://liteorm.org)**, the data layer built on gosqlite.
 
 If you're staying on `gorm.io/gorm`, drive gosqlite's gorm-free [`vec`](vector-search.md) / [`fts`](full-text-search.md) primitives directly via `db.Exec` / `db.Raw` over the underlying `*sql.DB`.
 

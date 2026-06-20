@@ -1,6 +1,6 @@
 # Skills — for AI agents using gosqlite
 
-These are [Agent Skills](https://docs.claude.com/en/docs/agents-and-tools/agent-skills/overview): task-scoped instructions that teach an AI agent how to **use** `gosqlite.org` correctly when building an application with it. Each skill is a folder with a `SKILL.md` whose frontmatter `description` says when to load it; the agent reads the description, then pulls in the body when the task matches.
+These are [Agent Skills](https://docs.claude.com/en/docs/agents-and-tools/agent-skills/overview): task-scoped instructions that teach an AI agent how to **use** `gosqlite.org` (and [LiteORM](https://liteorm.org), an ORM built on it) correctly when building an application with it. Each skill is a folder with a `SKILL.md` whose frontmatter `description` says when to load it; the agent reads the description, then pulls in the body when the task matches.
 
 | Skill | Load it when the task is… |
 |---|---|
@@ -9,7 +9,8 @@ These are [Agent Skills](https://docs.claude.com/en/docs/agents-and-tools/agent-
 | [`vector-search`](vector-search/SKILL.md) | semantic / similarity / KNN search |
 | [`full-text-search`](full-text-search/SKILL.md) | keyword / FTS5 / BM25 search |
 | [`hybrid-search`](hybrid-search/SKILL.md) | combining vector + keyword results |
-| [`gorm`](gorm/SKILL.md) | using gorm, especially with vec/FTS sidecars |
+| [`liteorm`](liteorm/SKILL.md) | an ORM with native vector / full-text / hybrid search, built on gosqlite |
+| [`gorm`](gorm/SKILL.md) | using `gorm.io/gorm` with the gosqlite dialector |
 | [`encryption-and-vfs`](encryption-and-vfs/SKILL.md) | encryption, checksums, in-memory, or `embed.FS` databases |
 | [`custom-vfs`](custom-vfs/SKILL.md) | backing a DB with custom Go storage |
 | [`extensions`](extensions/SKILL.md) | needing a SQL function/vtab (regexp, uuid, hash, csv, …) |
