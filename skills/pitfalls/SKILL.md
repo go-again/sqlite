@@ -17,6 +17,11 @@ description: Use when debugging surprising behaviour with gosqlite, or as a pre-
 - **`KNN inside a gorm.Transaction` is not supported** — run it outside the transaction.
 - `bit[N]` needs `N%8==0`; int8 quantization needs values in [-1, 1].
 
+## BLOBs
+
+- **`col || zeroblob(delta)` silently truncates.** SQLite drops `zeroblob` operands under `||` (`x'0102' || zeroblob(10)` has length 2, not 12); `cast`/`substr` don't materialize it either. You cannot grow a value that way — you get a shorter blob and no error. To pre-size, `INSERT … VALUES (zeroblob(N))` or `UPDATE SET col = zeroblob(N)`, then write with `Conn.OpenBlob` / `writeblob`.
+- **`Blob` (`OpenBlob`) is fixed-size.** `WriteAt` past `Size()` errors; growth means re-sizing the row. For an unbounded, growable, randomly-writable byte stream (files, uploads), use **`gosqlite.org/blobstore`** instead of hand-rolling chunk tables.
+
 ## Other
 
 - **Bind values cap at ~2 GiB** (one BLOB/TEXT parameter < INT_MAX bytes) — surfaced as an error.

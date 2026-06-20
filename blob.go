@@ -42,6 +42,10 @@ type Blob struct {
 // rows in the same column without reallocating, which is materially cheaper
 // than repeated OpenBlob/Close cycles.
 //
+// A Blob is fixed-size (see [Blob.WriteAt], [Blob.Size]). For an unbounded,
+// growable, randomly-writable byte stream, use [gosqlite.org/blobstore],
+// which manages the chunking for you.
+//
 // Wraps sqlite3_blob_open: https://sqlite.org/c3ref/blob_open.html
 func (c *Conn) OpenBlob(schema, table, column string, rowid int64, write bool) (*Blob, error) {
 	if schema == "" {
@@ -134,7 +138,11 @@ func (b *Blob) Close() error {
 
 // Size reports the length in bytes of the bound BLOB or TEXT value at the
 // time the handle was opened (or last reopened). The size is fixed for the
-// life of the handle; growing the value requires UPDATEing the row.
+// life of the handle; growing the value requires UPDATEing the row to a
+// larger pre-sized value (e.g. SET col = zeroblob(N), then re-write the
+// content), NOT `col || zeroblob(delta)` — SQLite silently drops zeroblob
+// operands under `||`, producing a shorter value than intended. For a
+// growable stream, use [gosqlite.org/blobstore].
 func (b *Blob) Size() int64 { return b.size }
 
 // Reopen rebinds the handle to a different rowid in the same database,
@@ -212,6 +220,11 @@ func (b *Blob) ReadAt(p []byte, off int64) (int, error) {
 // opened read-only, or if the write would extend past the current value
 // size (BLOB writes cannot grow the row — the row must be sized at INSERT
 // time with zeroblob(N) or via an UPDATE).
+//
+// To grow a value, re-size it with zeroblob(N) at INSERT/UPDATE time and
+// re-open the handle. Do NOT use `col || zeroblob(delta)`: SQLite drops
+// zeroblob operands under `||`, silently truncating. For an unbounded,
+// growable stream, use [gosqlite.org/blobstore] instead of growing by hand.
 //
 // Wraps sqlite3_blob_write: https://sqlite.org/c3ref/blob_write.html
 func (b *Blob) WriteAt(p []byte, off int64) (int, error) {

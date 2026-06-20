@@ -13,7 +13,10 @@
 //     Writes data into the value at (schema, table, column, rowid) starting
 //     at offset. Returns the number of bytes written. The target value must
 //     be sized to hold the write (use INSERT … VALUES (zeroblob(N)) to
-//     pre-size). Writes past the value end error.
+//     pre-size); writeblob does not grow it. Writes past the value end error.
+//     Do NOT try to grow with `col || zeroblob(delta)` — SQLite drops
+//     zeroblob operands under `||`, silently truncating. For an unbounded,
+//     growable byte stream, use [gosqlite.org/blobstore].
 //
 //   - openblob(schema, table, column, rowid, write, callback, args...) → INTEGER
 //     Opens a handle at (schema, table, column, rowid) and invokes callback

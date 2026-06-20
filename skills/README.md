@@ -14,6 +14,7 @@ These are [Agent Skills](https://docs.claude.com/en/docs/agents-and-tools/agent-
 | [`encryption-and-vfs`](encryption-and-vfs/SKILL.md) | encryption, checksums, in-memory, or `embed.FS` databases |
 | [`custom-vfs`](custom-vfs/SKILL.md) | backing a DB with custom Go storage |
 | [`extensions`](extensions/SKILL.md) | needing a SQL function/vtab (regexp, uuid, hash, csv, …) |
+| [`blob-storage`](blob-storage/SKILL.md) | storing large / growable / streamed byte objects (files, uploads) in SQLite |
 | [`pitfalls`](pitfalls/SKILL.md) | debugging surprising behaviour, or before shipping |
 
 ## For maintainers

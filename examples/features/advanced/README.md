@@ -13,3 +13,4 @@ Lower-level capabilities. Several use raw SQL on a pinned connection because the
 | [`udf-context`](udf-context/) | `FunctionContext` aux-data — cache a compiled regexp across rows in a scalar UDF |
 | [`sqlitex`](sqlitex/) | the `sqlitex` helpers — `embed.FS` migrations, `Transaction`, deferred savepoints, `Execute`, scalar reads |
 | [`window-function`](window-function/) | a custom Go window function via `Conn.RegisterWindowFunction` |
+| [`blobstore`](blobstore/) | large, growable byte objects (`gosqlite.org/blobstore`, a separate module) — `io.WriterAt`/`io.ReaderAt`, sparse holes, truncate, optional transparent compression |
