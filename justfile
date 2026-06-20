@@ -205,13 +205,16 @@ test-submodules:
 lint-submodules:
     #!/usr/bin/env bash
     set -euo pipefail
+    root="$(pwd)"
     for d in {{submods}}; do
         echo "=== lint $d ==="
         (
             cd "$d"
             go vet -unsafeptr=false ./...
             staticcheck ./...
-            golangci-lint run --timeout 5m ./...
+            # Pin the config so resolution can't drift if a sub-module ever
+            # gains its own .golangci.yml — always use the repo-root one.
+            golangci-lint run --timeout 5m --config "$root/.golangci.yml" ./...
             # Modernize, minus the forked upstream files we keep verbatim (gorm's
             # sqlite.go/migrator.go; matched on the path tail since these run with
             # the sub-module as the working dir).
