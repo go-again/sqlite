@@ -51,7 +51,7 @@ import (
 db, _ := gorm.Open(sqlite.Open("file:my.db?_pragma=foreign_keys(1)"), &gorm.Config{})
 ```
 
-See [`examples/migrating/from-glebarez/`](../../examples/migrating/from-glebarez/main.go) and the [gorm guide](gorm.md).
+See [`gorm/examples/from-glebarez/`](../../gorm/examples/from-glebarez/main.go) and the [gorm guide](gorm.md).
 
 ## With xorm
 

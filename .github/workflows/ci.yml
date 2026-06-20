@@ -231,6 +231,9 @@ jobs:
         with:
           cache-dependency-path: sqlite/go.sum
 
+      - name: Test the gorm module (its own unit tests, incl. the DDL parser)
+        run: cd sqlite/gorm && go test -count=1 -timeout 3m ./...
+
       - name: Clone gorm at pinned version
         run: |
           mkdir -p "$WORK_DIR"
@@ -252,10 +255,11 @@ jobs:
           go 1.25.0
 
           require (
-              gosqlite.org v0.0.0
+              gosqlite.org/gorm v0.0.0
               gorm.io/gorm $GORM_VERSION
           )
 
+          replace gosqlite.org/gorm => ${{ github.workspace }}/sqlite/gorm
           replace gosqlite.org => ${{ github.workspace }}/sqlite
           EOF
           cat > "$WORK_DIR/shim/sqlite.go" <<'EOF'
@@ -301,6 +305,7 @@ jobs:
           cat >> "$WORK_DIR/gorm/tests/go.mod" <<EOF
 
           replace gorm.io/driver/sqlite => $WORK_DIR/shim
+          replace gosqlite.org/gorm => ${{ github.workspace }}/sqlite/gorm
           replace gosqlite.org => ${{ github.workspace }}/sqlite
           EOF
           (cd "$WORK_DIR/gorm/tests" && go mod tidy)

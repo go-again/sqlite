@@ -63,9 +63,9 @@ doc.go                  package doc (pkg.go.dev landing)
 
 **Sub-packages** (each has a `doc.go`):
 
-- `gorm/` — gorm dialector (originally from glebarez; diverged: RETURNING gating, OpenConfig, error translator). Cross-cutting hooks the bridges register against (e.g. `DropTableHook`) are defined here.
-- `vec/` — sqlite-vec typed `Table`; `vec/gorm/` is the tag-driven sidecar plugin.
-- `fts/` — FTS5 typed `Index[K, V]`; `fts/gorm/` is the tag-driven sidecar plugin.
+- `gorm/` — gorm dialector, a **separate module** (`gosqlite.org/gorm`, its own `go.mod`); the core module does not depend on `gorm.io/gorm`. Originally from glebarez; diverged: RETURNING always-on, OpenConfig, error translator. `DropTableHook` (a public extension point for third-party plugins) is defined here. Examples under `gorm/examples/`.
+- `vec/` — sqlite-vec typed `Table`.
+- `fts/` — FTS5 typed `Index[K, V]`.
 - `fusion/` — RRF / RRF2 rank-fusion helpers (pure Go, no SQLite dep).
 - `sqlitex/` — ergonomic `database/sql` helpers (Save, Transaction, ExecScript, Execute, Result*, Migrate) in the zombiezen/crawshaw lineage.
 - `vfs/` — `vfs.New(fs.FS)` + `vfs.NewReader`; the public user-implementable VFS (`vfs.Register` with `vfs.VFS`/`vfs.File`, optional `vfs.ShmFile` for WAL, `vfs.NoLock`, `vfs.Wrap` instrumentation; dispatcher in `register.go`/`iomethods.go`/`shm.go`); `vfs/crypto` (encryption), `vfs/cksm` (page checksums), `vfs/mvcc` (snapshot-isolation in-memory), `vfs/memdb` (plain in-memory).
@@ -73,7 +73,7 @@ doc.go                  package doc (pkg.go.dev landing)
 - `internal/` — `cabi/` (the C-ABI primitives), `sqlid/` (SQL-identifier toolkit), `gormbridge/` (shared reflect/gorm plumbing), `obs/` (slog level-dispatch), `raceskip/`, `testhelp/`.
 - `ext/` — loadable Go extensions, one sub-package per ext, each with an `auto/` blank-import. Inventory + status: [`dev/coverage/ext.md`](dev/coverage/ext.md). `ext/internal/filevtab/` holds the file-vtab scaffolding shared by `ext/csv` + `ext/lines`.
 - `tests/sql/` — SQL conformance suite, organized by SQLite Language Reference category.
-- `examples/` — runnable examples grouped by reader intent: `migrating/`, `getting-started/`, `features/{search,vfs,extensions,advanced,gorm}/`. `examples/README.md` is the router. Smoke-tested by `just examples`; run one with `just example <leaf-or-subpath>`.
+- `examples/` — runnable examples grouped by reader intent: `migrating/`, `getting-started/`, `features/{search,vfs,extensions,advanced}/`. `examples/README.md` is the router. Smoke-tested by `just examples`; run one with `just example <leaf-or-subpath>`. (gorm examples live in the `gorm/` module under `gorm/examples/`.)
 
 Dot-prefixed top-level dirs (e.g. `.plans/`) are local-only working state, gitignored; nothing in the module references them by name.
 
@@ -88,7 +88,6 @@ Dot-prefixed top-level dirs (e.g. `.plans/`) are local-only working state, gitig
 5. **sqlite-vec quirks.** `INSERT OR REPLACE` is not honored by vec0 (use `(*Table).Update`); vec0's column parser rejects quoted identifiers (we validate via `validIdent`); `LIMIT`/`k` must be inlined as a literal (the planner needs it visible alongside MATCH); metric keywords are `l1`/`l2`/`cosine` (`Dot` aliases L1); `modernc.org/sqlite/vec` isn't transpiled for every GOOS/GOARCH (CI tolerates `vec/` build failures).
 6. **SQLite version** is whatever `modernc.org/sqlite` ships — we don't pin or fork SQLite itself.
 7. **Userauth is dropped** upstream; we reject `_auth*` DSN flags with a clear error. Don't reintroduce it.
-8. **gorm bridge plugin contract.** `vec/gorm` and `fts/gorm` expose `Plugin()` and implement the `DropTableHook` defined in `gorm/migrator.go`; `Migrator.DropTable` iterates `db.Config.Plugins` for implementers — don't rename/change `DropTableHook` without updating both bridges. `vec/gorm` injects `_texttotime=1` so map-mode reads return `time.Time` for DATETIME (matches mattn; needed by the upstream gorm suite). vec-tagged fields need the `vecgorm.Embedding` wrapper OR a `gorm:"-"` tag (the `vec/gorm/tag.go` preflight errors clearly if both are missing).
 
 ---
 
@@ -127,7 +126,7 @@ Dot-prefixed top-level dirs (e.g. `.plans/`) are local-only working state, gitig
 First: **does the typed API or the raw SQL path own this?**
 
 - **Raw SQL / conn-level** (DSN flag, hook, `Conn.Raw` method) → root package; touches modernc-derived files, be conservative.
-- **Vector** → `vec/` (typed `Table`; tag-driven gorm in `vec/gorm/`). **Full-text** → `fts/` (+ `fts/gorm/`). **gorm** dialector/Migrator → `gorm/`. **Rank fusion** → `fusion/` (pure Go).
+- **Vector** → `vec/` (typed `Table`). **Full-text** → `fts/`. **gorm** dialector/Migrator → the separate `gosqlite.org/gorm` module. **Rank fusion** → `fusion/` (pure Go). ORM-level vector/FTS search lives in the sibling **liteorm** project, not here.
 - **Encryption / VFS** → `vfs/crypto/` or the public `vfs/` interface; do not patch the transpilation pipeline; honor the struct-drift discipline.
 - **Loadable extension** → `ext/<name>/` with a `Register(*Conn) error` + a sibling `ext/<name>/auto/` blank-import; track status in [`dev/coverage/ext.md`](dev/coverage/ext.md).
 - **SQL conformance tests** → `tests/sql/`. **Observability** → `Wrap(...)` decorators (the per-package `Recorder` shape difference is intentional).

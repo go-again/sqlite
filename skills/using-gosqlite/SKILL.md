@@ -40,8 +40,8 @@ For an in-memory database that multiple connections must share, use `OpenShared(
 | Goal | Package | Skill |
 |---|---|---|
 | ORM | `gosqlite.org/gorm` | `gorm` |
-| Vector / similarity search | `gosqlite.org/vec` (+ `gosqlite.org/vec/gorm`) | `vector-search` |
-| Full-text search | `gosqlite.org/fts` (+ `gosqlite.org/fts/gorm`) | `full-text-search` |
+| Vector / similarity search | `gosqlite.org/vec` | `vector-search` |
+| Full-text search | `gosqlite.org/fts` | `full-text-search` |
 | Combine vec + fts results | `gosqlite.org/fusion` | `hybrid-search` |
 | Encryption / checksums / in-memory / custom storage | `gosqlite.org/vfs/...` | `encryption-and-vfs`, `custom-vfs` |
 | Bound the page-cache heap | `gosqlite.org/pcache` | (page cache: `pcache.InstallBoundedLRU(maxPages)` before first open) |

@@ -170,76 +170,13 @@ recipe is enforced by the `gorm-upstream` CI job.
 
 The `ext/` vtab modules (`csv`, `lines`, `closure`, `bloom`, `spellfix1`, `array`, `statement`) are usable from this dialector with no bridge package — once a module is registered on the pool, its vtab is an ordinary SQL table gorm can drive. The pattern: register the module pool-wide before `Open` (blank-import the module's `auto` sub-package, or install a `Driver.ConnectHook` when the module needs state at registration time, e.g. `csv.RegisterFS` with a sandboxed `fs.FS`), pin the pool with `sqlDB.SetMaxOpenConns(1)` (a `CREATE VIRTUAL TABLE` lives on the conn that issued it), then use plain gorm calls — `db.Exec` for the DDL, `db.Raw` / `db.Table(...).Scan` / `Where` for reads.
 
-`AutoMigrate` does not understand `CREATE VIRTUAL TABLE … USING …`, so the vtab is created out-of-band: raw `db.Exec`, or the typed `csv.Create` / `lines.Create` / `closure.Create` over `db.DB()`. There is intentionally no `csv/gorm` or `lines/gorm` sidecar plugin — those vtabs *are* the table, not a companion index, so the lifecycle-hook shape below does not fit them. [`examples/features/gorm/ext-vtabs`](../../examples/features/gorm/ext-vtabs/main.go) drives `csv` / `lines` / `closure` / `bloom` / `spellfix1` (plus `array` and `statement`) through gorm end-to-end.
+`AutoMigrate` does not understand `CREATE VIRTUAL TABLE … USING …`, so the vtab is created out-of-band: raw `db.Exec`, or the typed `csv.Create` / `lines.Create` / `closure.Create` over `db.DB()`. There is intentionally no `csv/gorm` or `lines/gorm` sidecar plugin — those vtabs *are* the table, not a companion index.
 
-## Deep integration: `vec/gorm` and `fts/gorm`
+## ORM-level vector / full-text search
 
-Tag-driven sidecar packages live under `gosqlite.org/vec/gorm`
-and `gosqlite.org/fts/gorm`. They register as gorm
-plugins and own the full lifecycle of the sidecar (vec0 virtual table /
-FTS5 external-content table + triggers).
+The tag-driven `vec/gorm` and `fts/gorm` sidecar plugins were **removed** — that capability now lives, first-class, in the sibling **liteorm** project (`liteorm.org`): declarative `vec:` / `fts:` tags, `AutoMigrate`-provisioned sidecars, and typed `search.For[T]` helpers. On plain `gorm.io/gorm`, drive the gorm-free `vec` / `fts` primitives via raw SQL.
 
-### Tag syntax — vec
-
-| Key | Required | Meaning |
-|---|---|---|
-| `dim=N` | yes | Embedding dimension. |
-| `metric=l2 \| cosine \| dot` | no | Distance metric. Default `l2`. |
-| `encoding=json \| binary` | no | Wire encoding. Default `binary`. |
-| `table=NAME` | no | Override sidecar table name. Default `<source>_vec`. |
-| `column=NAME` | no | Override embedding column. Default `embedding`. |
-
-The tagged field's type must be either `vecgorm.Embedding`
-(recommended) or `[]float32` with `gorm:"-"` alongside. The wrapper
-type implements gorm's `GormDataType` interface so the schema parser
-accepts it; the plugin then sets `IgnoreMigration=true` so no column
-lands on the source table.
-
-### Tag syntax — fts5
-
-| Key | Required | Meaning |
-|---|---|---|
-| `tokenize=NAME[+args]` | no | FTS5 tokenize option. Spaces escaped as `+`. |
-| `prefix=N1,N2,...` | no | Pre-computed prefix-match index sizes. |
-| `column=NAME` | no | Override FTS5 column name (default = lowercase field). |
-| `table=NAME` | no | Override FTS5 table. Default `<source>_fts`. |
-| `detail=full \| column \| none` | no | FTS5 detail= option. |
-| `external=true \| false` | no | External-content mode (default true). false → in-table FTS5 manages text itself. |
-| `contentless=true` | no | Contentless FTS5 (index only, no text). Snippet/highlight are rejected at search time. Mutually exclusive with `external=true`. |
-
-Multiple `fts5:`-tagged fields on one model share **one** FTS5 table.
-Conflicting table-level keys across fields are rejected at parse time.
-
-### Lifecycle matrix
-
-| Event | vec/gorm behavior | fts/gorm behavior |
-|---|---|---|
-| Plugin install | `db.Use(vecgorm.Plugin())` | `db.Use(ftsgorm.Plugin())` |
-| AutoMigrate | `vecgorm.Migrate(db, &T{})` creates source + sidecar | `ftsgorm.Migrate(db, &T{})` creates source + FTS5 table + triggers |
-| Create | AfterCreate callback `BatchInsert` (single tx) | AFTER INSERT trigger writes to FTS5 |
-| Save/Update | AfterUpdate callback `(*vec.Table).Update` | AFTER UPDATE trigger refreshes index |
-| Delete (hard) | AfterDelete callback `(*vec.Table).Delete` | AFTER DELETE trigger emits FTS5 `'delete'` |
-| Delete (soft, via `gorm.DeletedAt`) | Sidecar `deleted` flag flipped to 1 | FTS5's UNINDEXED `deleted_at` mirror set by trigger |
-| KNN / Search read-side | Typed `KNN[T]` returns materialized models; soft-deleted excluded by default, `IncludeDeleted()` overrides | Typed `Search[T]` ditto; soft-delete filter is `deleted_at IS NULL` (external) or `deleted = 0` (in-table/contentless) |
-| Primary-key type | Integer PK → rowid-keyed sidecar; string PK (UUID/slug) → `id text primary key` sidecar over `vec.KeyedTable[string]`. Detected at registration, no tag. (`TestStringPK_*`) | FTS5 keys on the source rowid |
-| Multi-embedding models | `vecgorm.WithField("Embedding")` picks which sidecar to query | n/a (FTS5 columns share one index) |
-| Custom projection / JOIN | `vecgorm.KNNSQL[T]` + `WithSelect` / `WithJoin` / `WithOrderBy` returns `(sql, args, err)` for `db.Raw(...).Scan(&custom)` | `ftsgorm.SearchSQL[T]` same shape |
-| DropSidecar | Drops sidecar table | Drops FTS5 table + all three triggers (for external mode) |
-| Source DropTable | Cascades into sidecar via DropTableHook on our gorm Dialector | Cascades into FTS5 table + triggers |
-| dim mismatch on re-migrate | Logged warning, existing sidecar left alone | n/a |
-
-### Tests
-
-| File | Notes |
-|---|---|
-| `vec/gorm/vecgorm_test.go` | Basic create/update/delete, KNN ranking, BatchInsert single-tx, soft-delete, Embedding wrapper |
-| `vec/gorm/lifecycle_test.go` | DropTable cascade, DropSidecar, composite PK rejection, tag validation, WithFilter, dim mismatch |
-| `fts/gorm/ftsgorm_test.go` | Migrate creates index + triggers, search/snippet/highlight, ranking, soft-delete, backfill |
-| `fts/gorm/lifecycle_test.go` | Conflicting tags, non-string fields, composite PK, LIMIT/OFFSET, no-plugin error, DropTable cascade |
-| `fts/gorm/mode_test.go` | external/in-table/contentless modes, conflicting modes rejected, contentless rejects snippet, in-table soft-delete |
-| `vec/gorm/multifield_test.go` | Multi-embedding models: `WithField` dispatch, unknown field rejected, single-field WithField ignored |
-| `vec/gorm/knnsql_test.go` | `KNNSQL` preserves soft-delete filter; `IncludeDeleted` strips it; WithJoin/Filter stack |
-| `fts/gorm/searchsql_test.go` | `SearchSQL` preserves external-mode `deleted_at IS NULL`; `IncludeDeleted` strips it; WithJoin executes via `db.Raw` |
+For the coverage of the old tag-driven sidecar plugins, see the liteorm project — they were removed here (see above).
 
 ---
 

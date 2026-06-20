@@ -44,7 +44,6 @@ Coverage matrix and status (✓ landed / ⚠ partial / ✗ deferred) lives at [`
 | [`text`](text/) | Rune-aware string scalars SQLite lacks: `text_reverse`, `text_repeat`, `text_lpad`, `text_rpad`, `text_split`. |
 | [`fuzzy`](fuzzy/) | Approximate string matching: `levenshtein`, `damerau_levenshtein`, `hamming`, `jaro`, `jaro_winkler`, `soundex`. Rune-aware distances; the stateless-scalar cousin of `spellfix1`. |
 | [`encode`](encode/) | `encode(data, format)` / `decode(text, format)` for base64 / base64url / base32 / base32hex / base16 / ascii85 / url. The codec half of sqlean `crypto`; digests live in `ext/hash`. |
-| [`regexp/gorm`](regexp/gorm/) | gorm helpers built on `ext/regexp`. `regexpgorm.WhereRegex(db, col, pattern)` adds a `col REGEXP ?` clause without touching the dialect. |
 
 ## Attribution
 

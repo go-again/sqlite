@@ -40,4 +40,4 @@ db.Where("ipcontains(?, src_ip)", "10.0.0.0/8").Find(&events)
 | [`time`](../../ext/time/) | `time_unix` / `add` / `diff` / `part` / `trunc` / `format` over Go `time` |
 | [`eval`](../../ext/eval/) | `eval(sql[, sep])` runs dynamic SQL on the calling connection (trusted input only) |
 
-Runnable demos under [`examples/features/extensions/`](../../examples/features/extensions/) (e.g. `hash`, `fuzzy`, `extras` for decimal/money/time/eval). End-to-end against a gorm model: [`examples/features/gorm/ext-scalars/`](../../examples/features/gorm/ext-scalars/main.go).
+Runnable demos under [`examples/features/extensions/`](../../examples/features/extensions/) (e.g. `hash`, `fuzzy`, `extras` for decimal/money/time/eval). End-to-end against a gorm model: [`gorm/examples/ext-scalars/`](../../gorm/examples/ext-scalars/main.go).

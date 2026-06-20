@@ -152,11 +152,8 @@ fixture verbatim; a delta there means upstream changed numeric output.
 
 ## See also
 
-- [`coverage-gorm.md`](gorm.md) — covers the tag-driven
-  `vec/gorm` bridge that wraps `vec.Table` for gorm models.
 - [`../examples/features/search/vec-search/`](../../examples/features/search/vec-search/) — raw `vec.Table`.
-- [`../examples/features/gorm/vec-tagged/`](../../examples/features/gorm/vec-tagged/) — the
-  `vecgorm.Plugin()` flow with a struct-tag-driven sidecar.
+- ORM-level vector search (declarative tags + `AutoMigrate` + typed KNN) lives in the sibling **liteorm** project; the old `vec/gorm` sidecar plugin was removed.
 
 ---
 

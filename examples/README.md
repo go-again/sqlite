@@ -20,9 +20,9 @@ just examples                        # build + run all of them (smoke test)
 |---|---|---|
 | coming from `github.com/mattn/go-sqlite3` | [`migrating/from-mattn`](migrating/from-mattn/) | keep the `sqlite3` driver name; your `_`-prefixed DSN flags are translated; change only the import |
 | coming from `modernc.org/sqlite` | [`migrating/from-modernc`](migrating/from-modernc/) | same `sqlite` driver name and DSN — you already work |
-| coming from `glebarez/sqlite` or `gorm.io/driver/sqlite` | [`migrating/from-glebarez`](migrating/from-glebarez/) | swap the gorm dialector import; the `sqlite.Open(dsn)` signature is identical |
+| coming from `glebarez/sqlite` or `gorm.io/driver/sqlite` | [`gorm/examples/from-glebarez`](../gorm/examples/from-glebarez/) | swap the dialector import to the `gosqlite.org/gorm` module; the `sqlite.Open(dsn)` signature is identical |
 | new, using `database/sql` | [`getting-started/database-sql`](getting-started/database-sql/) then [`getting-started/config`](getting-started/config/) | the idiomatic foundation, then the typed `sqlite.Config` entry |
-| new, using gorm | [`getting-started/gorm`](getting-started/gorm/) | gorm opened from a typed `sqlite.Config` — no DSN strings |
+| new, using gorm | [`gorm/examples/getting-started`](../gorm/examples/getting-started/) | the `gosqlite.org/gorm` dialector module, opened from a typed `sqlite.Config` |
 | after a specific capability | [`features/`](features/) | vector / FTS5 search, custom VFS, the `ext/` catalog, hooks, sessions, … |
 
 ## The two dials: "compat" vs "modern" (and why raw SQL is neither)
@@ -66,4 +66,3 @@ When you're ready to modernize, move connection setup from a DSN string to [`sql
   - [`vfs/`](features/vfs/) — custom + built-in virtual file systems (in-memory, encrypted, checksummed, fs.FS-backed)
   - [`extensions/`](features/extensions/) — the loadable `ext/` catalog (scalars, aggregates, vtabs, stores)
   - [`advanced/`](features/advanced/) — hooks, sessions/changesets, backup, page cache, window functions, and more
-  - [`gorm/`](features/gorm/) — gorm combined with vec/fts sidecars, encryption, and `ext/` functions

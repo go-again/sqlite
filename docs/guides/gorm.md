@@ -1,13 +1,13 @@
 ---
 title: gorm integration
-description: The gorm dialector (drop-in for glebarez and go-gorm/sqlite) plus tag-driven sqlite-vec and FTS5 sidecars.
+description: The gosqlite.org/gorm dialector — a CGo-free drop-in for glebarez and go-gorm/sqlite, shipped as its own module.
 sidebar:
   order: 4
 ---
 
 # gorm
 
-The `gosqlite.org/gorm` sub-package is a `gorm.Dialector` — a drop-in for both `glebarez/sqlite` and the official `go-gorm/sqlite`.
+`gosqlite.org/gorm` is a `gorm.Dialector` — a drop-in for both `glebarez/sqlite` and the official `go-gorm/sqlite`. It ships as its **own module**, so the gosqlite core stays free of `gorm.io/gorm`; add it with `go get gosqlite.org/gorm`.
 
 ```go
 import (
@@ -18,51 +18,23 @@ import (
 db, _ := gorm.Open(sqlite.Open("file:my.db?_pragma=foreign_keys(1)"), &gorm.Config{})
 ```
 
-`sqlite.Open(dsn)` and `sqlite.New(sqlite.Config{...})` are both provided so either import path can be swapped in. For the modern typed entry use `sqlitegorm.OpenConfig(sqlite.Config{...})` ([Configuration](configuration.md)). Coverage matrix: [`dev/coverage/gorm.md`](../../dev/coverage/gorm.md).
-
-## Tag-driven vec & FTS5 sidecars
-
-`vec/gorm` and `fts/gorm` bridge gorm models to the vector / full-text sidecars. Tag a field, register the plugin, and gorm `Create`/`Update`/`Delete` maintains the sidecar automatically. Typed `KNN[T]` / `Search[T]` helpers return matching gorm models in ranking order, distance / rank attached.
+`sqlite.Open(dsn)` and `sqlite.New(sqlite.Config{...})` are both provided so either upstream import path swaps in unchanged. For the modern typed entry, also import the root `gosqlite.org` (also `package sqlite`) and alias the dialector `sqlitegorm`:
 
 ```go
 import (
-	_ "gosqlite.org"
+	sqlite "gosqlite.org"
 	sqlitegorm "gosqlite.org/gorm"
-	"gosqlite.org/fts"
-	ftsgorm "gosqlite.org/fts/gorm"
-	vecgorm "gosqlite.org/vec/gorm"
 )
 
-type Document struct {
-	ID        uint   `gorm:"primaryKey"`
-	Title     string `fts5:"tokenize=porter+unicode61"`
-	Body      string `fts5:"tokenize=porter+unicode61"`
-	Embedding vecgorm.Embedding `vec:"dim=384;metric=cosine"`
-}
-
-db, _ := gorm.Open(sqlitegorm.Open("app.db"), &gorm.Config{})
-db.Use(vecgorm.Plugin())
-db.Use(ftsgorm.Plugin())
-
-vecgorm.Migrate(db, &Document{}) // creates documents + documents_vec
-ftsgorm.Migrate(db, &Document{}) // creates documents_fts + triggers
-
-db.Create(&Document{Title: "Hello", Body: "world", Embedding: vec})
-
-near, _ := vecgorm.KNN[Document](ctx, db, queryVec, 5)             // semantic
-hits, _ := ftsgorm.Search[Document](ctx, db, fts.Term("world"))   // BM25 lexical
+db, _ := sqlitegorm.OpenConfig(sqlite.Config{Path: "my.db", Pragmas: sqlite.RecommendedPragmas()})
 ```
 
-What the bridges do:
+See [Configuration](configuration.md); coverage matrix: [`dev/coverage/gorm.md`](../../dev/coverage/gorm.md).
 
-- Auto-migrate sidecar tables alongside `db.AutoMigrate`.
-- Sync-on-write callbacks (vec) or triggers (FTS5), including `CreateInBatches` (one transaction per batch).
-- Soft-delete awareness: models using `gorm.DeletedAt` get a metadata column on the sidecar; KNN/Search excludes them automatically — there is no opt-in to include them via the typed helpers.
-- Typed helpers return `[]Hit[T]` ordered by ranking — no manual IN-clause + re-sort dance.
-- `db.Migrator().DropTable(&Model{})` cascades into the sidecar via the dialector's `DropTableHook` — no manual cleanup.
-- FTS5 mode is per-tag: `external` (default, triggers-driven), `external=false` (in-table FTS5), or `contentless=true` (index only).
-- Works with int **and** string primary keys.
+## Vector & full-text search in an ORM
 
-The embedding field type is `vecgorm.Embedding` (a `[]float32` alias implementing gorm's `GormDataType`); `[]float32` with `gorm:"-"` also works.
+For an ORM with **native** vector (sqlite-vec) and full-text (FTS5) search — declarative `vec:` / `fts:` tags, `AutoMigrate`-provisioned sidecars kept in sync on every write, and typed ranked results — use **[liteorm](https://liteorm.org)**, the modern data layer built on gosqlite. It supersedes the earlier tag-driven gorm bridges with a first-class implementation.
 
-Runnable: [`examples/features/gorm/vec-tagged/`](../../examples/features/gorm/vec-tagged/main.go) and [`examples/features/gorm/fts-tagged/`](../../examples/features/gorm/fts-tagged/main.go). Combining `ext/` functions with gorm: [`examples/features/gorm/`](../../examples/features/gorm/).
+If you're staying on `gorm.io/gorm`, drive gosqlite's gorm-free [`vec`](vector-search.md) / [`fts`](full-text-search.md) primitives directly via `db.Exec` / `db.Raw` over the underlying `*sql.DB`.
+
+Runnable: [`gorm/examples/getting-started/`](../../gorm/examples/getting-started/main.go) and [`gorm/examples/from-glebarez/`](../../gorm/examples/from-glebarez/main.go).

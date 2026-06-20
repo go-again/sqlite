@@ -45,7 +45,6 @@ The driver itself — CGo-free, mattn-API + glebarez-gorm drop-in, registered un
 
 - **[Vector search](docs/guides/vector-search.md)** — typed `vec.Table` over [sqlite-vec](https://github.com/asg017/sqlite-vec): L2 / Cosine / Dot / Hamming, JSON + binary + quantized `int8` / `bit` encodings, metadata / partition / auxiliary columns, streaming `iter.Seq2` KNN, predicate pushdown.
 - **[Full-text search](docs/guides/full-text-search.md)** — typed `fts.Index[K, V]` over FTS5: Porter / Unicode61 / Trigram tokenizers plus **custom Go tokenizers**, a Go query builder, BM25 ranking, snippet + highlight.
-- **[Tag-driven gorm bridges](docs/guides/gorm.md)** — `vec/gorm` and `fts/gorm` maintain vector + FTS5 sidecars from a single field tag, with cascading `DropTable`, soft-delete awareness, and typed `KNN[T]` / `Search[T]` helpers.
 - **[Hybrid search](docs/guides/hybrid-search.md)** — `fusion.RRF` combines `vec.KNN` and `fts.Search` rankings via Reciprocal Rank Fusion.
 - **[Encryption at rest](docs/guides/encryption.md)** — pure-Go `vfs/crypto`, Adiantum or AES-XTS-256, transparent page-level encryption of DB + journal + WAL + temp; Argon2id key derivation; per-IO observability.
 - **[Corruption detection](docs/guides/checksums.md)** — pure-Go `vfs/cksm`, Fletcher-style trailer per page (compatible with SQLite's `cksumvfs`); composes beneath `vfs/crypto`.
@@ -65,16 +64,15 @@ The Go SQLite landscape has three camps: CGo bindings (mattn, zombiezen), pure-G
 | Capability | this | mattn | modernc | ncruces | glebarez |
 |---|---|---|---|---|---|
 | Ships AI Agent Skills + task-oriented docs | ✓ | ✗ | ✗ | ✗ | ✗ |
-| Whole stack (driver + gorm + vec + FTS5 + VFS + ext) in one module | ✓ | ✗ | ✗ | ✗ | ✗ |
+| Whole stack (driver + vec + FTS5 + fusion + VFS + ext) in one module | ✓ | ✗ | ✗ | ✗ | ✗ |
 | CGo-free | ✓ | ✗ | ✓ | ✓ (wazero) | ✓ |
 | Builds in distroless / `golang:alpine`, no `apk add` | ✓ | ✗ | ✓ | ✓ | ✓ |
 | `database/sql` driver | ✓ | ✓ | ✓ | ✓ | ✗ (gorm only) |
 | Registers as both `"sqlite"` and `"sqlite3"` | ✓ | ✗ | ✗ | ✗ | n/a |
 | Mattn-compat surface (hooks, `Backup`, `Serialize`, …) | ✓ | n/a | partial | partial | n/a |
-| gorm dialector in the same module | ✓ | ✗ | ✗ | ✗ | ✓ |
+| CGo-free gorm dialector (companion module) | ✓ | ✗ | ✗ | ✗ | ✓ |
 | Typed sqlite-vec API | ✓ | ✗ | ✗ | ✗ | ✗ |
 | Typed FTS5 API + custom Go tokenizers | ✓ | ✗ | ✗ | ✗ | ✗ |
-| Tag-driven gorm bridges (vec + FTS5 sidecars) | ✓ | ✗ | ✗ | ✗ | ✗ |
 | Hybrid-search rank fusion | ✓ | ✗ | ✗ | ✗ | ✗ |
 | Encryption-at-rest VFS | ✓ (Adiantum + AES-XTS, one constructor) | ✗ | ✗ | ✓ (two packages) | ✗ |
 | Page-checksum / in-memory / `fs.FS` VFSes | ✓ | ✗ | ✗ | ✓ | ✗ |
@@ -84,7 +82,7 @@ The Go SQLite landscape has three camps: CGo bindings (mattn, zombiezen), pure-G
 | Loadable Go SQL extensions | catalog under `ext/` | math/regexp via build-tag | ✗ | similar catalog | ✗ |
 | Hot UDF-row throughput | == modernc | fastest (CGo) | baseline | slowest (wazero) | == modernc |
 
-**Better here:** it's the only Go SQLite package that ships AI Agent Skills + task-oriented docs, so an AI assistant builds against it correctly without trial and error; one module ships the whole stack (driver + gorm + vec + FTS5 + fusion + crypto + cksm + VFSes + page cache + `ext/`) on one release cadence; one driver under two SQL names makes migration a one-line swap; typed vec/FTS5 + tag-driven gorm sidecars are first-class where every other driver needs DIY plumbing; custom Go FTS5 tokenizers and the typed `sqlite.Config` are unique to this module.
+**Better here:** it's the only Go SQLite package that ships AI Agent Skills + task-oriented docs, so an AI assistant builds against it correctly without trial and error; one module ships the whole stack (driver + vec + FTS5 + fusion + crypto + cksm + VFSes + page cache + `ext/`) on one release cadence; one driver under two SQL names makes migration a one-line swap; typed vec/FTS5 are first-class where every other driver needs DIY plumbing; custom Go FTS5 tokenizers and the typed `sqlite.Config` are unique to this module. For an ORM with native vector/full-text search, the companion [liteorm](https://liteorm.org) is built on this driver.
 
 **Worse here:** mattn's CGo binding is still fastest on hot per-row UDF paths (we measure ~3% slower with a few extra allocs/op on a no-op authorizer; invisible for "let SQL do the work" loads); the support window is the two newest Go releases only; `vfs/crypto` is confidentiality-only (no SQLCipher format / MAC). Details in [Performance](docs/reference/performance.md).
 
@@ -112,9 +110,9 @@ Plain `database/sql` works too: `sql.Open("sqlite", "file:app.db")`. The full se
 | Import path | What it gives you |
 |---|---|
 | `gosqlite.org` | the driver (registers `"sqlite"` + `"sqlite3"`) + `Config` + hooks + backup/serialize |
-| `gosqlite.org/gorm` | `gorm.Dialector` (drop-in for glebarez and go-gorm/sqlite) |
-| `gosqlite.org/vec` · `gosqlite.org/vec/gorm` | typed sqlite-vec `Table` · tag-driven gorm sidecars |
-| `gosqlite.org/fts` · `gosqlite.org/fts/gorm` | typed FTS5 `Index[K, V]` · tag-driven gorm sidecars |
+| `gosqlite.org/gorm` | `gorm.Dialector` drop-in (glebarez / go-gorm) — **separate module** |
+| `gosqlite.org/vec` | typed sqlite-vec `Table` (L2 / Cosine / Dot / Hamming, quantized encodings) |
+| `gosqlite.org/fts` | typed FTS5 `Index[K, V]` + custom Go tokenizers |
 | `gosqlite.org/fusion` | RRF rank-fusion helpers (combine vec + fts results) |
 | `gosqlite.org/vfs` (+ `crypto`, `cksm`, `mvcc`, `memdb`) | `fs.FS`/`io.ReaderAt` adapters, the user-implementable VFS, encryption, checksums, in-memory |
 | `gosqlite.org/pcache` | application-controlled bounded page cache |

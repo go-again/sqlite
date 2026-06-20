@@ -46,7 +46,7 @@
 // VFS in the right order on Close.
 //
 // See [examples/getting-started/config] for the full plain + encrypted demo,
-// and the [gorm] sub-package's [OpenConfig] for the gorm flavor
+// and the gosqlite.org/gorm module's OpenConfig for the gorm flavor
 // (same [Config] type, *gorm.DB return).
 //
 // # Driver registration (DSN form, still supported)
@@ -150,18 +150,14 @@
 // Higher-level capabilities live in sibling packages, each with its
 // own doc:
 //
-//   - gosqlite.org/gorm — gorm dialector + Migrator,
-//     drop-in for gorm.io/driver/sqlite and glebarez/sqlite.
+//   - gosqlite.org/gorm — gorm dialector + Migrator (a SEPARATE
+//     module; the core does not depend on gorm.io/gorm), drop-in for
+//     gorm.io/driver/sqlite and glebarez/sqlite.
 //   - gosqlite.org/vec — sqlite-vec vector search
 //     (auto-registered extension + typed Go API).
-//   - gosqlite.org/vec/gorm — tag-driven vec sidecars
-//     wired into gorm models.
 //   - gosqlite.org/fts — typed FTS5 full-text search
 //     (Index[K, V], query builder, tokenizers, BM25 + snippet /
 //     highlight).
-//   - gosqlite.org/fts/gorm — tag-driven FTS5 indexes
-//     wired into gorm models (external / in-table / contentless
-//     modes).
 //   - gosqlite.org/fusion — rank-fusion helpers
 //     (Reciprocal Rank Fusion) for combining vec.KNN and fts.Search
 //     results into a single hybrid-search ranking.

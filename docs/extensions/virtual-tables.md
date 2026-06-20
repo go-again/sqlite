@@ -37,7 +37,7 @@ db.Exec(`CREATE VIRTUAL TABLE recent USING statement('SELECT name FROM users WHE
 | [`rtree`](../../ext/rtree/) | R-Tree spatial index over the built-in `rtree`/`geopoly` vtabs + custom geometry/query callbacks + a `circle()` geometry (typed `rtree.Table`) |
 | [`series`](../../ext/series/) | `generate_series(start, stop[, step])` integer sequence |
 
-Typed handles (`csv.Table`, `lines.Table`, `closure.Graph`, `rtree.Table`) hide the DDL + query SQL. Demos under [`examples/features/extensions/`](../../examples/features/extensions/); end-to-end against gorm: [`examples/features/gorm/ext-vtabs/`](../../examples/features/gorm/ext-vtabs/main.go).
+Typed handles (`csv.Table`, `lines.Table`, `closure.Graph`, `rtree.Table`) hide the DDL + query SQL. Demos under [`examples/features/extensions/`](../../examples/features/extensions/); end-to-end against gorm: [`gorm/examples/ext-vtabs/`](../../gorm/examples/ext-vtabs/main.go).
 
 ## fs.FS-bound readers
 
