@@ -141,6 +141,8 @@ Plain `database/sql` works too: `sql.Open("sqlite", "file:app.db")`. The full se
 
 Full per-package recipes, the `_*` DSN-flag table, and build-tag mapping: **[Migrating](docs/guides/migrating.md)**, **[DSN flags](docs/reference/dsn-flags.md)**, **[Build tags](docs/reference/build-tags.md)**. Runnable: [`examples/migrating/`](examples/migrating/).
 
+The drop-in claim is **CI-enforced**: every push runs `gorm.io/gorm`'s full integration suite, plus vendored subsets of `mattn/go-sqlite3`'s and `modernc.org/sqlite`'s own test suites, against this module (with an xorm-compatibility lane alongside) — so compatibility is checked by tests upstream wrote, not by tests we wrote to flatter ourselves. Recipes and divergence tables: [`dev/upstream/`](dev/upstream/).
+
 ## Why CGo-free
 
 Because SQLite is transpiled to Go (via `modernc.org/sqlite`) rather than C-bound, you get: builds in `golang:alpine` / distroless with no `apk add`; `GOOS=… GOARCH=… go build` cross-compilation that just works; clean `go test -race`; reproducible builds with no vendored amalgamation; and CI on providers that disallow CGo. The cost is a constant-factor gap on hot UDF/per-row paths — invisible for most applications. More in [Getting started](docs/getting-started.md#why-cgo-free) and [Performance](docs/reference/performance.md).

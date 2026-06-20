@@ -80,7 +80,8 @@ type File interface {
 	Size() (int64, error)
 
 	// Lock raises the advisory lock to at least level; Unlock lowers it.
-	// A single-process backend can accept every transition (see NoLock).
+	// A single-connection backend can accept every transition (see NoLock);
+	// multiple connections in WAL mode require real arbitration here.
 	Lock(level LockLevel) error
 	Unlock(level LockLevel) error
 	// CheckReservedLock reports whether some connection (possibly
@@ -203,8 +204,19 @@ const (
 )
 
 // NoLock is an embeddable helper supplying accept-everything advisory
-// locking — the correct behaviour for any single-process or
-// exclusive-access File. Embed it to drop three methods of boilerplate:
+// locking. It is correct only when a database is reached by ONE connection at
+// a time — single-connection use, or exclusive-locking mode — where there is
+// nothing to arbitrate and every lock can be granted.
+//
+// Do NOT embed NoLock when several connections share a database in WAL mode.
+// SQLite gates destructive operations — notably the checkpoint it runs when a
+// connection closes, which resets the -wal file — on first acquiring an
+// EXCLUSIVE db-file lock; NoLock hands out that EXCLUSIVE even while other
+// connections are active, so the reset can corrupt the database under a
+// concurrent writer. A multi-connection backend must implement real
+// Lock/Unlock/CheckReservedLock (many holders may share SHARED; EXCLUSIVE must
+// fail while any other connection holds SHARED) — see the reference File in the
+// vfs package tests.
 //
 //	type myFile struct {
 //		vfs.NoLock

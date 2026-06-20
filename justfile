@@ -161,7 +161,8 @@ cross-build:
         export GOOS=$(echo "$triple" | cut -d/ -f1); \
         export GOARCH=$(echo "$triple" | cut -d/ -f2); \
         printf "  %-18s " "$triple"; \
-        go build ./ ./gorm/... ./fts/... ./vfs/... 2>/dev/null && \
+        go build ./ ./fts/... ./vfs/... 2>/dev/null && \
+        (cd gorm && go build ./ 2>/dev/null) && \
         (go build ./vec/... 2>/dev/null || echo -n "(vec skipped) ") && \
         echo "ok" || echo "FAILED"; \
     done

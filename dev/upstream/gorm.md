@@ -122,14 +122,17 @@ ergonomics every user needs.
 This is what allowed the suite to flip from 1 fail → 0 fail on the
 second local run.
 
-## Why we run this manually rather than in CI today
+## How this runs in CI
 
-The setup churns ~20 indirect modules (postgres, mysql, sqlserver, mssql,
-gaussdb drivers — even though we only exercise SQLite, the gorm/tests
-module brings them all in). The CI matrix would slow down by 60–90s per
-job. We may add a single-job gorm-upstream lane later; for now, treat
-this matrix as a periodic check, run on dependency bumps and before
-release tags.
+This is a dedicated `gorm-upstream` job in `.github/workflows/ci.yml`,
+on every push and pull request to `main`. It's a separate job on
+purpose: the `gorm/tests` module pulls in ~20 indirect drivers
+(postgres, mysql, sqlserver, mssql, gaussdb) even though we only
+exercise SQLite, which adds 60–90s — isolating it keeps the main test
+matrix fast while still gating merges on the suite. The job pins
+`GORM_VERSION`, wires the shim above, runs the full `gorm/tests`, fails
+on any `--- FAIL`, and also fails if the `--- PASS` count regresses
+below its expected floor.
 
 When SQLite or gorm bumps, the steps to repeat:
 

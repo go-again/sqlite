@@ -19,13 +19,15 @@ db.Close()
 vfs.Unregister("myvfs")              // after every db against it is closed
 ```
 
-Implement [`vfs.VFS`](https://pkg.go.dev/gosqlite.org/vfs#VFS) (`Open`/`Delete`/`Access`/`FullPathname`) and [`vfs.File`](https://pkg.go.dev/gosqlite.org/vfs#File) (`ReadAt`/`WriteAt`/`Truncate`/`Sync`/`Size`/locking/`Close`). Embed `vfs.NoLock` to satisfy the advisory-lock trio with accept-everything semantics (correct for single-process backends). Return a `vfs.VFSError` from any method to surface a specific `SQLITE_*` result code; a plain error becomes `SQLITE_IOERR`.
+Implement [`vfs.VFS`](https://pkg.go.dev/gosqlite.org/vfs#VFS) (`Open`/`Delete`/`Access`/`FullPathname`) and [`vfs.File`](https://pkg.go.dev/gosqlite.org/vfs#File) (`ReadAt`/`WriteAt`/`Truncate`/`Sync`/`Size`/locking/`Close`). Embed `vfs.NoLock` to satisfy the advisory-lock trio with accept-everything semantics — correct only for **single-connection** access (multiple connections in WAL mode need real locking; see [WAL](#wal--the-shmfile-capability)). Return a `vfs.VFSError` from any method to surface a specific `SQLITE_*` result code; a plain error becomes `SQLITE_IOERR`.
 
 A complete ~80-line in-memory backend is at [`examples/features/vfs/custom/`](../../examples/features/vfs/custom/main.go).
 
 ## WAL — the ShmFile capability
 
-A custom VFS runs in rollback-journal mode by default. To unlock WAL, have your `File` also implement `vfs.ShmFile` — a single `ShmGroup() string` method declaring which open files share a WAL index. The dispatcher owns the shared memory and the 8-slot WAL lock table, so you never touch unsafe memory or the lock protocol. WAL coordination is in-process (it backs multiple `database/sql` connections to one Go-managed database within a process, not cross-process WAL over a real disk).
+A custom VFS runs in rollback-journal mode by default. To unlock WAL, have your `File` also implement `vfs.ShmFile` — a single `ShmGroup() string` method declaring which open files share a WAL index. The dispatcher owns the shared memory and the 8-slot WAL lock table, so you never touch unsafe memory or the shared-memory lock protocol. WAL coordination is in-process (it backs multiple `database/sql` connections to one Go-managed database within a process, not cross-process WAL over a real disk).
+
+> **Multi-connection WAL needs real db-file locking — do not embed `vfs.NoLock`.** The dispatcher arbitrates the WAL *shared-memory* locks, but SQLite still gates destructive operations — notably the checkpoint it runs when a connection closes, which resets the `-wal` — on first acquiring an EXCLUSIVE *db-file* lock. `vfs.NoLock` grants that EXCLUSIVE even while other connections are active, so the close-checkpoint can reset the WAL under a concurrent writer and corrupt the database. Implement real `Lock` / `Unlock` / `CheckReservedLock` on the main db file: many connections may share `LockShared`; `LockExclusive` must fail while any other connection holds `LockShared`. The reference `File` in the `vfs` package tests is a complete in-process example.
 
 ## Instrumentation — Wrap
 

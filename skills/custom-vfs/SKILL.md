@@ -34,13 +34,15 @@ type File interface {
 }
 ```
 
-- **Embed `vfs.NoLock`** in your File to get the lock trio for free (correct for single-process backends).
+- **Embed `vfs.NoLock`** in your File to get the lock trio for free — correct only for **single-connection** access (see the WAL caveat below; multi-connection WAL needs real locking).
 - **Errors:** return `&vfs.VFSError{Code: sqlite3.SQLITE_READONLY}` (or any `SQLITE_*`) for a specific code; a plain error becomes `SQLITE_IOERR`. A short read past EOF returns `io.EOF` (dispatcher zero-fills + reports SHORT_READ).
 - **Buffers are copied at the boundary** — a `File.ReadAt` is handed a fresh slice; don't alias it past the call.
 
 ## WAL
 
-Default is rollback-journal. For WAL, also implement `vfs.ShmFile` (one method, `ShmGroup() string`, declaring which files share a WAL index). The dispatcher owns the shared memory + lock table. In-process only.
+Default is rollback-journal. For WAL, also implement `vfs.ShmFile` (one method, `ShmGroup() string`, declaring which files share a WAL index). The dispatcher owns the shared memory + WAL lock table. In-process only.
+
+> **Multi-connection WAL needs real db-file locking — do NOT embed `vfs.NoLock`.** The dispatcher arbitrates the WAL *shared-memory* locks, but SQLite still gates destructive operations — notably the checkpoint it runs when a connection closes, which resets the `-wal` — on first acquiring an EXCLUSIVE *db-file* lock. `NoLock` hands out that EXCLUSIVE even while other connections are active, so the close-checkpoint can reset the WAL under a concurrent writer and corrupt the database. Implement real `Lock` / `Unlock` / `CheckReservedLock` on the main db file: many holders may share `LockShared`; `LockExclusive` must fail while any other connection holds `LockShared`. The reference `File` in the `vfs` package tests shows the full pattern.
 
 ## Instrumentation
 

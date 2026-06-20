@@ -140,10 +140,13 @@ jobs:
           CGO_ENABLED: '0'
         run: |
           go build ./
-          go build ./gorm/...
           go build ./fts/...
           go build ./vfs/...
           go build ./vec/... || echo "vec not supported on ${GOOS}/${GOARCH} — skipping"
+          # gorm is a separate module — cross-build its dialector from its own
+          # dir. Build the package (`./`), not `./...`: gorm/examples/vec imports
+          # gosqlite.org/vec, which isn't transpiled on every target.
+          (cd gorm && go build ./)
 
   # Run the SQL conformance suite under tests/sql/. This is our methodical
   # feature-by-feature proof that every documented SQLite SQL surface the
