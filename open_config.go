@@ -5,17 +5,16 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"sort"
 	"strings"
 	"time"
-
-	"gosqlite.org/vfs/crypto"
 )
 
 // DB wraps *sql.DB so the caller can `defer db.Close()` without
-// thinking about the encryption VFS lifecycle. Embedded *sql.DB
-// means every database/sql method works unchanged:
+// thinking about VFS lifecycle. Embedded *sql.DB means every
+// database/sql method works unchanged:
 //
 //	db, err := sqlite.Open(sqlite.Config{Path: "x.db"})
 //	if err != nil { ... }
@@ -24,7 +23,7 @@ import (
 //	rows, err := db.Query("SELECT ...")  // *sql.DB methods
 type DB struct {
 	*sql.DB
-	fs *crypto.FS // nil unless Encryption was set in the Config
+	vfsCloser io.Closer // from Config.VFSCloser; closed after the pool drains
 }
 
 // Open is the modern Go-typed entry point. It builds a DSN that
@@ -32,12 +31,11 @@ type DB struct {
 // driver applies them at connection open, on every connection in the
 // pool — not just the one [database/sql] happens to dispatch the first
 // Exec to), opens the underlying *sql.DB, eagerly Pings to surface
-// any PRAGMA error as an Open error, and returns a wrapper that
-// bundles any VFS handles in the Close.
+// any PRAGMA error as an Open error, and returns a wrapper whose Close
+// also runs any [Config.VFSCloser].
 //
-// Lifecycle: a single defer db.Close() is sufficient — closing
-// drains the *sql.DB pool first, then unregisters any VFS that
-// Open registered for this database (encryption case).
+// Lifecycle: a single defer db.Close() is sufficient — closing drains
+// the *sql.DB pool first, then closes any Config.VFSCloser.
 //
 // Backward-compat note: this does not replace `sql.Open("sqlite",
 // dsn)`. Both keep working. Open(Config) is the recommended new
@@ -47,35 +45,13 @@ func Open(cfg Config) (*DB, error) {
 	if cfg.Path == "" {
 		return nil, errors.New("sqlite: Config.Path is required")
 	}
-	if cfg.Encryption != nil && cfg.VFS != "" {
-		return nil, errors.New("sqlite: Encryption and VFS are mutually exclusive")
-	}
-	if cfg.Encryption != nil && isMemoryPath(cfg.Path, cfg.Mode) {
-		return nil, errors.New("sqlite: Encryption requires an on-disk path (refusing :memory: / mode=memory)")
-	}
 
-	var fs *crypto.FS
-	vfsName := cfg.VFS
-	if cfg.Encryption != nil {
-		name, handle, err := crypto.New(crypto.Options{
-			Key:      cfg.Encryption.Key,
-			Cipher:   cfg.Encryption.Cipher,
-			PageSize: cfg.Encryption.PageSize,
-			Recorder: cfg.Encryption.Recorder,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("sqlite: register encryption VFS: %w", err)
-		}
-		fs = handle
-		vfsName = name
-	}
-
-	dsn := buildDSN(cfg, vfsName)
+	dsn := buildDSN(cfg, cfg.VFS)
 
 	sqlDB, err := sql.Open(DriverName, dsn)
 	if err != nil {
-		if fs != nil {
-			_ = fs.Close()
+		if cfg.VFSCloser != nil {
+			_ = cfg.VFSCloser.Close()
 		}
 		return nil, fmt.Errorf("sqlite: sql.Open: %w", err)
 	}
@@ -97,25 +73,28 @@ func Open(cfg Config) (*DB, error) {
 	defer cancel()
 	if err := sqlDB.PingContext(ctx); err != nil {
 		_ = sqlDB.Close()
-		if fs != nil {
-			_ = fs.Close()
+		if cfg.VFSCloser != nil {
+			_ = cfg.VFSCloser.Close()
 		}
 		return nil, fmt.Errorf("sqlite: open first connection: %w", err)
 	}
 
-	return &DB{DB: sqlDB, fs: fs}, nil
+	return &DB{DB: sqlDB, vfsCloser: cfg.VFSCloser}, nil
 }
 
 // OpenInMemory is the shortest path to a private in-memory database:
 // equivalent to [Open] with Config{Path: [InMemory]}. Convenient for
-// tests, REPLs, and scratch usage that doesn't need PRAGMAs,
-// encryption, or pool tuning.
+// tests, REPLs, and scratch usage that doesn't need PRAGMAs or
+// pool tuning.
 //
 //	db, err := sqlite.OpenInMemory()
 //	defer db.Close()
 //
-// For an in-memory DB shared across multiple connections in the same
-// process, use [OpenShared].
+// NOT safe for a connection pool: each pooled connection gets its OWN
+// private empty database, so a write made through one connection is invisible
+// to the next, and pool-borrowing helpers (e.g. [gosqlite.org/blobstore])
+// silently lose data. For an in-memory database shared across connections,
+// use [OpenShared] — or pin the pool with SetMaxOpenConns(1).
 func OpenInMemory() (*DB, error) {
 	return Open(Config{Path: InMemory})
 }
@@ -164,9 +143,9 @@ func OpenShared(name string) (*DB, error) {
 	return Open(Config{Path: name, Mode: ModeMemory, Cache: CacheShared})
 }
 
-// Close drains the *sql.DB pool and (if Open registered a VFS for
-// encryption) unregisters it. Order matters per
-// [vfs/crypto/doc.go]: pool first, VFS second. Idempotent.
+// Close drains the *sql.DB pool and then closes any [Config.VFSCloser]
+// (a VFS-providing package's teardown). Order matters: pool first, VFS
+// second. Idempotent.
 func (d *DB) Close() error {
 	if d == nil {
 		return nil
@@ -178,24 +157,100 @@ func (d *DB) Close() error {
 		}
 		d.DB = nil
 	}
-	if d.fs != nil {
-		if err := d.fs.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("sqlite: close encryption VFS: %w", err))
+	if d.vfsCloser != nil {
+		if err := d.vfsCloser.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("sqlite: close VFS: %w", err))
 		}
-		d.fs = nil
+		d.vfsCloser = nil
 	}
 	return errors.Join(errs...)
 }
 
-// VFSName returns the name of the encryption VFS Open registered
-// for this database, or the empty string if Open did not register
-// one. Useful when a caller wants to open a second sql.DB against
-// the same encrypted file (e.g. a separate read-only pool).
-func (d *DB) VFSName() string {
-	if d == nil || d.fs == nil {
-		return ""
+// PinConn borrows a single connection from the pool and returns the
+// underlying *Conn together with a release func that returns it to the
+// pool. The *Conn stays valid until release is called; do not use it
+// afterward, and close any [Blob] (or other connection-scoped handle)
+// opened on it BEFORE calling release.
+//
+// It removes the db.Conn + (*sql.Conn).Raw + type-assert boilerplate that
+// every connection-scoped feature otherwise repeats — [Conn.OpenBlob], the
+// SESSION/changeset extension, per-connection hooks, backup, serialize:
+//
+//	c, release, err := db.PinConn(ctx)
+//	if err != nil { return err }
+//	defer release()
+//	blob, err := c.OpenBlob("main", "docs", "body", rowid, true)
+//	// ... use blob, then blob.Close() before release runs ...
+//
+// Each pinned conn occupies one pool slot for its lifetime, so release
+// promptly; holding more than [sql.DB.SetMaxOpenConns] at once deadlocks.
+// For bulk byte-stream storage that manages this for you, see
+// [gosqlite.org/blobstore].
+func (d *DB) PinConn(ctx context.Context) (c *Conn, release func() error, err error) {
+	sc, err := d.Conn(ctx)
+	if err != nil {
+		return nil, nil, err
 	}
-	return d.fs.Name()
+	if err := sc.Raw(func(driverConn any) error {
+		cc, ok := driverConn.(*Conn)
+		if !ok {
+			return fmt.Errorf("sqlite: PinConn: unexpected driver conn %T", driverConn)
+		}
+		c = cc
+		return nil
+	}); err != nil {
+		_ = sc.Close()
+		return nil, nil, err
+	}
+	return c, sc.Close, nil
+}
+
+// IncrementalVacuum reclaims up to pages free pages from the database file,
+// returning that space to the OS. Pass 0 to reclaim every free page. It is
+// only effective when the database is in incremental auto_vacuum mode (open
+// with Config.Pragmas.AutoVacuum = [AutoVacuumIncremental], or convert an
+// existing database with [DB.SetAutoVacuum]); in any other mode it is a
+// harmless no-op.
+func (d *DB) IncrementalVacuum(ctx context.Context, pages int) error {
+	stmt := "PRAGMA incremental_vacuum"
+	if pages > 0 {
+		stmt = fmt.Sprintf("PRAGMA incremental_vacuum(%d)", pages)
+	}
+	if _, err := d.ExecContext(ctx, stmt); err != nil {
+		return fmt.Errorf("sqlite: incremental_vacuum: %w", err)
+	}
+	return nil
+}
+
+// SetAutoVacuum changes the auto_vacuum mode of an EXISTING database and
+// rewrites it with VACUUM so the new mode takes effect — the heavyweight
+// conversion SQLite requires once a database has content. For a brand-new
+// database prefer Config.Pragmas.AutoVacuum, which fixes the mode at creation
+// with no VACUUM. mode must be [AutoVacuumNone], [AutoVacuumFull], or
+// [AutoVacuumIncremental].
+//
+// The pragma and the VACUUM run on one pinned connection (the pending mode is
+// connection-local until VACUUM persists it to the file header). VACUUM
+// rewrites the whole database under an exclusive lock — call it deliberately
+// as a maintenance step, never on every open.
+func (d *DB) SetAutoVacuum(ctx context.Context, mode AutoVacuumMode) error {
+	switch mode {
+	case AutoVacuumNone, AutoVacuumFull, AutoVacuumIncremental:
+	default:
+		return fmt.Errorf("sqlite: SetAutoVacuum: invalid mode %q", mode)
+	}
+	sc, err := d.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer sc.Close()
+	if _, err := sc.ExecContext(ctx, "PRAGMA auto_vacuum = "+string(mode)); err != nil {
+		return fmt.Errorf("sqlite: SetAutoVacuum: %w", err)
+	}
+	if _, err := sc.ExecContext(ctx, "VACUUM"); err != nil {
+		return fmt.Errorf("sqlite: SetAutoVacuum: VACUUM: %w", err)
+	}
+	return nil
 }
 
 // BuildDSN renders the full DSN that Open would build for the given
@@ -207,11 +262,11 @@ func (d *DB) VFSName() string {
 //	db, _ := sql.Open("sqlite", dsn)
 //
 // New code should prefer [Open] — it Pings to surface PRAGMA errors
-// eagerly and bundles the encryption VFS lifecycle. BuildDSN exists
+// eagerly and bundles the [Config.VFSCloser] lifecycle. BuildDSN exists
 // for the integration case.
 //
-// Encryption is NOT handled here — pure DSN rendering. Use [Open]
-// if you need encryption; it owns the crypto.FS lifecycle.
+// VFS teardown is NOT wired here — this is pure DSN rendering. Use [Open]
+// if you set [Config.VFSCloser]; only it bundles that into db.Close().
 func BuildDSN(cfg Config) string {
 	return buildDSN(cfg, cfg.VFS)
 }
@@ -311,6 +366,14 @@ func escapeDSNPath(p string) string {
 // `_pragma()` URL form, "ON" for the `PRAGMA … = …` statement form —
 // the only field whose canonical spelling differs between encodings.
 func pragmaPairs(p Pragmas, fkOn string, emit func(name, value string)) {
+	// auto_vacuum only takes hold on an empty database. What guarantees that
+	// here is timing, not this emit order (the driver re-sorts _pragma values
+	// before applying them): every Config pragma runs at connection open,
+	// before any CREATE TABLE gives the database content. Emitted first anyway,
+	// as the one creation-time pragma.
+	if p.AutoVacuum != "" {
+		emit(PragmaAutoVacuum, string(p.AutoVacuum))
+	}
 	if p.JournalMode != "" {
 		emit(PragmaJournalMode, string(p.JournalMode))
 	}
@@ -361,10 +424,4 @@ func pragmaStatements(p Pragmas) []string {
 		out = append(out, fmt.Sprintf("PRAGMA %s = %s", name, value))
 	})
 	return out
-}
-
-// isMemoryPath returns true when the requested open targets an
-// in-memory database, in either of the two equivalent forms.
-func isMemoryPath(path string, mode AccessMode) bool {
-	return path == InMemory || mode == ModeMemory
 }

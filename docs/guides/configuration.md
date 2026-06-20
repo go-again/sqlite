@@ -44,16 +44,15 @@ db, _ := gorm.Open(sqlitegorm.OpenWAL("app.db"), &gorm.Config{})
 import sqlite "gosqlite.org"
 
 db, err := sqlite.Open(sqlite.Config{
-	Path:    "myapp.db",
-	Pragmas: sqlite.RecommendedPragmas(), // WAL + busy_timeout=5s + foreign_keys
-	Encryption: &sqlite.Encryption{       // optional
-		Key: key,                          // 32 bytes for Adiantum
-	},
+	Path:         "myapp.db",
+	Pragmas:      sqlite.RecommendedPragmas(), // WAL + busy_timeout=5s + foreign_keys
 	MaxOpenConns: 8,
 })
 if err != nil { /* ... */ }
-defer db.Close() // drains *sql.DB AND unregisters any encryption VFS the open registered
+defer db.Close() // drains the *sql.DB pool
 ```
+
+For an encrypted database, the same `Config` flows through `crypto.Open` ([Encryption at rest](encryption.md)): `crypto.Open(sqlite.Config{Path: "myapp.db"}, crypto.Options{Key: key})`.
 
 For gorm, the same `Config` via `sqlitegorm.OpenConfig`:
 
@@ -86,6 +85,22 @@ db, _ := sqlite.Open(sqlite.Config{
 ```
 
 The constants live in the root package: `sqlite.JournalWAL` / `JournalDelete` / …, `sqlite.SynchronousNormal` / …, `sqlite.TempStoreMemory` / …, `sqlite.CacheShared` / `CachePrivate`. String literals (`JournalMode: "WAL"`) still compile — the typed forms are an additive type-safety win, not a breaking change.
+
+## Reclaiming space (auto_vacuum)
+
+By default SQLite keeps freed pages on a free list and reuses them, so a database file never shrinks. `Pragmas.AutoVacuum` changes that. It is special: the mode is fixed when the database is *created*, so set it on a fresh database — gosqlite emits it before every other pragma precisely so it takes hold before WAL setup or your first `CREATE TABLE`.
+
+```go
+db, _ := sqlite.Open(sqlite.Config{
+	Path:    "app.db",
+	Pragmas: sqlite.Pragmas{JournalMode: sqlite.JournalWAL, AutoVacuum: sqlite.AutoVacuumIncremental},
+})
+// ... after deleting a lot of data:
+db.IncrementalVacuum(ctx, 0) // return free pages to the OS (0 = all)
+```
+
+- `sqlite.AutoVacuumFull` returns freed pages on every commit; `sqlite.AutoVacuumIncremental` defers reclamation until you call `db.IncrementalVacuum`; `sqlite.AutoVacuumNone` is the default.
+- Converting an **existing**, populated database needs a full rewrite — `db.SetAutoVacuum(ctx, sqlite.AutoVacuumIncremental)` sets the mode and runs `VACUUM` on one pinned connection. That takes an exclusive lock and rewrites the whole file, so do it as a deliberate maintenance step, never on every open.
 
 ## See also
 

@@ -9,7 +9,7 @@ Run any example by its leaf name or sub-path:
 
 ```sh
 just example database-sql            # by leaf name
-just example features/vfs/crypto     # by sub-path (use this when a leaf is ambiguous)
+just example features/vfs/cksm       # by sub-path (use this when a leaf is ambiguous)
 just examples-list                   # list every runnable example
 just examples                        # build + run all of them (smoke test)
 ```
@@ -36,7 +36,7 @@ just examples                        # build + run all of them (smoke test)
 |---|---|---|
 | compat | `sql.Open("sqlite3", "file:app.db?_pragma=busy_timeout(5000)&_fk=1")` | dropping in for mattn — keep your DSN |
 | modern, plain | `sql.Open("sqlite", "file:app.db")` | the standard library way; reach for it any time |
-| modern, typed | `sqlite.Open(sqlite.Config{Path: "app.db", Pragmas: …, Encryption: …})` | structured setup — pragmas, encryption, pool tuning in one Go value |
+| modern, typed | `sqlite.Open(sqlite.Config{Path: "app.db", Pragmas: …})` | structured setup — pragmas, pool tuning in one Go value (encryption via `crypto.Open`) |
 
 **Dial 2 — how you read/write data:**
 
@@ -56,7 +56,7 @@ An example can be modern on one dial and raw on the other — that's normal. A `
 | glebarez/sqlite | n/a (gorm) | `gorm.Open(sqlite.Open(dsn), …)` with `sqlite "gosqlite.org/gorm"` |
 | gorm.io/driver/sqlite | n/a (gorm) | same as glebarez — our dialector is a drop-in for both |
 
-When you're ready to modernize, move connection setup from a DSN string to [`sqlite.Config`](../config.go) (see [`getting-started/config`](getting-started/config/)), and reach for the typed [`vec`](../vec/) / [`fts`](../fts/) handles or [gorm](../gorm/) where they save you hand-written SQL. You gain typed pragmas, built-in encryption, pool knobs in one value, and typed search — without giving up `database/sql`.
+When you're ready to modernize, move connection setup from a DSN string to [`sqlite.Config`](../config.go) (see [`getting-started/config`](getting-started/config/)), and reach for the typed [`vec`](../vec/) / [`fts`](../fts/) handles or [gorm](../gorm/) where they save you hand-written SQL. You gain typed pragmas, pool knobs in one value, and typed search — without giving up `database/sql`.
 
 ## Folders
 
@@ -64,7 +64,7 @@ When you're ready to modernize, move connection setup from a DSN string to [`sql
 - **[`getting-started/`](getting-started/)** — the recommended modern entry points (`database/sql`, typed `Config`, gorm).
 - **[`features/`](features/)** — capability reference, sub-grouped:
   - [`search/`](features/search/) — sqlite-vec vector search, FTS5, hybrid rank fusion
-  - [`vfs/`](features/vfs/) — custom + built-in virtual file systems (in-memory, encrypted, checksummed, fs.FS-backed)
+  - [`vfs/`](features/vfs/) — custom + built-in virtual file systems (in-memory, checksummed, fs.FS-backed, custom)
   - [`extensions/`](features/extensions/) — the loadable `ext/` catalog (scalars, aggregates, vtabs, stores)
   - [`advanced/`](features/advanced/) — hooks, sessions/changesets, backup, page cache, window functions, and more
 - **[`liteorm/`](liteorm/)** — [LiteORM](https://liteorm.org), an ORM with native vector / full-text / hybrid search built on this driver. *(Separate module — see its README.)*

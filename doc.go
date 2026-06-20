@@ -2,14 +2,14 @@
 // It is a drop-in replacement for both github.com/mattn/go-sqlite3
 // (the dominant CGo-based driver) and modernc.org/sqlite (the
 // upstream CGo-free wrapper this module is built on top of), and
-// serves as the dialector source for the sibling gorm package.
+// serves as the dialector source for the companion gosqlite.org/gorm module.
 //
 // # Modern Go-typed open (recommended)
 //
 // New code should reach for the structured [Config] entry. No DSN
 // string assembly, no `_pragma=` URL flags to memorize, and a single
-// defer Close that bundles the connection pool AND any encryption
-// VFS lifecycle:
+// defer Close that bundles the connection pool and any VFS teardown
+// wired through [Config.VFSCloser]:
 //
 //	import sqlite "gosqlite.org"
 //
@@ -27,27 +27,22 @@
 // driver applies them on every new connection in the pool — not just
 // the one [database/sql] happens to pick for the first Exec.
 //
-// Encryption at rest takes the same Config shape, with one extra
-// field:
+// Encryption at rest takes the same Config shape via the
+// gosqlite.org/vfs/crypto module's Open, which registers an encrypting
+// VFS and bundles its teardown into db.Close():
 //
-//	db, _ := sqlite.Open(sqlite.Config{
-//	    Path:    "secret.db",
-//	    Pragmas: sqlite.RecommendedPragmas(),
-//	    Encryption: &sqlite.Encryption{
-//	        Key:    key,                // 32 bytes for [Adiantum]
-//	        Cipher: sqlite.Adiantum,
-//	    },
-//	})
+//	db, _ := crypto.Open(
+//	    sqlite.Config{Path: "secret.db", Pragmas: sqlite.RecommendedPragmas()},
+//	    crypto.Options{Key: key}, // 32-byte Adiantum key (default cipher)
+//	)
 //
-// Use [crypto.DeriveKey] from the [vfs/crypto] sub-package to turn a
-// passphrase + salt into the right key length. The returned [*DB]
-// embeds *sql.DB, so every database/sql method works unchanged; the
-// wrapper exists to release the pool AND unregister the encryption
-// VFS in the right order on Close.
+// crypto.DeriveKey turns a passphrase + salt into the right key length.
+// The returned [*DB] embeds *sql.DB, so every database/sql method works
+// unchanged.
 //
-// See [examples/getting-started/config] for the full plain + encrypted demo,
-// and the gosqlite.org/gorm module's OpenConfig for the gorm flavor
-// (same [Config] type, *gorm.DB return).
+// See [examples/getting-started/config] for the plain-Config demo and the
+// gosqlite.org/gorm module's OpenConfig for the gorm flavor (same [Config]
+// type, *gorm.DB return).
 //
 // # Driver registration (DSN form, still supported)
 //

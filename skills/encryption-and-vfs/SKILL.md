@@ -18,7 +18,7 @@ defer fs.Close()
 db, _ := sql.Open("sqlite", "file:secret.db?vfs="+name)
 ```
 
-Or via Config: `sqlite.Open(sqlite.Config{Path: "secret.db", Encryption: &sqlite.Encryption{Key: key}})`. Confidentiality only — no SQLCipher format compatibility, no MAC. Cipher: `crypto.Options{Cipher: crypto.AESXTS}` (default Adiantum).
+Or in one call via `crypto.Open` (registers the VFS, routes the Config through it, and bundles teardown into `db.Close()`): `crypto.Open(sqlite.Config{Path: "secret.db"}, crypto.Options{Key: key})`. Confidentiality only — no SQLCipher format compatibility, no MAC. Cipher: `crypto.Options{Cipher: crypto.AESXTS}` (default Adiantum). `vfs/crypto` is its own module (`gosqlite.org/vfs/crypto`).
 
 ## Checksums (corruption detection)
 

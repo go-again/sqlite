@@ -25,7 +25,7 @@
 //	    Pragmas: sqlite.RecommendedPragmas(), // WAL + busy_timeout=5s + foreign_keys
 //	})
 //	if err != nil { ... }
-//	defer db.Close() // drains gorm pool AND unregisters any encryption VFS
+//	defer db.Close() // drains the gorm connection pool
 //
 //	type User struct {
 //	    gorm.Model
@@ -35,9 +35,10 @@
 //	db.Create(&User{Email: "a@example.com"})
 //
 // Same [sqlite.Config] type the root package exposes — set
-// [sqlite.Encryption] for transparent encryption at rest, or
-// MaxOpenConns / MaxIdleConns / ConnMaxLifetime to tune the pool.
-// See examples/getting-started for the plain + encrypted demos.
+// MaxOpenConns / MaxIdleConns / ConnMaxLifetime to tune the pool, or
+// VFS to route through a pre-registered VFS. See examples/getting-started.
+// The dialector has no encryption path; for an encrypted database with an
+// ORM, use LiteORM (https://liteorm.org), built on this driver.
 //
 // # Quick start (legacy DSN, still supported)
 //
@@ -84,9 +85,8 @@
 // # Configuration knobs
 //
 //   - sqlitegorm.OpenConfig(sqlite.Config, ...*gorm.Config): the modern
-//     Go-typed entry. Pragmas, Encryption, pool knobs, and VFS routing
-//     are struct fields — no DSN string assembly. Returns a *DB that
-//     embeds *gorm.DB and bundles the encryption VFS lifecycle.
+//     Go-typed entry. Pragmas, pool knobs, and VFS routing are struct
+//     fields — no DSN string assembly. Returns a *DB that embeds *gorm.DB.
 //   - sqlitegorm.Open(dsn): the gorm-standard constructor. dsn is passed
 //     verbatim to the driver, so every DSN flag the underlying
 //     gosqlite.org supports is available
@@ -116,6 +116,6 @@
 //     the ext/ catalog of loadable SQL functions and virtual tables.
 //   - gosqlite.org/vfs — io/fs.FS-backed read-only databases (e.g. shipping
 //     seed data inside an embed.FS), usable under this dialector.
-//   - examples/ in this module — getting-started, from-glebarez, crypto,
-//     vfs, ext-scalars, ext-vtabs.
+//   - examples/ in this module — getting-started, from-glebarez, vfs,
+//     ext-scalars, ext-vtabs.
 package sqlite

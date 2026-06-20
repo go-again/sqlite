@@ -19,7 +19,15 @@ defer fs.Close()
 db, _ := sql.Open("sqlite", "file:secret.db?vfs="+name)
 ```
 
-Or via the typed `Config`: `sqlite.Open(sqlite.Config{Path: "secret.db", Encryption: &sqlite.Encryption{Key: key}})` ([Configuration](configuration.md)).
+Or in one call via `crypto.Open`, which registers the VFS, routes a typed [`Config`](configuration.md) through it, and bundles VFS teardown into `db.Close()`:
+
+```go
+db, _ := crypto.Open(
+	sqlite.Config{Path: "secret.db", Pragmas: sqlite.RecommendedPragmas()},
+	crypto.Options{Key: key}, // 32-byte Adiantum key (default cipher)
+)
+defer db.Close()
+```
 
 ## What to know
 
@@ -30,4 +38,4 @@ Or via the typed `Config`: `sqlite.Open(sqlite.Config{Path: "secret.db", Encrypt
 
 Add `Options.Recorder = crypto.NewSlogRecorder(slog.Default())` (or any custom `crypto.Recorder`) for per-IO observability. Stack `vfs/cksm` underneath via `Options.WrapVFS` for checksum-then-encrypt protection (see [Checksums](checksums.md)).
 
-Runnable: [`examples/features/vfs/crypto/`](../../examples/features/vfs/crypto/main.go) (Argon2id key derivation + per-IO observability), and with gorm [`gorm/examples/crypto/`](../../gorm/examples/crypto/main.go). Package docs: [`vfs/crypto/doc.go`](../../vfs/crypto/doc.go). On-disk format + threat model: `vfs/crypto/doc.go`; coverage: [`dev/coverage/vfs.md`](../../dev/coverage/vfs.md).
+`vfs/crypto` is its own module (`gosqlite.org/vfs/crypto`) so its cipher dependencies stay out of the root graph. Runnable: [`vfs/crypto/example/`](../../vfs/crypto/example/main.go) (`crypto.Open` + a slog recorder). For an encrypted database with an ORM, use [LiteORM](https://liteorm.org), built on this driver — the gorm dialector has no encryption path. Package docs: [`vfs/crypto/doc.go`](../../vfs/crypto/doc.go). On-disk format + threat model: `vfs/crypto/doc.go`; coverage: [`dev/coverage/vfs.md`](../../dev/coverage/vfs.md).

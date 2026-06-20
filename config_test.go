@@ -1,26 +1,20 @@
 package sqlite_test
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"io"
-	"log/slog"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	sqlite "gosqlite.org"
-	"gosqlite.org/vfs/crypto"
 )
 
-// TestOpen_Plain confirms the new entry works for the no-encryption
-// path: pure Go Config in, *sql.DB-compatible *DB out, no DSN
-// strings anywhere in the caller's code.
+// TestOpen_Plain confirms the new entry works: pure Go Config in,
+// *sql.DB-compatible *DB out, no DSN strings anywhere in the caller's code.
 func TestOpen_Plain(t *testing.T) {
 	dir := t.TempDir()
 	db, err := sqlite.Open(sqlite.Config{
@@ -40,10 +34,6 @@ func TestOpen_Plain(t *testing.T) {
 	}
 	if v != "hi" {
 		t.Errorf("v=%q, want \"hi\"", v)
-	}
-	// No encryption registered → VFSName empty.
-	if name := db.VFSName(); name != "" {
-		t.Errorf("VFSName=%q, want empty for no-encryption path", name)
 	}
 }
 
@@ -250,223 +240,6 @@ func TestPragmas_ExtraDeterministicOrder(t *testing.T) {
 	}
 }
 
-func TestOpen_Encrypted(t *testing.T) {
-	if raceEnabledExt {
-		t.Skip("vfs/crypto trampolines trip -race checkptr (same skip as the vfs/crypto package)")
-	}
-	dir := t.TempDir()
-	key := make([]byte, 32)
-	db, err := sqlite.Open(sqlite.Config{
-		Path:    filepath.Join(dir, "secret.db"),
-		Pragmas: sqlite.RecommendedPragmas(),
-		Encryption: &sqlite.Encryption{
-			Key:    key,
-			Cipher: sqlite.Adiantum,
-		},
-	})
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	if name := db.VFSName(); !strings.HasPrefix(name, "crypto") {
-		t.Errorf("VFSName=%q, want prefix \"crypto\" (encryption path)", name)
-	}
-	if _, err := db.Exec(`CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('encrypted')`); err != nil {
-		t.Fatalf("exec: %v", err)
-	}
-	var v string
-	if err := db.QueryRow(`SELECT v FROM t`).Scan(&v); err != nil {
-		t.Fatalf("scan: %v", err)
-	}
-	if v != "encrypted" {
-		t.Errorf("v=%q, want \"encrypted\"", v)
-	}
-}
-
-// TestOpen_EncryptionKeyDefensiveCopy pins that mutating the caller's
-// Encryption.Key slice after Open does NOT corrupt the in-flight
-// cipher. The contract is documented at sqlite.Encryption.Key —
-// regression here would silently break encrypted IO.
-func TestOpen_EncryptionKeyDefensiveCopy(t *testing.T) {
-	if raceEnabledExt {
-		t.Skip("touches vfs/crypto; same -race checkptr skip")
-	}
-	dir := t.TempDir()
-	key := make([]byte, 32)
-	for i := range key {
-		key[i] = byte(i + 1)
-	}
-	keyBackup := append([]byte(nil), key...)
-
-	db, err := sqlite.Open(sqlite.Config{
-		Path: filepath.Join(dir, "keymut.db"),
-		Encryption: &sqlite.Encryption{
-			Key:    key,
-			Cipher: sqlite.Adiantum,
-		},
-	})
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	// Mutate the caller's key slice — defensive copy should keep the
-	// cipher operating on the original bytes.
-	for i := range key {
-		key[i] = 0xAA
-	}
-
-	if _, err := db.Exec(`CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('still works')`); err != nil {
-		t.Fatalf("post-mutation exec: %v", err)
-	}
-	var v string
-	if err := db.QueryRow(`SELECT v FROM t`).Scan(&v); err != nil {
-		t.Fatalf("post-mutation scan: %v", err)
-	}
-	if v != "still works" {
-		t.Errorf("v=%q, want \"still works\"", v)
-	}
-	// And the backup matches what we initialized with.
-	if !bytes.Equal(keyBackup, []byte{
-		1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
-		17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-	}) {
-		t.Fatal("backup of original key changed mid-test")
-	}
-}
-
-// TestOpen_EncryptionBadKeyLengthSurfaces pins that the Config layer
-// surfaces a wrong-length key as an Open error (not a panic, not a
-// silent open with broken IO).
-func TestOpen_EncryptionBadKeyLengthSurfaces(t *testing.T) {
-	if raceEnabledExt {
-		t.Skip("touches vfs/crypto; same -race checkptr skip")
-	}
-	dir := t.TempDir()
-	_, err := sqlite.Open(sqlite.Config{
-		Path: filepath.Join(dir, "bad-key.db"),
-		Encryption: &sqlite.Encryption{
-			Key:    make([]byte, 16), // Adiantum needs 32
-			Cipher: sqlite.Adiantum,
-		},
-	})
-	if err == nil {
-		t.Fatal("expected error for wrong key length, got nil")
-	}
-	if !strings.Contains(err.Error(), "32-byte key") {
-		t.Errorf("error %q does not mention required key length", err.Error())
-	}
-}
-
-// TestOpen_EncryptionInvalidCipher pins that an unknown Cipher value
-// fails Open with a clear error.
-func TestOpen_EncryptionInvalidCipher(t *testing.T) {
-	if raceEnabledExt {
-		t.Skip("touches vfs/crypto; same -race checkptr skip")
-	}
-	dir := t.TempDir()
-	_, err := sqlite.Open(sqlite.Config{
-		Path: filepath.Join(dir, "bad-cipher.db"),
-		Encryption: &sqlite.Encryption{
-			Key:    make([]byte, 32),
-			Cipher: sqlite.Cipher(99), // out of range
-		},
-	})
-	if err == nil {
-		t.Fatal("expected error for unknown cipher, got nil")
-	}
-	if !strings.Contains(err.Error(), "unknown cipher") {
-		t.Errorf("error %q does not mention unknown cipher", err.Error())
-	}
-}
-
-// TestOpen_EncryptionPageSizeNonDefault pins that PageSize != 4096
-// round-trips: create with 8192, close, reopen with same, read back.
-func TestOpen_EncryptionPageSizeNonDefault(t *testing.T) {
-	if raceEnabledExt {
-		t.Skip("touches vfs/crypto; same -race checkptr skip")
-	}
-	dir := t.TempDir()
-	path := filepath.Join(dir, "page8k.db")
-	key := make([]byte, 32)
-	for i := range key {
-		key[i] = byte(i + 100)
-	}
-
-	mkCfg := func() sqlite.Config {
-		return sqlite.Config{
-			Path:    path,
-			Pragmas: sqlite.RecommendedPragmas(),
-			Encryption: &sqlite.Encryption{
-				Key:      key,
-				Cipher:   sqlite.Adiantum,
-				PageSize: 8192,
-			},
-		}
-	}
-
-	db, err := sqlite.Open(mkCfg())
-	if err != nil {
-		t.Fatalf("first Open: %v", err)
-	}
-	if _, err := db.Exec(`PRAGMA page_size = 8192;
-		CREATE TABLE t (v TEXT);
-		INSERT INTO t VALUES ('page8k');`); err != nil {
-		t.Fatalf("setup: %v", err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("first Close: %v", err)
-	}
-
-	db2, err := sqlite.Open(mkCfg())
-	if err != nil {
-		t.Fatalf("second Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db2.Close() })
-	var v string
-	if err := db2.QueryRow(`SELECT v FROM t`).Scan(&v); err != nil {
-		t.Fatalf("read after reopen: %v", err)
-	}
-	if v != "page8k" {
-		t.Errorf("v=%q, want \"page8k\"", v)
-	}
-}
-
-// TestOpen_EncryptionRecorderFires confirms that a Recorder attached
-// via Config.Encryption is wired into the crypto VFS — IO produces
-// events the caller can observe.
-func TestOpen_EncryptionRecorderFires(t *testing.T) {
-	if raceEnabledExt {
-		t.Skip("touches vfs/crypto; same -race checkptr skip")
-	}
-	dir := t.TempDir()
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	recorder := crypto.NewSlogRecorder(logger)
-
-	db, err := sqlite.Open(sqlite.Config{
-		Path:    filepath.Join(dir, "obs.db"),
-		Pragmas: sqlite.RecommendedPragmas(),
-		Encryption: &sqlite.Encryption{
-			Key:      make([]byte, 32),
-			Cipher:   sqlite.Adiantum,
-			Recorder: recorder,
-		},
-	})
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	if _, err := db.Exec(`CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('obs')`); err != nil {
-		t.Fatalf("exec: %v", err)
-	}
-	if buf.Len() == 0 {
-		t.Error("recorder captured zero events for an encrypted write path")
-	}
-}
-
 func TestOpen_Errors(t *testing.T) {
 	cases := []struct {
 		name string
@@ -474,20 +247,6 @@ func TestOpen_Errors(t *testing.T) {
 		want string
 	}{
 		{"missing path", sqlite.Config{}, "Path is required"},
-		{"VFS and Encryption both set", sqlite.Config{
-			Path:       "/tmp/x",
-			VFS:        "some_vfs",
-			Encryption: &sqlite.Encryption{Key: make([]byte, 32)},
-		}, "mutually exclusive"},
-		{":memory: with Encryption", sqlite.Config{
-			Path:       ":memory:",
-			Encryption: &sqlite.Encryption{Key: make([]byte, 32)},
-		}, "on-disk path"},
-		{"ModeMemory with Encryption", sqlite.Config{
-			Path:       "any.db",
-			Mode:       sqlite.ModeMemory,
-			Encryption: &sqlite.Encryption{Key: make([]byte, 32)},
-		}, "on-disk path"},
 		{"unknown VFS name surfaces", sqlite.Config{
 			Path: "/tmp/no-such-vfs-test.db",
 			VFS:  "no_such_vfs_zzz",
@@ -549,17 +308,8 @@ func TestOpen_ReadOnlyEnforcement(t *testing.T) {
 }
 
 func TestClose_Idempotent(t *testing.T) {
-	if raceEnabledExt {
-		t.Skip("touches vfs/crypto; same -race checkptr skip")
-	}
 	dir := t.TempDir()
-	db, err := sqlite.Open(sqlite.Config{
-		Path: filepath.Join(dir, "idem.db"),
-		Encryption: &sqlite.Encryption{
-			Key:    make([]byte, 32),
-			Cipher: sqlite.Adiantum,
-		},
-	})
+	db, err := sqlite.Open(sqlite.Config{Path: filepath.Join(dir, "idem.db")})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -690,131 +440,15 @@ func TestApplyPragmas_Standalone(t *testing.T) {
 	}
 }
 
-// TestOpen_ConcurrentEncryptedOpens exercises two simultaneous
-// Open calls with Encryption set: each gets a distinct VFS name,
-// Close on one does NOT pull the rug out from under the other.
-func TestOpen_ConcurrentEncryptedOpens(t *testing.T) {
-	if raceEnabledExt {
-		t.Skip("touches vfs/crypto; same -race checkptr skip")
-	}
-	dir := t.TempDir()
-	const n = 4
-	dbs := make([]*sqlite.DB, n)
-	var wg sync.WaitGroup
-	errs := make([]error, n)
-	for i := range n {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			db, err := sqlite.Open(sqlite.Config{
-				Path: filepath.Join(dir, fmt.Sprintf("conc%d.db", i)),
-				Encryption: &sqlite.Encryption{
-					Key:    make([]byte, 32),
-					Cipher: sqlite.Adiantum,
-				},
-			})
-			if err != nil {
-				errs[i] = err
-				return
-			}
-			dbs[i] = db
-		}(i)
-	}
-	wg.Wait()
-	for i, e := range errs {
-		if e != nil {
-			t.Fatalf("Open[%d]: %v", i, e)
-		}
-	}
-
-	seen := map[string]bool{}
-	for i, db := range dbs {
-		name := db.VFSName()
-		if seen[name] {
-			t.Errorf("Open[%d] reused VFS name %q (should be unique per Open)", i, name)
-		}
-		seen[name] = true
-	}
-
-	// Close half, confirm the other half still works.
-	for i := range n / 2 {
-		if err := dbs[i].Close(); err != nil {
-			t.Fatalf("Close[%d]: %v", i, err)
-		}
-		dbs[i] = nil
-	}
-	for i := n / 2; i < n; i++ {
-		if _, err := dbs[i].Exec(`CREATE TABLE t (v TEXT); INSERT INTO t VALUES ('survives')`); err != nil {
-			t.Errorf("Exec on survivor[%d] after closing peers: %v", i, err)
-		}
-		if err := dbs[i].Close(); err != nil {
-			t.Errorf("Close survivor[%d]: %v", i, err)
-		}
-	}
-}
-
-// TestOpen_FailedOpenReleasesVFS pins that a failure after VFS
-// registration releases the VFS — otherwise repeated failed opens
-// leak crypto.FS handles.
-func TestOpen_FailedOpenReleasesVFS(t *testing.T) {
-	if raceEnabledExt {
-		t.Skip("touches vfs/crypto; same -race checkptr skip")
-	}
-	dir := t.TempDir()
-	// Bad PRAGMA — drives the PingContext path to fail after VFS
-	// has been registered.
-	db0, err := sqlite.Open(sqlite.Config{
-		Path: filepath.Join(dir, "fail.db"),
-		Encryption: &sqlite.Encryption{
-			Key:    make([]byte, 32),
-			Cipher: sqlite.Adiantum,
-		},
-		Pragmas: sqlite.Pragmas{
-			Extra: map[string]string{
-				// Intentionally malformed; modernc will reject this
-				// on conn open, surfacing a Ping error.
-				"page_size": "not_a_number",
-			},
-		},
-	})
-	if err == nil {
-		// Some platforms (e.g. Windows) accept the malformed pragma, so
-		// Open succeeds. Close the DB so its file handle is released
-		// before t.TempDir cleanup — otherwise Windows can't unlink
-		// fail.db while the handle is open.
-		if db0 != nil {
-			_ = db0.Close()
-		}
-		t.Skip("driver accepted bad pragma; no easy way to force a post-VFS-registration failure")
-	}
-	// A subsequent successful Open should work — proves the failed
-	// open didn't leave the VFS registered and blocking subsequent
-	// registrations of the same name.
-	db, err := sqlite.Open(sqlite.Config{
-		Path: filepath.Join(dir, "ok.db"),
-		Encryption: &sqlite.Encryption{
-			Key:    make([]byte, 32),
-			Cipher: sqlite.Adiantum,
-		},
-	})
-	if err != nil {
-		t.Fatalf("subsequent Open after failed one: %v", err)
-	}
-	_ = db.Close()
-}
-
 // Catch nil-deref guards on the DB wrapper.
 var _ io.Closer = (*sqlite.DB)(nil)
 
-// nilWrapperClose exercises the zero-value safety guard so a typo
+// TestDB_NilCloseSafe exercises the zero-value safety guard so a typo
 // like `var db *sqlite.DB; db.Close()` doesn't panic.
 func TestDB_NilCloseSafe(t *testing.T) {
 	var db *sqlite.DB
 	if err := db.Close(); err != nil {
 		t.Errorf("nil receiver Close: %v", err)
-	}
-	if name := db.VFSName(); name != "" {
-		t.Errorf("nil receiver VFSName=%q", name)
 	}
 }
 
@@ -825,11 +459,8 @@ func TestOpen_ErrorsAreWrapped(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	// "Path is required" is unwrapped, but VFS+Encryption error wraps
-	// nothing either — the goal here is to confirm callers can
-	// errors.Is against future sentinel errors. Today's contract is
-	// loose; this test is a placeholder to flag if we introduce
-	// sentinels later.
+	// "Path is required" is unwrapped today; this test is a placeholder to
+	// flag if we introduce errors.Is-able sentinels later.
 	var probe interface{ Error() string }
 	if !errors.As(err, &probe) {
 		t.Errorf("err not satisfying error interface: %v", err)

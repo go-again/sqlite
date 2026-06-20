@@ -1,9 +1,8 @@
 package sqlite
 
 import (
+	"io"
 	"time"
-
-	"gosqlite.org/vfs/crypto"
 )
 
 // InMemory is the canonical SQLite path for a private per-conn
@@ -47,16 +46,16 @@ type Config struct {
 	// foreign_keys=on).
 	Pragmas Pragmas
 
-	// Encryption, when non-nil, transparently encrypts the on-disk
-	// file via [vfs/crypto]. The opened *DB bundles the VFS handle;
-	// Close releases both the *sql.DB pool AND the VFS.
-	Encryption *Encryption
-
 	// VFS overrides the SQLite VFS name. Set only when you have a
 	// pre-registered VFS to route through; leave empty otherwise.
-	// Mutually exclusive with Encryption (which registers its own
-	// VFS internally).
 	VFS string
+
+	// VFSCloser, if set, is closed by [DB.Close] after the connection pool
+	// drains. VFS-providing packages set it so a single db.Close() also
+	// tears down the VFS they registered for this database — e.g.
+	// [gosqlite.org/vfs/crypto]'s Open routes its cipher VFS through VFS and
+	// its handle through VFSCloser. Leave nil otherwise.
+	VFSCloser io.Closer
 
 	// Cache routes the SQLite `cache=` URI parameter. Use [CacheShared]
 	// to let multiple connections in the same process see the same
@@ -145,11 +144,31 @@ const (
 	TempStoreMemory  TempStore = "MEMORY"
 )
 
+// AutoVacuumMode is the typed enum for SQLite's auto_vacuum pragma. Unlike
+// most pragmas it is a database-creation-time property: it takes effect only
+// on an empty database (before any table exists) or after a VACUUM. Empty
+// value leaves SQLite at its default (NONE). See [Pragmas.AutoVacuum] for the
+// new-database path and [DB.SetAutoVacuum] for converting an existing one.
+type AutoVacuumMode string
+
+const (
+	// AutoVacuumNone disables auto-vacuum (SQLite default): freed pages
+	// become a free list reused by later writes; the file never shrinks.
+	AutoVacuumNone AutoVacuumMode = "NONE"
+	// AutoVacuumFull returns freed pages to the OS automatically on every
+	// commit.
+	AutoVacuumFull AutoVacuumMode = "FULL"
+	// AutoVacuumIncremental tracks freed pages but reclaims them only when
+	// you call [DB.IncrementalVacuum].
+	AutoVacuumIncremental AutoVacuumMode = "INCREMENTAL"
+)
+
 // Exported pragma-key constants. Used internally by the DSN renderer
 // and the [ApplyPragmas] / [BuildDSN] code paths; exposed so callers
 // building custom pragma strings or migration scripts can reference
 // the canonical SQLite spelling without re-hardcoding it.
 const (
+	PragmaAutoVacuum  = "auto_vacuum"
 	PragmaJournalMode = "journal_mode"
 	PragmaBusyTimeout = "busy_timeout"
 	PragmaSynchronous = "synchronous"
@@ -164,6 +183,15 @@ const (
 //
 // For Pragmas not surfaced here (there are many), use [Pragmas.Extra].
 type Pragmas struct {
+	// AutoVacuum sets SQLite's auto_vacuum mode. The mode is fixed when the
+	// database is created, so it only takes effect on a fresh database — which
+	// works here because every Config pragma is applied at connection open,
+	// before your first CREATE TABLE. Converting an existing, populated
+	// database needs [DB.SetAutoVacuum]. Pair [AutoVacuumIncremental] with
+	// [DB.IncrementalVacuum] to reclaim space on demand. Empty = leave at
+	// SQLite's default (NONE).
+	AutoVacuum AutoVacuumMode
+
 	// JournalMode selects the journaling strategy. Use [JournalWAL]
 	// for production. Empty = leave alone.
 	JournalMode JournalMode
@@ -205,41 +233,3 @@ func RecommendedPragmas() Pragmas {
 		ForeignKeys: true,
 	}
 }
-
-// Encryption bundles the page-level encryption options. The fields
-// are a thin pass-through to [crypto.Options]; see that type for
-// per-field semantics. Set [Config.Encryption] to enable.
-type Encryption struct {
-	// Key is the raw cipher key. Length depends on Cipher: 32 bytes
-	// for [Adiantum] (default), 64 bytes for [AESXTS]. Use
-	// [crypto.DeriveKey] to turn a passphrase + salt into the right
-	// number of bytes.
-	//
-	// The caller's slice is defensively copied; you're free to zero
-	// or mutate it after [Open] returns.
-	Key []byte
-
-	// Cipher selects the encryption mode. Zero value is [Adiantum].
-	Cipher Cipher
-
-	// PageSize must match the database's PRAGMA page_size if the DB
-	// already exists. Zero = 4096 (SQLite default).
-	PageSize int
-
-	// Recorder receives per-IO observability events (one per xRead /
-	// xWrite / xSync trampoline). Nil disables. Use
-	// [crypto.NewSlogRecorder] for an slog-shaped recorder.
-	Recorder crypto.Recorder
-}
-
-// Cipher is re-exported from [vfs/crypto] so consumers of the root
-// package don't need a separate import for the common case. All
-// [crypto.Cipher] values are usable here.
-type Cipher = crypto.Cipher
-
-// Re-exported cipher constants. Use these directly via the root
-// package: `sqlite.Adiantum`, `sqlite.AESXTS`.
-const (
-	Adiantum = crypto.Adiantum
-	AESXTS   = crypto.AESXTS
-)

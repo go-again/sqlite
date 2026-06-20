@@ -26,7 +26,7 @@ Existing mattn / modernc / glebarez / ncruces code keeps working after the impor
 
 - **🤖 AI / LLM-ready — your coding agent writes correct code on the first try.** The repo ships [**Agent Skills**](skills/): task-scoped instructions (vector search, FTS5, the gorm dialector, LiteORM, custom VFS, migration, pitfalls) an AI assistant loads on demand, so it reaches for the *real* API instead of hallucinating one — drop `skills/` into your agent and the trial-and-error loop largely disappears. It's backed by structured, task-oriented [docs](docs/) ("I want X → do Y"), an [`AGENTS.md`](AGENTS.md) for agents working *in* the codebase, and `doc.go` on every package for pkg.go.dev. **This is the fastest way to build on SQLite with an AI pair-programmer.**
 
-- **📦 Comprehensive — the whole stack, one project.** Driver + typed sqlite-vec + FTS5 + rank fusion + encryption + checksums + in-memory & custom VFSes + a bounded page cache + the `ext/` catalog all ship and version **together** under `gosqlite.org`. The gorm dialector lives in a companion `gosqlite.org/gorm` module so the core stays dependency-free for everyone who isn't on gorm. No stitching `modernc.org/sqlite` + `glebarez/sqlite` + `asg017/sqlite-vec` + a separate encryption/vtab module and reconciling four release cadences — and your agent reasons about *one* surface, not four.
+- **📦 Comprehensive — the whole stack, one project.** Driver + typed sqlite-vec + FTS5 + rank fusion + checksums + in-memory & custom VFSes + a bounded page cache + the `ext/` catalog all ship and version **together** in the core `gosqlite.org` module; encryption (`vfs/crypto`), blob storage (`blobstore`), and the gorm dialector (`gosqlite.org/gorm`) are opt-in companion modules in the same repo on the same release cadence, so the core stays dependency-free for everyone who doesn't use them. No stitching `modernc.org/sqlite` + `glebarez/sqlite` + `asg017/sqlite-vec` + a separate encryption/vtab module and reconciling four release cadences — and your agent reasons about *one* surface, not four.
 
 - **🔀 CGo-free migration in one line.** Swap the import; keep your `sql.Open("sqlite3", …)` calls and `_*` DSN flags (translated transparently). Two driver names (`"sqlite"` + `"sqlite3"`) mean code from either lineage compiles unchanged. You drop the C toolchain, cross-compile with plain `GOOS=… go build`, and ship static distroless/alpine binaries.
 
@@ -41,12 +41,12 @@ Existing mattn / modernc / glebarez / ncruces code keeps working after the impor
 
 ## What you get
 
-The driver itself — CGo-free, mattn-API + glebarez-gorm drop-in, registered under both `"sqlite"` and `"sqlite3"` — is just the floor. Stacked on top, in the same module:
+The driver itself — CGo-free, mattn-API + glebarez-gorm drop-in, registered under both `"sqlite"` and `"sqlite3"` — is just the floor. Stacked on top:
 
 - **[Vector search](docs/guides/vector-search.md)** — typed `vec.Table` over [sqlite-vec](https://github.com/asg017/sqlite-vec): L2 / Cosine / Dot / Hamming, JSON + binary + quantized `int8` / `bit` encodings, metadata / partition / auxiliary columns, streaming `iter.Seq2` KNN, predicate pushdown.
 - **[Full-text search](docs/guides/full-text-search.md)** — typed `fts.Index[K, V]` over FTS5: Porter / Unicode61 / Trigram tokenizers plus **custom Go tokenizers**, a Go query builder, BM25 ranking, snippet + highlight.
 - **[Hybrid search](docs/guides/hybrid-search.md)** — `fusion.RRF` combines `vec.KNN` and `fts.Search` rankings via Reciprocal Rank Fusion.
-- **[Encryption at rest](docs/guides/encryption.md)** — pure-Go `vfs/crypto`, Adiantum or AES-XTS-256, transparent page-level encryption of DB + journal + WAL + temp; Argon2id key derivation; per-IO observability.
+- **[Encryption at rest](docs/guides/encryption.md)** — pure-Go `vfs/crypto` (a separate module), Adiantum or AES-XTS-256, transparent page-level encryption of DB + journal + WAL + temp; `crypto.Open` for one-call typed-Config setup; Argon2id key derivation; per-IO observability.
 - **[Corruption detection](docs/guides/checksums.md)** — pure-Go `vfs/cksm`, Fletcher-style trailer per page (compatible with SQLite's `cksumvfs`); composes beneath `vfs/crypto`.
 - **[In-memory & embedded](docs/guides/in-memory.md)** — `vfs/mvcc` (snapshot isolation) and `vfs/memdb` (direct), plus `vfs.New(fs.FS)` / `vfs.NewReader` for `embed.FS` and raw-buffer databases.
 - **[User-implementable VFS](docs/guides/custom-vfs.md)** — back a writable database with arbitrary Go storage via `vfs.Register` + the `vfs.VFS` / `vfs.File` interfaces; WAL via the optional `vfs.ShmFile`; `vfs.Wrap` instrumentation.
@@ -54,8 +54,9 @@ The driver itself — CGo-free, mattn-API + glebarez-gorm drop-in, registered un
 - **[Loadable Go SQL extensions](docs/extensions/index.md)** under `ext/` — scalars / aggregates / collations (`regexp`, `uuid`, `hash`, `stats`, `unicode`, `fuzzy`, `decimal`, `money`, `time`, `eval`, …), virtual tables (`array`, `csv`, `lines`, `rtree`, `series`, …), stores (`bloom`, `spellfix1`), I/O (`blobio`, `fileio`) — many with a typed Go handle. Auto-register per conn or pool-wide.
 - **[Sessions / changesets](docs/guides/sessions.md)** — record changes into a changeset/patchset, `ApplyChangeset` to a replica, `InvertChangeset`, `ConcatChangesets`. Offline sync, audit logs, replication — **no other pure-Go SQLite driver exposes this**.
 - **[Hooks, backup & introspection](docs/guides/hooks.md)** — per-conn update / authorizer / commit / trace hooks, `Backup` + `Serialize`/`Deserialize`, column metadata + runtime telemetry, the `*FunctionContext` aux-data substrate.
-- **[Modern Go-typed Config](docs/guides/configuration.md)** — `sqlite.Config{Path, Pragmas, Encryption, …}` flows uniformly to raw `database/sql` and gorm; plus typed pragma enums and one-line open shortcuts.
+- **[Modern Go-typed Config](docs/guides/configuration.md)** — `sqlite.Config{Path, Pragmas, …}` flows uniformly to raw `database/sql`, gorm, and `crypto.Open`; plus typed pragma enums and one-line open shortcuts.
 - **[sqlitex ergonomics](docs/guides/sqlitex.md)** — `Save`, `Transaction`, `Execute`, scalar reads, and an `embed.FS` migration runner.
+- **[Blob storage](docs/guides/blobstore.md)** — pure-Go `blobstore` (a separate module) keeps a large, growable byte object (files, uploads, streamed content) as an `io.ReaderAt` / `io.WriterAt`, O(chunk) memory, with sparse holes, truncate, and optional transparent per-object compression.
 
 ## Declarative models with native search: LiteORM
 
@@ -93,7 +94,7 @@ The Go SQLite landscape has three camps: CGo bindings (mattn, zombiezen), pure-G
 | Loadable Go SQL extensions | catalog under `ext/` | math/regexp via build-tag | ✗ | similar catalog | ✗ |
 | Hot UDF-row throughput | == modernc | fastest (CGo) | baseline | slowest (wazero) | == modernc |
 
-**Better here:** it's the only Go SQLite package that ships AI Agent Skills + task-oriented docs, so an AI assistant builds against it correctly without trial and error; one module ships the whole stack (driver + vec + FTS5 + fusion + crypto + cksm + VFSes + page cache + `ext/`) on one release cadence; one driver under two SQL names makes migration a one-line swap; typed vec/FTS5 are first-class where every other driver needs DIY plumbing; custom Go FTS5 tokenizers and the typed `sqlite.Config` are unique to this module; and [LiteORM](https://liteorm.org), built on this driver, is the only Go SQLite data layer with native vector / full-text / hybrid search wired straight in.
+**Better here:** it's the only Go SQLite package that ships AI Agent Skills + task-oriented docs, so an AI assistant builds against it correctly without trial and error; one project ships the whole stack (driver + vec + FTS5 + fusion + cksm + VFSes + page cache + `ext/`, plus the `vfs/crypto`, `blobstore`, and gorm companion modules) on one release cadence; one driver under two SQL names makes migration a one-line swap; typed vec/FTS5 are first-class where every other driver needs DIY plumbing; custom Go FTS5 tokenizers and the typed `sqlite.Config` are unique to this module; and [LiteORM](https://liteorm.org), built on this driver, is the only Go SQLite data layer with native vector / full-text / hybrid search wired straight in.
 
 **The trade-offs are narrow:** mattn's CGo binding is ~3% faster on hot per-row UDF paths (a few extra allocs/op on a no-op authorizer — invisible once you let SQL do the work); the support window tracks the two newest Go releases; and `vfs/crypto` is confidentiality-only (no SQLCipher on-disk format or per-page MAC). None is a dealbreaker for typical use; details in [Performance](docs/reference/performance.md).
 
@@ -125,9 +126,11 @@ Plain `database/sql` works too: `sql.Open("sqlite", "file:app.db")`. The full se
 | `gosqlite.org/vec` | typed sqlite-vec `Table` (L2 / Cosine / Dot / Hamming, quantized encodings) |
 | `gosqlite.org/fts` | typed FTS5 `Index[K, V]` + custom Go tokenizers |
 | `gosqlite.org/fusion` | RRF rank-fusion helpers (combine vec + fts results) |
-| `gosqlite.org/vfs` (+ `crypto`, `cksm`, `mvcc`, `memdb`) | `fs.FS`/`io.ReaderAt` adapters, the user-implementable VFS, encryption, checksums, in-memory |
+| `gosqlite.org/vfs` (+ `cksm`, `mvcc`, `memdb`) | `fs.FS`/`io.ReaderAt` adapters, the user-implementable VFS, checksums, in-memory |
+| `gosqlite.org/vfs/crypto` | Adiantum / AES-XTS-256 encryption-at-rest VFS + `crypto.Open` — **separate module** |
 | `gosqlite.org/pcache` | application-controlled bounded page cache |
 | `gosqlite.org/sqlitex` | ergonomic `database/sql` helpers + `embed.FS` migrations |
+| `gosqlite.org/blobstore` | large, growable byte objects as `io.ReaderAt`/`io.WriterAt` (files, uploads), optional transparent compression — **separate module** |
 | `gosqlite.org/ext/<name>` (+ `/auto`) | opt-in loadable Go extensions — see the [catalog](docs/extensions/index.md) |
 
 ## Migrating

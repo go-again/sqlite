@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
 	"gorm.io/gorm"
@@ -110,42 +109,6 @@ func TestOpenConfig_PragmasPropagateAcrossPool(t *testing.T) {
 	}
 }
 
-func TestOpenConfig_Encrypted(t *testing.T) {
-	if raceEnabledExt {
-		t.Skip("touches vfs/crypto; same -race checkptr skip as the vfs/crypto package")
-	}
-	dir := t.TempDir()
-	db, err := sqlitegorm.OpenConfig(sqlite.Config{
-		Path:    filepath.Join(dir, "secret.db"),
-		Pragmas: sqlite.RecommendedPragmas(),
-		Encryption: &sqlite.Encryption{
-			Key:    make([]byte, 32),
-			Cipher: sqlite.Adiantum,
-		},
-	})
-	if err != nil {
-		t.Fatalf("OpenConfig: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	if err := db.AutoMigrate(&row{}); err != nil {
-		t.Fatalf("AutoMigrate: %v", err)
-	}
-	if err := db.Create(&row{Body: "encrypted via gorm"}).Error; err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	var got row
-	if err := db.First(&got).Error; err != nil {
-		t.Fatalf("First: %v", err)
-	}
-	if got.Body != "encrypted via gorm" {
-		t.Errorf("Body=%q", got.Body)
-	}
-	if name := db.VFSName(); !strings.HasPrefix(name, "crypto") {
-		t.Errorf("VFSName=%q, want prefix \"crypto\"", name)
-	}
-}
-
 func TestOpenConfig_Errors(t *testing.T) {
 	cases := []struct {
 		name string
@@ -153,20 +116,6 @@ func TestOpenConfig_Errors(t *testing.T) {
 		want string
 	}{
 		{"missing path", sqlite.Config{}, "Path is required"},
-		{"VFS and Encryption both set", sqlite.Config{
-			Path:       "/tmp/x",
-			VFS:        "some_vfs",
-			Encryption: &sqlite.Encryption{Key: make([]byte, 32)},
-		}, "mutually exclusive"},
-		{":memory: with Encryption", sqlite.Config{
-			Path:       ":memory:",
-			Encryption: &sqlite.Encryption{Key: make([]byte, 32)},
-		}, "on-disk path"},
-		{"ModeMemory with Encryption", sqlite.Config{
-			Path:       "any.db",
-			Mode:       sqlite.ModeMemory,
-			Encryption: &sqlite.Encryption{Key: make([]byte, 32)},
-		}, "on-disk path"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -249,67 +198,6 @@ func TestOpenConfig_VariadicGormConfig(t *testing.T) {
 	}
 }
 
-// TestOpenConfig_ConcurrentEncryptedOpens — gorm version of the
-// concurrent-Open isolation test. Four parallel encrypted opens get
-// distinct VFS names; closing half doesn't affect the survivors.
-func TestOpenConfig_ConcurrentEncryptedOpens(t *testing.T) {
-	if raceEnabledExt {
-		t.Skip("touches vfs/crypto; same -race checkptr skip")
-	}
-	dir := t.TempDir()
-	const n = 4
-	dbs := make([]*sqlitegorm.DB, n)
-	var wg sync.WaitGroup
-	errs := make([]error, n)
-	for i := range n {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			db, err := sqlitegorm.OpenConfig(sqlite.Config{
-				Path: filepath.Join(dir, fmt.Sprintf("conc%d.db", i)),
-				Encryption: &sqlite.Encryption{
-					Key:    make([]byte, 32),
-					Cipher: sqlite.Adiantum,
-				},
-			})
-			if err != nil {
-				errs[i] = err
-				return
-			}
-			dbs[i] = db
-		}(i)
-	}
-	wg.Wait()
-	for i, e := range errs {
-		if e != nil {
-			t.Fatalf("OpenConfig[%d]: %v", i, e)
-		}
-	}
-
-	seen := map[string]bool{}
-	for i, db := range dbs {
-		name := db.VFSName()
-		if seen[name] {
-			t.Errorf("OpenConfig[%d] reused VFS name %q", i, name)
-		}
-		seen[name] = true
-	}
-
-	for i := range n / 2 {
-		if err := dbs[i].Close(); err != nil {
-			t.Fatalf("Close[%d]: %v", i, err)
-		}
-	}
-	for i := n / 2; i < n; i++ {
-		if err := dbs[i].AutoMigrate(&row{}); err != nil {
-			t.Errorf("AutoMigrate on survivor[%d]: %v", i, err)
-		}
-		if err := dbs[i].Close(); err != nil {
-			t.Errorf("Close survivor[%d]: %v", i, err)
-		}
-	}
-}
-
 // TestOpenConfig_NilSafe pins the zero-value safety guard on the gorm
 // DB wrapper so accidental `var db *sqlitegorm.DB; db.Close()` doesn't
 // panic.
@@ -317,8 +205,5 @@ func TestOpenConfig_NilSafe(t *testing.T) {
 	var db *sqlitegorm.DB
 	if err := db.Close(); err != nil {
 		t.Errorf("nil receiver Close: %v", err)
-	}
-	if name := db.VFSName(); name != "" {
-		t.Errorf("nil receiver VFSName=%q", name)
 	}
 }

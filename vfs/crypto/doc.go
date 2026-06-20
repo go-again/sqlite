@@ -177,7 +177,8 @@
 //
 // # See also
 //
-//   - examples/features/vfs/crypto — runnable end-to-end demo.
+//   - the example subdirectory of this module — a runnable crypto.Open
+//     end-to-end demo (cd vfs/crypto && go run ./example).
 //   - [gosqlite.org/vec] / [gosqlite.org/fts]
 //     — both compose with this VFS transparently. The same Recorder-
 //     shaped observability surface is parallel across all three.

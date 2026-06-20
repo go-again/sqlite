@@ -31,10 +31,10 @@ db, _ := sqlitegorm.OpenConfig(sqlite.Config{Path: "my.db", Pragmas: sqlite.Reco
 
 ## Good to know
 
-- **`OpenConfig` returns a `*sqlitegorm.DB`** that embeds `*gorm.DB`; `defer db.Close()` drains the pool *and* unregisters any encryption VFS — no separate `*sql.DB` teardown.
-- **Encryption at rest**: set `sqlite.Config{Encryption: &sqlite.Encryption{Key: key}}` — the dialector wires and tears down the VFS for you.
+- **`OpenConfig` returns a `*sqlitegorm.DB`** that embeds `*gorm.DB`; `defer db.Close()` drains the pool — no separate `*sql.DB` teardown.
+- **No encryption via the dialector** — for an encrypted database with an ORM, use [LiteORM](https://liteorm.org) (built on this driver), which integrates `vfs/crypto` itself.
 - **Error translation** is on through the dialector: unique / primary-key violations map to `gorm.ErrDuplicatedKey`, foreign-key violations to `gorm.ErrForeignKeyViolated`.
 - **`time.Time` columns**: the dialector injects `_texttotime=1` so `DATE` / `DATETIME` / `TIMESTAMP` scan back as `time.Time`; opt out with `_texttotime=0` in the DSN.
 - **ext/ virtual tables** (`csv`, `lines`, `closure`, `bloom`, `spellfix1`, …) work through gorm: register the module on the pool, pin it with `sqlDB.SetMaxOpenConns(1)`, create the vtab with `db.Exec` (AutoMigrate can't emit `CREATE VIRTUAL TABLE`), then read with `db.Raw` / `db.Table(...).Scan`. See [`gorm/examples/ext-vtabs`](../../gorm/examples/ext-vtabs/main.go).
 
-Runnable demos: [`gorm/examples/`](../../gorm/examples/) (getting-started, from-glebarez, crypto, vfs, ext-scalars, ext-vtabs).
+Runnable demos: [`gorm/examples/`](../../gorm/examples/) (getting-started, from-glebarez, vfs, ext-scalars, ext-vtabs).
