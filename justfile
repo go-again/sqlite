@@ -67,10 +67,11 @@ bench-vec:
 bench-fts:
     go test -run=^$ -bench='^Benchmark' -benchmem -count=5 ./fts/
 
-# Lint with fmt-check + vet + staticcheck + golangci-lint + modernize
-# (matches CI). fmt-check runs first because it's the cheapest and the
-# most common cause of CI failures from local-only pushes.
-lint: fmt-check vet staticcheck golangci modernize
+# Lint the root module + every sub-module with fmt-check + vet + staticcheck +
+# golangci-lint + modernize (matches CI). fmt-check runs first because it's the
+# cheapest and the most common cause of CI failures from local-only pushes;
+# lint-submodules runs last because it lints N modules and is the slowest.
+lint: fmt-check vet staticcheck golangci modernize lint-submodules
 
 # go vet across all packages. unsafeptr=false suppresses the false-positive
 # storm from modernc's uintptr↔unsafe.Pointer conversions inherited in our
@@ -195,6 +196,31 @@ submodule DIR:
 # vfs/crypto self-skips its blob-I/O tests under -race via TestMain.
 test-submodules:
     @set -e; for d in {{submods}}; do echo "=== test $d ==="; (cd "$d" && go test -count=1 -timeout 5m ./...); done
+
+# Lint EVERY sub-module in its own module context: vet + staticcheck +
+# golangci-lint + modernize (gofmt is already repo-wide via fmt-check). Mirrors
+# the per-module lint the CI `submodules` matrix runs. Slow — lints N modules.
+# Assumes staticcheck + golangci-lint are installed (the root `staticcheck` /
+# `golangci` recipes that run before this in `lint` already check that).
+lint-submodules:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for d in {{submods}}; do
+        echo "=== lint $d ==="
+        (
+            cd "$d"
+            go vet -unsafeptr=false ./...
+            staticcheck ./...
+            golangci-lint run --timeout 5m ./...
+            # Modernize, minus the forked upstream files we keep verbatim (gorm's
+            # sqlite.go/migrator.go; matched on the path tail since these run with
+            # the sub-module as the working dir).
+            out=$(go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest ./... 2>&1 \
+                | grep -v -E '(^|/)(sqlite|vtab|rows|migrator)\.go:' \
+                | grep -v '^exit status' | grep -v '^go: ' || true)
+            [ -z "$out" ] || { echo "$out"; exit 1; }
+        )
+    done
 
 # Full CI parity: everything CI runs, in order. Slower than `default`. Now mirrors
 # CI's submodule + pin coverage (the old `ci` skipped xorm-compat and the pins).

@@ -200,9 +200,9 @@ jobs:
   # Every sub-module has its OWN go.mod (joined to the root via `replace
   # gosqlite.org`), so its private deps never reach the root graph: blobstore's
   # codec, vfs/crypto's adiantum + x/crypto, xorm-compat's xorm.io/xorm, gorm's
-  # dialector deps. Each is tested in its own module context. (xorm-compat is the
-  # CI-enforced proof gosqlite.org is a drop-in xorm SQLite driver — see
-  # dev/upstream/xorm.md.)
+  # dialector deps. Each is linted (vet + staticcheck + golangci-lint + modernize)
+  # and tested in its own module context. (xorm-compat is the CI-enforced proof
+  # gosqlite.org is a drop-in xorm SQLite driver — see dev/upstream/xorm.md.)
   #
   # The matrix is DISCOVERED, not hand-listed: `discover` finds every joined
   # sub-module's go.mod and emits the dir list as JSON; `submodules` fans out
@@ -237,6 +237,34 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup
+      # Same lint gate as the root `lint` job, in the sub-module's own context.
+      # gofmt is not repeated here — the root job's `gofmt -d` already covers
+      # every .go file in the repo, sub-modules included.
+      - name: go vet
+        working-directory: ${{ matrix.dir }}
+        run: go vet -unsafeptr=false ./...
+      - name: staticcheck
+        working-directory: ${{ matrix.dir }}
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          staticcheck ./...
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.4.0
+          args: --timeout 5m
+          # Runs in the sub-module dir; golangci-lint walks up to the repo-root
+          # .golangci.yml, so its exclusions apply uniformly across modules.
+          working-directory: ${{ matrix.dir }}
+      - name: gopls modernize
+        working-directory: ${{ matrix.dir }}
+        # Forked upstream files (gorm's sqlite.go/migrator.go) are excluded by
+        # path tail, since modernize runs with the sub-module as the working dir.
+        run: |
+          out=$(go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest ./... 2>&1 \
+              | grep -v -E '(^|/)(sqlite|vtab|rows|migrator)\.go:' \
+              | grep -v '^exit status' | grep -v '^go: ' || true)
+          if [ -n "$out" ]; then echo "$out"; exit 1; fi
       - name: go test (${{ matrix.dir }} module)
         working-directory: ${{ matrix.dir }}
         run: go test -count=1 -timeout 5m -v ./...
