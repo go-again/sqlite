@@ -175,10 +175,7 @@ func (s *Store) readAt(ctx context.Context, id int64, p []byte, off int64) (int,
 	if off >= size {
 		return 0, io.EOF
 	}
-	n := int64(len(p))
-	if n > size-off {
-		n = size - off
-	}
+	n := min(int64(len(p)), size-off)
 
 	compressed := codec == codecAZ
 	read := 0
@@ -215,10 +212,7 @@ func eachChunkSpan(off, n, chunk int64, fn func(seq, inOff, span, bufOff int64) 
 	for pos := off; pos < end; {
 		seq := pos / chunk
 		inOff := pos % chunk
-		span := chunk - inOff
-		if span > end-pos {
-			span = end - pos
-		}
+		span := min(chunk-inOff, end-pos)
 		if err := fn(seq, inOff, span, bufOff); err != nil {
 			return err
 		}

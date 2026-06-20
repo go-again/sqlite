@@ -37,7 +37,7 @@ func main() {
 		log.Fatal(err)
 	}
 	row := strings.Repeat("the quick brown fox jumps over the lazy dog ", 64) // ~2.8 KB, very compressible
-	for i := 0; i < 2000; i++ {
+	for range 2000 {
 		if _, err := db.Exec(`INSERT INTO notes (body) VALUES (?)`, row); err != nil {
 			log.Fatal(err)
 		}

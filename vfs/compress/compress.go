@@ -81,7 +81,7 @@ func Open(cfg sqlite.Config, opts Options) (*sqlite.DB, error) {
 		// sqlite.Open closes cfg.VFSCloser on its error paths; rc is still
 		// unarmed, so that only removes the working dir and leaves dest
 		// untouched. Close again defensively (idempotent) in case it didn't.
-		rc.Close()
+		_ = rc.Close()
 		return nil, err
 	}
 	// Arm only after a successful open, so the recompress never fires for a

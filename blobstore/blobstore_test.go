@@ -497,7 +497,7 @@ func TestSameIDConcurrentWriters(t *testing.T) {
 	const n = 8
 	var wg sync.WaitGroup
 	errs := make([]error, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -525,7 +525,7 @@ func TestSameIDConcurrentWriters(t *testing.T) {
 		t.Fatalf("size = %d, want %d", size, n*10)
 	}
 	got := readAll(t, s, id)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if want := bytes.Repeat([]byte{byte('A' + i)}, 10); !bytes.Equal(got[i*10:(i+1)*10], want) {
 			t.Fatalf("region %d = %q, want %q", i, got[i*10:(i+1)*10], want)
 		}

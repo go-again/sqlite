@@ -24,7 +24,7 @@ func growThenFree(t *testing.T, db *DB) {
 		t.Fatal(err)
 	}
 	blob := strings.Repeat("x", 4000)
-	for i := 0; i < 500; i++ {
+	for range 500 {
 		if _, err := db.ExecContext(ctx, `INSERT INTO t(b) VALUES (?)`, blob); err != nil {
 			t.Fatal(err)
 		}

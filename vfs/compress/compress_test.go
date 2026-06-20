@@ -80,7 +80,7 @@ func TestCompressionRatio(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	mustExec(t, db, `CREATE TABLE t (v TEXT)`)
-	for i := 0; i < rows; i++ {
+	for range rows {
 		mustExec(t, db, `INSERT INTO t VALUES (?)`, row)
 	}
 	if err := db.Close(); err != nil {
@@ -263,7 +263,7 @@ func TestWALPersistence(t *testing.T) {
 		t.Fatalf("journal_mode = %q, want wal", mode)
 	}
 	mustExec(t, db, `CREATE TABLE t (v INTEGER)`)
-	for i := 0; i < 500; i++ { // leave uncheckpointed frames in the WAL
+	for i := range 500 { // leave uncheckpointed frames in the WAL
 		mustExec(t, db, `INSERT INTO t VALUES (?)`, i)
 	}
 	if err := db.Close(); err != nil {

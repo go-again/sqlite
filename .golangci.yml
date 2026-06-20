@@ -82,6 +82,8 @@ linters:
         - (io.Closer).Close
         - (net.Conn).Close
         - os.Remove
+        - os.RemoveAll
+        - (*os.File).Close
         # Our internal driver types — *conn, *stmt, *rows, *Backup all
         # implement Close. database/sql's pool semantics mean we close on
         # cleanup paths where the prior error already short-circuits.
@@ -89,6 +91,14 @@ linters:
         - (*gosqlite.org.stmt).Close
         - (*gosqlite.org.rows).Close
         - (*gosqlite.org.Backup).Close
+        # Cleanup-path closers in the sub-modules (blobstore, vfs/compress, …):
+        # the wrapper *DB / *Blob, and the az codec reader/writer. Deferred-close
+        # idiom on paths where a prior error already short-circuits, same as the
+        # stdlib closers above.
+        - (*gosqlite.org.DB).Close
+        - (*gosqlite.org.Blob).Close
+        - (*github.com/go-again/az.Reader).Close
+        - (*github.com/go-again/az.Writer).Close
 
   exclusions:
     rules:
@@ -105,9 +115,10 @@ linters:
         path: "_test\\.go"
 
       # Examples are illustrative; brevity outweighs error-checking
-      # ceremony around `defer db.Close()` and the like.
+      # ceremony around `defer db.Close()` and the like. Matches both the root
+      # examples/ tree and a sub-module's own example/ dir.
       - linters: [errcheck]
-        path: "examples/"
+        path: "(^|/)examples?/"
 
       # The modernc-derived wrapper files use `defer x.Close()` without an
       # error-handler everywhere — that's the upstream idiom and changing it
