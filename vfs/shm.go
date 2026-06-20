@@ -226,10 +226,31 @@ func xShmLockTrampoline(_ *libc.TLS, id uintptr, offset, n, flags int32) int32 {
 	return sqlite3.SQLITE_OK
 }
 
-// xShmBarrier is a full memory barrier on real hardware shm. The Go
-// memory model already orders our mutex-guarded region access, so the
-// barrier is a no-op here.
-func xShmBarrierTrampoline(_ *libc.TLS, _ uintptr) {}
+// xShmBarrier fences shared-memory access across the connections in a shm
+// group. SQLite reads and writes the WAL index in the region memory
+// directly; those hot-path accesses do NOT go through g.mu (only region
+// allocation in xShmMap and the lock table in xShmLock do), so SQLite
+// relies on this callback to order them — exactly as its own unix VFS does
+// with a mutex enter/leave. A sync.Mutex Lock/Unlock pair is a full memory
+// barrier in the Go memory model, so a reader that runs its barrier after
+// a writer ran theirs observes the writer's published WAL-index update (and
+// the -wal frames written before it). A no-op here leaves the accesses
+// unordered: a reader can see an advanced mxFrame but stale/short -wal bytes
+// and fail with SQLITE_IOERR_SHORT_READ — sporadically, and far more often
+// on weakly-ordered (arm64) hardware than on x86.
+func xShmBarrierTrampoline(_ *libc.TLS, id uintptr) {
+	of := fileFor(id)
+	if of == nil {
+		return
+	}
+	g := of.shm
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	//lint:ignore SA2001 intentional empty critical section: Lock/Unlock is the memory barrier, mirroring SQLite's unixShmBarrier (staticcheck CLI)
+	g.mu.Unlock() //nolint:staticcheck // golangci-lint directive for the same suppression
+}
 
 // xShmUnmap detaches this file from its shm group, freeing the group's
 // regions when the last connection leaves. deleteFlag is advisory for
