@@ -19,6 +19,13 @@ sql.Register("sqlite3", drv) // mattn-compatible
 
 `RegisterFunction` / `Driver.RegisterConnectionHook` apply once and affect both names — there is no separate state.
 
+## Use with ORMs
+
+Both major Go ORMs use these driver names directly — no ORM-specific glue:
+
+- **gorm** — the in-module [`gosqlite.org/gorm`](../guides/gorm.md) dialector (a drop-in for `glebarez/sqlite` and `go-gorm/sqlite`), plus tag-driven vec / FTS5 sidecars.
+- **xorm** — `xorm.io/xorm` maps `"sqlite3"`, `"sqlite"`, and `"libsql"` to its SQLite dialect, so `xorm.NewEngine("sqlite3", dsn)` (or `"sqlite"`) drives it with this CGo-free driver, with no xorm-specific code. Compatibility is CI-enforced; see [Migrating → With xorm](../guides/migrating.md#with-xorm).
+
 ## Coexistence with mattn
 
 This package and `mattn/go-sqlite3` both claim `"sqlite3"` by default, so blank-importing both in one binary panics at init. To run both (gradual migration, or a mattn-only compiled `.so` extension), register this one under a custom name and leave `"sqlite3"` to mattn:

@@ -22,7 +22,7 @@ The [README](../README.md) is the high-level landing page. These docs are the de
 | Area | Pages |
 |---|---|
 | Search | [Vector search](guides/vector-search.md) · [Full-text search](guides/full-text-search.md) · [Hybrid search](guides/hybrid-search.md) |
-| gorm | [gorm integration + tag-driven sidecars](guides/gorm.md) |
+| ORMs | [gorm integration + tag-driven sidecars](guides/gorm.md) · [xorm](guides/migrating.md#with-xorm) — works as-is via `xorm.NewEngine("sqlite3", dsn)` |
 | Storage / VFS | [Encryption](guides/encryption.md) · [Checksums](guides/checksums.md) · [In-memory & embedded](guides/in-memory.md) · [Custom VFS](guides/custom-vfs.md) · [Page cache](guides/page-cache.md) |
 | Driver capabilities | [Hooks & introspection](guides/hooks.md) · [Sessions / changesets](guides/sessions.md) · [Window functions & UDFs](guides/window-functions.md) · [sqlitex helpers](guides/sqlitex.md) · [Observability](guides/observability.md) |
 

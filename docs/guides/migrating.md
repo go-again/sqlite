@@ -53,6 +53,21 @@ db, _ := gorm.Open(sqlite.Open("file:my.db?_pragma=foreign_keys(1)"), &gorm.Conf
 
 See [`examples/migrating/from-glebarez/`](../../examples/migrating/from-glebarez/main.go) and the [gorm guide](gorm.md).
 
+## With xorm
+
+`xorm.io/xorm` works out of the box — it maps the `"sqlite3"`, `"sqlite"`, and `"libsql"` driver names to its driver-agnostic SQLite dialect, and we register under both `"sqlite"` and `"sqlite3"`. Blank-import the driver and call `NewEngine` exactly as you would for mattn or modernc; your `_pragma=` DSN flags still apply.
+
+```go
+import (
+	_ "gosqlite.org" // registers "sqlite" + "sqlite3"
+	"xorm.io/xorm"
+)
+
+eng, _ := xorm.NewEngine("sqlite3", "file:app.db?_pragma=foreign_keys(1)")
+```
+
+Compatibility is CI-enforced by the `xorm-compat` job.
+
 ## From ncruces/go-sqlite3
 
 Partial migration only — not a one-line swap. `ncruces/go-sqlite3` is the other major CGo-free Go SQLite driver (WebAssembly via wazero, vs our ccgo-transpiled Go), with a different public API for everything beyond `database/sql`.

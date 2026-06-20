@@ -189,6 +189,23 @@ jobs:
       - name: go test -tags=mattn_upstream
         run: go test -tags=mattn_upstream -count=1 -timeout 5m -v -run 'TestMath|TestUnlock' .
 
+  # Drive xorm.io/xorm through its public API against our driver — the
+  # CI-enforced proof that gosqlite.org is a drop-in xorm SQLite driver
+  # (xorm maps the "sqlite3" / "sqlite" / "libsql" names to its
+  # driver-agnostic SQLite dialect; we register under "sqlite" + "sqlite3").
+  # Lives in the isolated `xorm-compat/` module (its own go.mod, replace
+  # gosqlite.org => ..) so xorm never enters the main module's graph and no
+  # consumer carries it. See dev/upstream/xorm.md.
+  xorm_compat:
+    name: xorm-compat
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+      - name: go test (xorm-compat module)
+        working-directory: xorm-compat
+        run: go test -count=1 -timeout 5m -v ./...
+
   # Run gorm.io/gorm's own integration test suite against our dialector.
   # The setup, reasoning, and current pass/fail counts live in
   # dev/upstream/gorm.md; this job is the CI-enforced version of the

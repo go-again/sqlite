@@ -398,6 +398,26 @@ func TestGetColumns(t *testing.T) {
 )`,
 			columns: []string{"`id`", "`created_at`", "`updated_at`", "`created_by`", "`updated_by`", "`role_id`", "`menu_id`"},
 		},
+		{
+			name:    "short_form_generated_column",
+			ddl:     "CREATE TABLE t (a int, b int, c int AS (a + b), d int AS (a * b) STORED)",
+			columns: []string{"`a`", "`b`"},
+		},
+		{
+			name:    "bare_foreign_key",
+			ddl:     "CREATE TABLE notes (id integer NOT NULL, user_id integer, FOREIGN KEY (user_id) REFERENCES users(id))",
+			columns: []string{"`id`", "`user_id`"},
+		},
+		{
+			name:    "bare_unique_constraint",
+			ddl:     "CREATE TABLE t (a int, b int, UNIQUE (a, b))",
+			columns: []string{"`a`", "`b`"},
+		},
+		{
+			name:    "string_default_containing_as_paren",
+			ddl:     "CREATE TABLE t (a int, note text DEFAULT 'see x AS (y)')",
+			columns: []string{"`a`", "`note`"},
+		},
 	}
 
 	for _, p := range params {

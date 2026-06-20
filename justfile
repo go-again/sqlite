@@ -161,6 +161,12 @@ cross-build:
         echo "ok" || echo "FAILED"; \
     done
 
+# Run the isolated xorm-compatibility module (its own go.mod with a
+# replace, so xorm.io/xorm never enters the main module's graph). Needs
+# network for xorm.io/xorm on first run.
+xorm-compat:
+    cd xorm-compat && go test -count=1 -timeout 5m ./...
+
 # Full CI parity: everything CI runs, in order. Slower than `default`.
 ci: build test test-race lint cross-build
 

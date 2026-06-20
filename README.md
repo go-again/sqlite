@@ -20,7 +20,7 @@ defer db.Close()
 // db embeds *sql.DB — every database/sql method works.
 ```
 
-Existing mattn / modernc / glebarez / ncruces code keeps working after the import swap; the legacy `sql.Open("sqlite3", "file:...?_pragma=…")` form is still accepted. See the **[migration guide](docs/guides/migrating.md)**.
+Existing mattn / modernc / glebarez / ncruces code keeps working after the import swap; the legacy `sql.Open("sqlite3", "file:...?_pragma=…")` form is still accepted. Your ORM works too — the [gorm](docs/guides/gorm.md) dialector ships in-module, and [xorm](docs/guides/migrating.md#with-xorm) uses the driver as-is. See the **[migration guide](docs/guides/migrating.md)**.
 
 ## Why gosqlite
 

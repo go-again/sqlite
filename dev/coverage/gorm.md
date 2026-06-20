@@ -71,7 +71,7 @@ Tests live in `gorm/integration_test.go`.
 | `MigrateColumnUnique(dst any, *schema.Field, ColumnType) error` | ⚠ inherited | — |
 | `HasColumn(dst any, field string) bool` | ✓ typed | — | Reads `sqlite_master.sql`. |
 | `RenameColumn(dst any, oldName, field string) error` | ⚠ inherited | — |
-| `ColumnTypes(dst any) ([]ColumnType, error)` | ✓ typed | — | Parses DDL via `ddlmod.go`. |
+| `ColumnTypes(dst any) ([]ColumnType, error)` | ✓ typed | — | Parses DDL via `ddl.go`. |
 
 ### Views
 

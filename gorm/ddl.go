@@ -21,6 +21,11 @@ var (
 	columnRegexp       = regexp.MustCompile(fmt.Sprintf(`^[%v]?([\w\d]+)[%v]?\s+([\w\(\)\d]+)(.*)$`, sqliteSeparator, sqliteSeparator))
 	defaultValueRegexp = regexp.MustCompile(`(?i) DEFAULT \(?(.+)?\)?( |COLLATE|GENERATED|$)`)
 	regRealDataType    = regexp.MustCompile(`[^\d](\d+)[^\d]?`)
+	// generatedColumnRegexp matches the `AS (` clause marking a SQLite
+	// generated column, in BOTH forms: `GENERATED ALWAYS AS (…)` and the
+	// short `… AS (…)`. Applied to a quote-stripped field so a string
+	// DEFAULT that happens to contain the literal " AS (" is not misread.
+	generatedColumnRegexp = regexp.MustCompile(`(?i)\bAS\s*\(`)
 )
 
 func getAllColumns(s string) []string {
@@ -242,15 +247,46 @@ func (d *ddl) removeConstraint(name string) bool {
 	return false
 }
 
+// stripQuoted returns s with the contents of any '…' / "…" / `…` quoted
+// region removed, so token matching (e.g. the generated-column clause)
+// never trips on text inside a string or quoted-identifier literal.
+func stripQuoted(s string) string {
+	var b strings.Builder
+	var quote rune
+	for _, r := range s {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '\'' || r == '"' || r == '`':
+			quote = r
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 func (d *ddl) getColumns() []string {
 	res := []string{}
 
 	for _, f := range d.fields {
 		fUpper := strings.ToUpper(f)
+		// Skip non-column fields so they never enter the rebuild's copy
+		// list. Bare table-level FOREIGN KEY / UNIQUE constraints (gorm
+		// emits named ones, but hand-written or externally-created tables
+		// may not) would otherwise be captured as phantom columns; and a
+		// short-form `… AS (…)` generated column (no "GENERATED ALWAYS")
+		// would fail the rebuild INSERT. FOREIGN KEY / UNIQUE prefix
+		// handling mirrors go-gorm/sqlite; the generated-column regex
+		// covers both the long and short forms.
 		if strings.HasPrefix(fUpper, "PRIMARY KEY") ||
+			strings.HasPrefix(fUpper, "FOREIGN KEY") ||
+			strings.HasPrefix(fUpper, "UNIQUE") ||
 			strings.HasPrefix(fUpper, "CHECK") ||
 			strings.HasPrefix(fUpper, "CONSTRAINT") ||
-			strings.Contains(fUpper, "GENERATED ALWAYS AS") {
+			generatedColumnRegexp.MatchString(stripQuoted(fUpper)) {
 			continue
 		}
 
