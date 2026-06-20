@@ -143,10 +143,15 @@ jobs:
           go build ./fts/...
           go build ./vfs/...
           go build ./vec/... || echo "vec not supported on ${GOOS}/${GOARCH} — skipping"
-          # gorm is a separate module — cross-build its dialector from its own
-          # dir. Build the package (`./`), not `./...`: gorm/examples/vec imports
+          # Cross-build every PUBLISHED sub-module (own go.mod, module path
+          # gosqlite.org/<sub> — gorm, blobstore, vfs/crypto). Discovered, not
+          # hand-listed; mirrors `just cross-build`'s pubmods loop. Build the
+          # package (`./`), not `./...`: some module examples import
           # gosqlite.org/vec, which isn't transpiled on every target.
-          (cd gorm && go build ./)
+          for f in $(find . -mindepth 2 -name go.mod -not -path './.*/*' -not -path './examples/*'); do
+            grep -q '^module gosqlite[.]org/' "$f" || continue
+            (cd "$(dirname "$f")" && go build ./)
+          done
 
   # Run the SQL conformance suite under tests/sql/. This is our methodical
   # feature-by-feature proof that every documented SQLite SQL surface the
@@ -192,22 +197,78 @@ jobs:
       - name: go test -tags=mattn_upstream
         run: go test -tags=mattn_upstream -count=1 -timeout 5m -v -run 'TestMath|TestUnlock' .
 
-  # Drive xorm.io/xorm through its public API against our driver — the
-  # CI-enforced proof that gosqlite.org is a drop-in xorm SQLite driver
-  # (xorm maps the "sqlite3" / "sqlite" / "libsql" names to its
-  # driver-agnostic SQLite dialect; we register under "sqlite" + "sqlite3").
-  # Lives in the isolated `xorm-compat/` module (its own go.mod, replace
-  # gosqlite.org => ..) so xorm never enters the main module's graph and no
-  # consumer carries it. See dev/upstream/xorm.md.
-  xorm_compat:
-    name: xorm-compat
+  # Every sub-module has its OWN go.mod (joined to the root via `replace
+  # gosqlite.org`), so its private deps never reach the root graph: blobstore's
+  # codec, vfs/crypto's adiantum + x/crypto, xorm-compat's xorm.io/xorm, gorm's
+  # dialector deps. Each is tested in its own module context. (xorm-compat is the
+  # CI-enforced proof gosqlite.org is a drop-in xorm SQLite driver — see
+  # dev/upstream/xorm.md.)
+  #
+  # The matrix is DISCOVERED, not hand-listed: `discover` finds every joined
+  # sub-module's go.mod and emits the dir list as JSON; `submodules` fans out
+  # over it. Adding or removing a module needs no edit here — it mirrors
+  # `just test-submodules`. gorm's own unit tests run here, so the gorm-upstream
+  # job below stays focused on the upstream integration suite.
+  discover:
+    name: discover submodules
     runs-on: ubuntu-latest
+    outputs:
+      mods: ${{ steps.find.outputs.mods }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: find
+        # Joined sub-modules = own go.mod + a `replace gosqlite.org` directive,
+        # minus the hidden reference clones (.xorm, …) and the examples/* modules.
+        run: |
+          mods=$(for f in $(find . -mindepth 2 -name go.mod -not -path './.*/*' -not -path './examples/*'); do
+                   grep -q 'replace gosqlite.org ' "$f" && dirname "$f" | sed 's|^[.]/||'
+                 done | sort | jq -R . | jq -sc .)
+          echo "mods=$mods" >> "$GITHUB_OUTPUT"
+          echo "discovered submodules: $mods"
+
+  submodules:
+    name: submodule (${{ matrix.dir }})
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: ${{ fromJson(needs.discover.outputs.mods) }}
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup
-      - name: go test (xorm-compat module)
-        working-directory: xorm-compat
+      - name: go test (${{ matrix.dir }} module)
+        working-directory: ${{ matrix.dir }}
         run: go test -count=1 -timeout 5m -v ./...
+
+  # Standing guard that every PUBLISHED sub-module pins the same gosqlite.org
+  # core version. A lagging pin is exactly what once made `go get
+  # gosqlite.org/gorm` fail with an ambiguous import (the submodule required an
+  # old core that still bundled gorm/). Mirrors `just check-pins`; `just release`
+  # keeps them in lockstep by construction.
+  module_pins:
+    name: module-pins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: core-version pins are in lockstep
+        # Mirrors `just check-pins`; identical associative-array-free logic so
+        # the guard behaves the same on any bash.
+        run: |
+          vers=""
+          while IFS= read -r f; do
+            grep -q '^module gosqlite[.]org/' "$f" || continue
+            v=$(grep -oE 'gosqlite\.org v[0-9][^[:space:]]*' "$f" | awk '{print $2}' | head -n1 || true)
+            [ -n "$v" ] || continue
+            printf '  %-14s gosqlite.org %s\n' "$(dirname "$f")" "$v"
+            vers="${vers}${v}"$'\n'
+          done < <(find . -mindepth 2 -name go.mod -not -path './.*/*' -not -path './examples/*' | sort)
+          distinct=$(printf '%s' "$vers" | sed '/^$/d' | sort -u | wc -l | tr -d ' ')
+          if [ "$distinct" -gt 1 ]; then
+            echo "::error::published sub-modules pin different core versions"
+            exit 1
+          fi
+          echo "all published sub-modules pin the same gosqlite.org core version"
 
   # Run gorm.io/gorm's own integration test suite against our dialector.
   # The setup, reasoning, and current pass/fail counts live in
@@ -234,9 +295,8 @@ jobs:
         with:
           cache-dependency-path: sqlite/go.sum
 
-      - name: Test the gorm module (its own unit tests, incl. the DDL parser)
-        run: cd sqlite/gorm && go test -count=1 -timeout 3m ./...
-
+      # gorm's own unit tests (incl. the DDL parser) run in the `submodules`
+      # matrix above; this job stays focused on the upstream integration suite.
       - name: Clone gorm at pinned version
         run: |
           mkdir -p "$WORK_DIR"

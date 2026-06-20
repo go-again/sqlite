@@ -5,6 +5,19 @@
 
 set dotenv-load := true
 
+# The repo's sub-modules — each has its own go.mod (a separate dependency graph)
+# joined to the root via a `replace gosqlite.org` directive. DISCOVERED, never
+# hand-listed, so adding or removing a module needs no edit to the recipes below.
+#   submods  — every joined sub-module (gorm, blobstore, vfs/crypto, xorm-compat):
+#              built + tested in its own module context.
+#   pubmods  — only the PUBLISHED ones (module path `gosqlite.org/<sub>`): these
+#              also get cross-built and lockstep-pinned. The xorm-compat harness
+#              (module `xormcompat`) is tested but never shipped, so it's not here.
+# Both exclude the root, the hidden reference clones (.xorm, .liteorm, …), and the
+# examples/* modules (run via `just example`).
+submods := `for f in $(find . -mindepth 2 -name go.mod -not -path './.*/*' -not -path './examples/*'); do grep -q 'replace gosqlite.org ' "$f" && dirname "$f"; done | sed 's|^[.]/||' | sort | tr '\n' ' '`
+pubmods := `for f in $(find . -mindepth 2 -name go.mod -not -path './.*/*' -not -path './examples/*'); do grep -q '^module gosqlite[.]org/' "$f" && dirname "$f"; done | sed 's|^[.]/||' | sort | tr '\n' ' '`
+
 # Default recipe: a fast pre-commit gate.
 default: build test lint
 
@@ -161,20 +174,31 @@ cross-build:
         export GOOS=$(echo "$triple" | cut -d/ -f1); \
         export GOARCH=$(echo "$triple" | cut -d/ -f2); \
         printf "  %-18s " "$triple"; \
-        go build ./ ./fts/... ./vfs/... 2>/dev/null && \
-        (cd gorm && go build ./ 2>/dev/null) && \
-        (go build ./vec/... 2>/dev/null || echo -n "(vec skipped) ") && \
-        echo "ok" || echo "FAILED"; \
+        ok=1; \
+        go build ./ ./fts/... ./vfs/... 2>/dev/null || ok=0; \
+        for d in {{pubmods}}; do (cd "$d" && go build ./ 2>/dev/null) || ok=0; done; \
+        (go build ./vec/... 2>/dev/null || echo -n "(vec skipped) "); \
+        [ "$ok" -eq 1 ] && echo "ok" || echo "FAILED"; \
     done
 
-# Run the isolated xorm-compatibility module (its own go.mod with a
-# replace, so xorm.io/xorm never enters the main module's graph). Needs
-# network for xorm.io/xorm on first run.
-xorm-compat:
-    cd xorm-compat && go test -count=1 -timeout 5m ./...
+# Print the discovered sub-modules, one per line (debugging the discovery above).
+submodules:
+    @for d in {{submods}}; do echo "$d"; done
 
-# Full CI parity: everything CI runs, in order. Slower than `default`.
-ci: build test test-race lint cross-build
+# Test ONE sub-module by its dir, e.g. `just submodule vfs/crypto`. Each runs in
+# its own module context, so its separate deps (az / adiantum / xorm) stay out of
+# the root graph. (Replaces the old per-module `blobstore` / `crypto` recipes.)
+submodule DIR:
+    cd {{DIR}} && go test -count=1 -timeout 5m ./...
+
+# Test EVERY sub-module. xorm-compat needs network for xorm.io/xorm on first run;
+# vfs/crypto self-skips its blob-I/O tests under -race via TestMain.
+test-submodules:
+    @set -e; for d in {{submods}}; do echo "=== test $d ==="; (cd "$d" && go test -count=1 -timeout 5m ./...); done
+
+# Full CI parity: everything CI runs, in order. Slower than `default`. Now mirrors
+# CI's submodule + pin coverage (the old `ci` skipped xorm-compat and the pins).
+ci: build test test-race lint cross-build test-submodules check-pins
 
 # Clean test artifacts (.test binaries, cover files).
 clean:
@@ -200,22 +224,74 @@ modernc-versions:
 libc-pin:
     @go list -m modernc.org/libc | awk '{print "modernc.org/libc " $2}'
 
-# Prepare a release: pin every intra-repo gosqlite.org require to VERSION across
-# the publishable modules (the root and gorm/), verify they still build, then
-# PRINT the exact ordered tag/push plan. It edits go.mod only — it never commits,
-# tags, or pushes (run the printed git commands yourself). The dev-only `replace
-# gosqlite.org => ..` directives are ignored by consumers, so they stay. Modules
-# are discovered from each go.mod, so this adapts as modules come and go; the
-# xorm-compat and examples/* modules are not `gosqlite.org/*`, so they are never
-# tagged or imported and are left untouched.
+# Verify every PUBLISHED sub-module pins the SAME intra-repo gosqlite.org core
+# version. This is the standing guard against the failure that once made
+# `go get gosqlite.org/gorm` break: gorm's go.mod required an older core that
+# still bundled gorm/, so the import path was claimed by two modules at once
+# ("ambiguous import"). `just release` pins them in lockstep by construction;
+# this catches any drift introduced by hand between releases. Run in `just ci`.
 #
-#   just release v0.8.0
+# Only modules whose path is `gosqlite.org/<sub>` are checked — those are the
+# ones consumers resolve through tags, so their pin must match. The xorm-compat
+# and examples/* modules always resolve via `replace`, so their core require is
+# cosmetic (xorm-compat deliberately pins v0.0.0) and is intentionally ignored.
+check-pins:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Portable by design — deliberately NO bash-4 associative arrays. macOS ships
+    # bash 3.2, where `declare -A` silently degrades to an indexed array, which
+    # would make this guard pass even on real drift. Collect the versions into a
+    # newline string and count the DISTINCT ones with `sort -u`.
+    vers=""
+    while IFS= read -r f; do
+        grep -q '^module gosqlite[.]org/' "$f" || continue
+        # The CORE require reads "gosqlite.org vX.Y.Z" — a space after .org, so a
+        # "gosqlite.org/<sub> vX" require (none today) would not match here.
+        v=$(grep -oE 'gosqlite\.org v[0-9][^[:space:]]*' "$f" | awk '{print $2}' | head -n1 || true)
+        [ -n "$v" ] || continue
+        printf '  %-14s gosqlite.org %s\n' "$(dirname "$f")" "$v"
+        vers="${vers}${v}"$'\n'
+    done < <(find . -mindepth 2 -name go.mod -not -path './.*/*' -not -path './examples/*' | sort)
+    distinct=$(printf '%s' "$vers" | sed '/^$/d' | sort -u | wc -l | tr -d ' ')
+    if [ "$distinct" -gt 1 ]; then
+        echo "✗ published sub-modules pin DIFFERENT core versions — re-pin in lockstep with 'just release vX.Y.Z'." >&2
+        exit 1
+    fi
+    echo "✓ all published sub-modules pin the same gosqlite.org core version"
+
+# Cut a release: pin every intra-repo gosqlite.org require to VERSION across the
+# publishable modules, verify each still builds, commit the pin, then tag EVERY
+# module at that commit and push (commit + all tags) in one shot. Modules are
+# discovered from their go.mod, so this adapts as modules come and go; the
+# xorm-compat and examples/* modules are not `gosqlite.org/*`, so they are never
+# pinned, tagged, or pushed. The dev-only `replace gosqlite.org => ..` directives
+# are ignored by consumers, so they stay.
+#
+# Two release rules this enforces, both learned the hard way:
+#   1. Tag EVERY module, together. A module in a subdirectory (gorm/) is only
+#      resolvable through a path-prefixed tag (gorm/vX.Y.Z); tagging the root but
+#      forgetting the submodule makes `go get gosqlite.org/gorm` fail with "no
+#      matching versions" — the module looks like it vanished. The single tag
+#      loop here makes forgetting one impossible.
+#   2. Pin lockstep. A submodule must require a core version new enough to have
+#      carved that submodule OUT of the root module — otherwise the import path is
+#      claimed by both modules and consumers hit "ambiguous import". Pinning every
+#      require to the version being released guarantees that by construction.
+#
+# Refuses a dirty tree (the tag must capture a known commit) and a VERSION that is
+# already tagged. Local steps (pin, commit, tag) run automatically; the outward
+# push is confirmed interactively, or printed for you to run when non-interactive.
+#
+#   just release v0.8.1
 release VERSION:
     #!/usr/bin/env bash
     set -euo pipefail
     v='{{VERSION}}'
     semver='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'
     [[ "$v" =~ $semver ]] || { echo "✗ VERSION must look like v1.2.3 or v1.2.3-rc.1 (got '$v')" >&2; exit 1; }
+
+    git rev-parse --git-dir >/dev/null 2>&1 || { echo "✗ not a git repo" >&2; exit 1; }
+    [ -z "$(git status --porcelain)" ] || { echo "✗ working tree not clean — commit or stash first (the release tag must capture a known commit):" >&2; git status --short >&2; exit 1; }
 
     # Publishable = module path is gosqlite.org or gosqlite.org/*. (xorm-compat is
     # module 'xormcompat', examples/liteorm is 'liteormexample' — neither matches,
@@ -225,34 +301,64 @@ release VERSION:
         mp=$(awk '/^module /{print $2; exit}' "$gomod")
         case "$mp" in gosqlite.org|gosqlite.org/*) pub+=("$(dirname "$gomod")") ;; esac
     done < <(find . -name go.mod -not -path './.*/*' | sort)
+    [ "${#pub[@]}" -gt 0 ] || { echo "✗ no publishable gosqlite.org modules found" >&2; exit 1; }
+
+    # The tag each module gets: 'vX.Y.Z' for the root, '<subdir>/vX.Y.Z' for a
+    # nested module (Go resolves a subdir module ONLY from its path-prefixed tag).
+    tags=()
+    for d in "${pub[@]}"; do
+        case "$d" in .) tags+=("$v") ;; *) tags+=("${d#./}/$v") ;; esac
+    done
+    for t in "${tags[@]}"; do
+        git rev-parse -q --verify "refs/tags/$t" >/dev/null && { echo "✗ tag $t already exists — pick a new VERSION" >&2; exit 1; }
+    done
 
     echo "→ publishable modules: ${pub[*]}"
     echo "→ pinning intra-repo gosqlite.org requires to $v"
-    bumped=0
+    pinned=()
     for d in "${pub[@]}"; do
         # Each REQUIRED gosqlite.org* path (require lines read "<path> v<ver>"; the
         # 'module' line and '=>' replace lines carry no " v<ver>", so neither matches).
         for p in $(grep -oE "gosqlite\.org(/[A-Za-z0-9._/-]+)? v[0-9][^[:space:]]*" "$d/go.mod" | sed -E 's/ v.*//' | sort -u); do
-            (cd "$d" && go mod edit -require="$p@$v"); echo "    $d: $p → $v"; bumped=1
+            (cd "$d" && go mod edit -require="$p@$v"); echo "    $d: $p → $v"; pinned+=("$d/go.mod")
         done
     done
-    [ "$bumped" -eq 1 ] || echo "    (no intra-repo gosqlite.org requires to bump)"
+    [ "${#pinned[@]}" -gt 0 ] || echo "    (no intra-repo gosqlite.org requires to bump)"
 
     echo "→ verifying every publishable module still builds (replace directives resolve locally)"
     for d in "${pub[@]}"; do ( cd "$d" && go build ./... ); done
 
-    echo
-    echo "→ go.mod changes:"
-    git diff --stat -- '*go.mod' 2>/dev/null || echo "    (not a git repo — review go.mod diffs by hand)"
+    committed=0
+    if [ "${#pinned[@]}" -gt 0 ]; then
+        git add "${pinned[@]}"
+        if git diff --cached --quiet; then
+            echo "→ requires already at $v; nothing to commit, tagging HEAD"
+        else
+            git commit -q -m "release $v: pin intra-repo gosqlite.org requires to $v"
+            committed=1
+            echo "→ committed the require pin"
+        fi
+    else
+        echo "→ no intra-repo requires; tagging current HEAD"
+    fi
 
+    echo "→ tagging every module at $(git rev-parse --short HEAD)"
+    for t in "${tags[@]}"; do git tag "$t"; echo "    $t"; done
+
+    push="git push origin HEAD ${tags[*]}"
     echo
-    echo "════════ RELEASE PLAN — run these yourself; nothing below was executed ════════"
-    echo "  git add -A && git commit -m 'release $v'"
-    for d in "${pub[@]}"; do
-        case "$d" in .) echo "  git tag $v                       # root module: gosqlite.org" ;; \
-                      *) echo "  git tag ${d#./}/$v                  # ${d#./} module: $(awk '/^module /{print $2; exit}' "$d/go.mod")" ;; esac
-    done
-    echo "  git push origin HEAD --tags        # commit + every tag pushed together"
-    echo
-    echo "  Consumers can 'go get' these once the gosqlite.org go-import vanity meta"
-    echo "  resolves the module path to the GitHub repo and $v is a published tag."
+    do_push=0
+    if [ -t 0 ]; then
+        read -r -p "→ push commit + ${#tags[@]} tag(s) to origin now? [y/N] " ans || ans=""
+        [[ "$ans" == [yY] ]] && do_push=1
+    fi
+    if [ "$do_push" -eq 1 ]; then
+        $push
+        echo "✓ released $v — consumers can 'go get' each module once the vanity meta resolves and the tags reach the proxy."
+    else
+        echo "→ local commit + tags created but NOT pushed. To publish, run:"
+        echo "      $push"
+        echo "  Or to abort and undo what this recipe just did locally:"
+        echo "      git tag -d ${tags[*]}"
+        [ "$committed" -eq 1 ] && echo "      git reset --hard HEAD~1"
+    fi
