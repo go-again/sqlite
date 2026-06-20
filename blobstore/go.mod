@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/go-again/az v0.2.0
-	gosqlite.org v0.9.0
+	gosqlite.org v0.10.0
 )
 
 require (
