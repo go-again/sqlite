@@ -12,7 +12,9 @@ package compress
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"hash/crc32"
+	"math"
 	"sort"
 )
 
@@ -161,6 +163,68 @@ func pickSuperblock(a, b []byte) (*superblock, error) {
 	return sb, err
 }
 
+// validate rejects a superblock whose fields could overflow allocation or
+// offset math, or that names a directory extent that does not fit the file. The
+// CRC only proves the bytes are self-consistent — an attacker who controls the
+// container recomputes it for any chosen values — so the open path must bound
+// the fields before using them, or a crafted file panics (slice overflow,
+// divide-by-zero) or exhausts memory inside a VFS callback. fileSize is the
+// physical backing length. All arithmetic is overflow-safe in uint64.
+func (s *superblock) validate(fileSize int64) error {
+	if !isPow2InRange(int(s.blockSize)) {
+		return fmt.Errorf("compress: invalid container block size %d (want power of two in [512, 65536])", s.blockSize)
+	}
+	if !isPow2InRange(int(s.pageSize)) {
+		return fmt.Errorf("compress: invalid container page size %d (want power of two in [512, 65536])", s.pageSize)
+	}
+	if s.blockSize > s.pageSize {
+		return fmt.Errorf("compress: container block size %d exceeds page size %d", s.blockSize, s.pageSize)
+	}
+	// Bound pageCount so neither the logical size (pageCount*pageSize) nor the
+	// directory length (pageCount*dirEntrySize) can overflow int64/uint64.
+	if s.pageCount > uint64(math.MaxInt64)/uint64(s.pageSize) {
+		return fmt.Errorf("compress: container page count %d too large for page size %d", s.pageCount, s.pageSize)
+	}
+	bs := uint64(s.blockSize)
+	fsz := uint64(fileSize)
+	dirBytes := uint64(s.dirBlocks) * bs // dirBlocks(u32) * blockSize(<=65536) cannot overflow
+	if s.dirOffset > fsz || dirBytes > fsz-s.dirOffset {
+		return fmt.Errorf("compress: directory extent [%d,+%d) out of bounds (file %d bytes)", s.dirOffset, dirBytes, fsz)
+	}
+	if s.pageCount*dirEntrySize > dirBytes {
+		return fmt.Errorf("compress: directory holds %d bytes, too small for %d pages", dirBytes, s.pageCount)
+	}
+	return nil
+}
+
+// validateDirectory rejects directory entries whose slot extents could overflow
+// or fall outside the file — the per-page counterpart to [superblock.validate],
+// so a crafted entry cannot drive a huge per-page allocation or an out-of-bounds
+// read. It assumes sb already passed validate (blockSize/pageSize sane).
+func validateDirectory(dir []dirEntry, sb *superblock, fileSize int64) error {
+	bs := uint64(sb.blockSize)
+	fsz := uint64(fileSize)
+	for i, e := range dir {
+		if e.physOffset == 0 {
+			continue // sparse: storedLen/blocks are ignored on read
+		}
+		if e.storedLen == 0 || uint64(e.storedLen) > uint64(sb.pageSize) {
+			return fmt.Errorf("compress: page %d slot length %d out of range (page size %d)", i, e.storedLen, sb.pageSize)
+		}
+		if uint64(e.blocks) != blocksFor(uint64(e.storedLen), bs) {
+			return fmt.Errorf("compress: page %d block count %d inconsistent with slot length %d", i, e.blocks, e.storedLen)
+		}
+		if e.physOffset%bs != 0 {
+			return fmt.Errorf("compress: page %d slot offset %d not block-aligned", i, e.physOffset)
+		}
+		span := uint64(e.blocks) * bs // blocks(u32) * blockSize(<=65536) cannot overflow
+		if end := e.physOffset + span; end < e.physOffset || end > fsz {
+			return fmt.Errorf("compress: page %d slot [%d,+%d) out of bounds (file %d bytes)", i, e.physOffset, span, fsz)
+		}
+	}
+	return nil
+}
+
 // dirEntry maps a logical page to its physical slot. A zero entry (physOffset
 // == 0) is a sparse page that was never written; reads of it zero-fill. The
 // data region starts past the superblocks, so offset 0 can never be a real
@@ -236,8 +300,15 @@ func blocksFor(n, blockSize uint64) uint64 {
 // allocator hands out block-aligned runs for slots, the directory and the
 // free-map itself. It serves from a sorted, coalesced free list first
 // (first-fit), then grows the backing region at the tail by bumping highWater.
-// The free list is persisted in the container; highWater is reconstructed from
-// the physical file size on open, so it is not stored separately.
+// The free list is reconstructed from the committed directory on open
+// (rebuildAllocator); highWater comes from the physical file size, so neither
+// is stored separately.
+//
+// alloc/release/coalesce are O(n) in the number of free extents. That stays
+// small because adjacent frees coalesce, so the list only grows under heavy
+// fragmentation (many scattered, non-adjacent freed slots). A size-indexed
+// structure would be worth it only if a fragmentation benchmark showed the list
+// growing unbounded — not the case for the single-writer, large-page workload.
 type allocator struct {
 	free      []extent // sorted by start, non-adjacent (coalesced)
 	highWater uint64   // first block past the allocated region

@@ -18,9 +18,9 @@ import (
 // test on error.
 func openLive(t *testing.T, path string, opts Options) *sqlite.DB {
 	t.Helper()
-	db, err := OpenLive(sqlite.Config{Path: path}, opts)
+	db, err := Open(sqlite.Config{Path: path}, opts)
 	if err != nil {
-		t.Fatalf("OpenLive: %v", err)
+		t.Fatalf("Open: %v", err)
 	}
 	return db
 }
@@ -161,14 +161,14 @@ func TestLiveRejectsForeignFile(t *testing.T) {
 	}
 	before := fileSize(t, path)
 
-	// OpenLive must refuse it rather than treat it as a container and clobber it.
-	db, err := OpenLive(sqlite.Config{Path: path}, Options{})
+	// Open must refuse it rather than treat it as a container and clobber it.
+	db, err := Open(sqlite.Config{Path: path}, Options{})
 	if err == nil {
 		db.Close()
-		t.Fatalf("OpenLive on a raw .db succeeded; want a no-clobber rejection")
+		t.Fatalf("Open on a raw .db succeeded; want a no-clobber rejection")
 	}
 	if got := fileSize(t, path); got != before {
-		t.Fatalf("raw file changed size %d → %d on a rejected OpenLive", before, got)
+		t.Fatalf("raw file changed size %d → %d on a rejected Open", before, got)
 	}
 }
 

@@ -23,7 +23,7 @@ const (
 	CompressionBest
 )
 
-// Options configures a compressed database opened with [Open].
+// Options configures a compressed database opened with [Open] or [OpenSnapshot].
 type Options struct {
 	// Level is the at-rest compression level. The zero value compresses at
 	// the default level.
@@ -35,7 +35,7 @@ type Options struct {
 	// database for the lifetime of the open handle.
 	TempDir string
 
-	// MaxInflatedSize, if > 0, caps the number of bytes [Open] will inflate
+	// MaxInflatedSize, if > 0, caps the number of bytes [OpenSnapshot] will inflate
 	// from the compressed file; inflation past it fails instead of filling the
 	// disk. Leave 0 (unlimited) for a database you created. Set a sane upper
 	// bound when opening a compressed file from an UNTRUSTED source — otherwise
@@ -44,15 +44,15 @@ type Options struct {
 	MaxInflatedSize int64
 
 	// PageSize is the logical SQLite page size for the live compressing VFS
-	// ([OpenLive]/[NewVFS]); it is ignored by the snapshot [Open]. A large page
+	// ([Open]/[NewVFS]); it is ignored by the snapshot [OpenSnapshot]. A large page
 	// amortises the per-page directory overhead and widens the compression
 	// window. Zero uses a 64 KiB default. It must be a power of two in
-	// [512, 65536] and must equal the database's page_size — [OpenLive] sets
+	// [512, 65536] and must equal the database's page_size — [Open] sets
 	// both for you.
 	PageSize int
 
 	// BlockSize is the physical block granularity of the live container
-	// ([OpenLive]/[NewVFS]); it is ignored by the snapshot [Open]. Every
+	// ([Open]/[NewVFS]); it is ignored by the snapshot [OpenSnapshot]. Every
 	// physical read and write is block-aligned, which also keeps the door open
 	// for per-block encryption later. Zero uses a 4 KiB default. It must be a
 	// power of two in [512, 65536] and must not exceed PageSize.

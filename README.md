@@ -57,7 +57,7 @@ The driver itself — CGo-free, mattn-API + glebarez-gorm drop-in, registered un
 - **[Modern Go-typed Config](docs/guides/configuration.md)** — `sqlite.Config{Path, Pragmas, …}` flows uniformly to raw `database/sql`, gorm, and `crypto.Open`; plus typed pragma enums and one-line open shortcuts.
 - **[sqlitex ergonomics](docs/guides/sqlitex.md)** — `Save`, `Transaction`, `Execute`, scalar reads, and an `embed.FS` migration runner.
 - **[Blob storage](docs/guides/blobstore.md)** — pure-Go `blobstore` (a separate module) keeps a large, growable byte object (files, uploads, streamed content) as an `io.ReaderAt` / `io.WriterAt`, O(chunk) memory, with sparse holes, truncate, and optional transparent per-object compression.
-- **[Compressed databases](docs/guides/compression.md)** — pure-Go `vfs/compress` (a separate module) stores a database compressed at rest via `compress.Open`, inflating it for a session and recompressing on close; plus `Pack` / `Unpack` for shipping a compressed `.db`.
+- **[Compressed databases](docs/guides/compression.md)** — pure-Go `vfs/compress` (a separate module). `compress.Open` queries a database **compressed in place** — a live, file-backed storage engine that's durable per transaction, multi-connection, WAL-capable, and never writes plaintext-uncompressed bytes to disk; `compress.OpenSnapshot` inflates a working copy for the session instead; plus `Pack` / `Unpack` for shipping a compressed `.db`.
 
 ## Declarative models with native search: LiteORM
 
@@ -88,6 +88,7 @@ The Go SQLite landscape has three camps: CGo bindings (mattn, zombiezen), pure-G
 | Typed FTS5 API + custom Go tokenizers | ✓ | ✗ | ✗ | ✗ | ✗ |
 | Hybrid-search rank fusion | ✓ | ✗ | ✗ | ✗ | ✗ |
 | Encryption-at-rest VFS | ✓ (Adiantum + AES-XTS, one constructor) | ✗ | ✗ | ✓ (two packages) | ✗ |
+| Compressed-at-rest database (live, queried in place, pure Go) | ✓ | ✗ | ✗ | ✗ | ✗ |
 | Page-checksum / in-memory / `fs.FS` VFSes | ✓ | ✗ | ✗ | ✓ | ✗ |
 | User-implementable VFS (pure Go) | ✓ (rollback-journal + WAL via `ShmFile`) | ✗ | ✗ | ✓ | ✗ |
 | Bounded / observable page cache (pure Go) | ✓ | ✗ | ✗ | ✗ | ✗ |
@@ -132,7 +133,7 @@ Plain `database/sql` works too: `sql.Open("sqlite", "file:app.db")`. The full se
 | `gosqlite.org/pcache` | application-controlled bounded page cache |
 | `gosqlite.org/sqlitex` | ergonomic `database/sql` helpers + `embed.FS` migrations |
 | `gosqlite.org/blobstore` | large, growable byte objects as `io.ReaderAt`/`io.WriterAt` (files, uploads), optional transparent compression — **separate module** |
-| `gosqlite.org/vfs/compress` | a SQLite database compressed at rest (`compress.Open`, plus `Pack` / `Unpack`) — **separate module** |
+| `gosqlite.org/vfs/compress` | a SQLite database compressed at rest — live & queried in place, durable per transaction (`compress.Open`), or a snapshot working copy (`compress.OpenSnapshot`); plus `Pack` / `Unpack` — **separate module** |
 | `gosqlite.org/ext/<name>` (+ `/auto`) | opt-in loadable Go extensions — see the [catalog](docs/extensions/index.md) |
 
 ## Migrating

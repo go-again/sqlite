@@ -11,14 +11,16 @@ import (
 	sqlite "gosqlite.org"
 )
 
-// Open opens a database whose on-disk file at cfg.Path is stored compressed.
-// It inflates the file into a private, transient working copy, opens that copy
-// as a normal database, and — wired through cfg.VFSCloser — recompresses it
+// OpenSnapshot opens a database whose on-disk file at cfg.Path is stored
+// compressed, running it from a transient working copy for the session (the
+// snapshot model). It inflates the file into a private working copy, opens that
+// copy as a normal database, and — wired through cfg.VFSCloser — recompresses it
 // back over cfg.Path when the returned handle is closed. A single
 // defer db.Close() therefore both drains the pool and rewrites the compressed
-// file, just like a plain [gosqlite.org.Open].
+// file, just like a plain [gosqlite.org.Open]. For a database queried while it
+// stays compressed in place, durable per transaction, use [Open] instead.
 //
-//	db, err := compress.Open(sqlite.Config{Path: "app.db.az"}, compress.Options{})
+//	db, err := compress.OpenSnapshot(sqlite.Config{Path: "app.db.az"}, compress.Options{})
 //	if err != nil { ... }
 //	defer db.Close()
 //
@@ -33,7 +35,7 @@ import (
 // cfg.Path is required and must be on disk; an in-memory cfg (Path
 // [gosqlite.org.InMemory] or Mode [gosqlite.org.ModeMemory]) is rejected, and
 // cfg.VFS must be empty.
-func Open(cfg sqlite.Config, opts Options) (*sqlite.DB, error) {
+func OpenSnapshot(cfg sqlite.Config, opts Options) (*sqlite.DB, error) {
 	if cfg.VFS != "" {
 		return nil, errors.New("compress: Config.VFS must be empty")
 	}

@@ -1,75 +1,69 @@
-// Package compress stores a SQLite database compressed on disk.
+// Package compress stores a SQLite database compressed on disk, in two modes.
 //
-// [Open] returns a normal [gosqlite.org.DB]: the compressed file at the given
-// path is inflated into a private working copy, that copy is opened as an
-// ordinary database, and on Close the working copy is compressed back over the
-// original path. A single defer db.Close() drains the pool and rewrites the
-// compressed file — the same ergonomics as a plain [gosqlite.org.Open] or
-// [gosqlite.org/vfs/crypto]'s Open.
+// [Open] is the live mode: it keeps the on-disk file compressed the whole time
+// the database is open and queries it in place — a pure-Go, file-backed storage
+// engine that translates SQLite's page reads and writes to compressed,
+// block-aligned slots in a block-structured container (page directory + block
+// allocator + a crash-safe copy-on-write commit), so nothing is ever written to
+// disk uncompressed. Durability is per-TRANSACTION: each commit atomically flips
+// a ping-pong superblock, so a crash leaves the previous committed state intact
+// and SQLite's rollback journal recovers the rest.
 //
 //	db, err := compress.Open(sqlite.Config{Path: "app.db.az"}, compress.Options{})
 //	if err != nil { ... }
 //	defer db.Close()
 //	// use db exactly like *sql.DB
 //
-// [Pack] and [Unpack] are the same transform without a session — compress an
-// existing .db for shipping or storage, and inflate it back.
+// [Open] supports multiple pooled connections: they share one in-memory
+// container and coordinate through the VFS's in-process advisory locks — many
+// concurrent readers, one writer at a time. It sets a large page size to match
+// the container, disables mmap, and defaults a busy timeout. The default is a
+// rollback journal (no uncompressed working set on disk); set Pragmas.JournalMode
+// to WAL to opt into WAL mode, where the main DB stays compressed and only the
+// transient -wal frames are uncompressed, folded into compressed slots on
+// checkpoint. (WAL coordination is in-process only — multiple connections in one
+// process, not cross-process.) It refuses a non-container file rather than risk
+// clobbering it. [NewVFS] exposes the underlying [VFS] for advanced wiring; most
+// callers want [Open].
 //
-// [OpenLive] is the live alternative: it keeps the database compressed on disk
-// and queries it in place — durable per transaction, never materialising the
-// whole database in the clear. Pick between the two with the model below.
+// # Snapshot mode — [OpenSnapshot]
 //
-// # Two models: snapshot ([Open]) vs live ([OpenLive])
+// [OpenSnapshot] is the alternative: it inflates the compressed file into a
+// private working copy, opens that copy, and recompresses it back over the
+// original path at Close — so a single defer db.Close() drains the pool and
+// rewrites the compressed file.
 //
-// [Open] compresses a database AT REST. While it is open the database runs from
-// a full, uncompressed working copy (under the OS temp dir, or Options.TempDir);
-// the compressed file is (re)written only at Close. Two consequences follow:
-//
-//   - Durability is per-SESSION, not per-transaction. The durable artifact is
-//     the snapshot written at Close. A crash while the database is open leaves
-//     the on-disk file at its previous Close — no corruption, but changes made
-//     in the interrupted session are lost.
-//   - The working copy is the full uncompressed database and exists in
-//     plaintext on disk for the lifetime of the handle. So this is NOT a
-//     substitute for at-rest encryption.
-//
-// That makes [Open] a good fit for archival, distribution, backups, and
-// open-modify-close tooling over compressible data.
-//
-// [OpenLive] instead keeps the on-disk file compressed throughout and translates
-// SQLite's page reads and writes to compressed, block-aligned slots in a
-// block-structured container — a real storage engine (page directory + block
-// allocator + a crash-safe copy-on-write commit). Durability is per-TRANSACTION:
-// each commit atomically flips a ping-pong superblock, so a crash leaves the
-// previous committed state intact and SQLite's rollback journal recovers the
-// rest. Nothing is ever written to disk uncompressed. It fits a large,
-// compressible database that must stay open continuously and survive crashes.
-//
-//	db, err := compress.OpenLive(sqlite.Config{Path: "app.db.az"}, compress.Options{})
-//	if err != nil { ... }
+//	db, err := compress.OpenSnapshot(sqlite.Config{Path: "app.db.az"}, compress.Options{})
 //	defer db.Close()
 //
-// [OpenLive] supports multiple pooled connections: they share one in-memory
-// container and coordinate through the VFS's in-process advisory locks — many
-// concurrent readers, one writer at a time — so a connection pool is safe. It
-// uses a rollback journal (it sets a large page size to match the container,
-// disables mmap, defaults a busy timeout, and overrides any WAL request). WAL
-// needs the shared-memory capability and is not yet implemented; for a
-// WAL-mode database use a plain database or the snapshot [Open]. [NewVFS]
-// exposes the underlying [LiveVFS] for advanced wiring; most callers want
-// [OpenLive].
+// It compresses the database AT REST only; while open it runs from a full,
+// uncompressed working copy (under the OS temp dir, or Options.TempDir). Two
+// consequences follow, and they are the reason to prefer [Open] for a long-lived
+// database:
 //
-// Opening a raw (uncompressed) database file with [Open] adopts it (rewritten
-// compressed on Close); [OpenLive] instead refuses a non-container file rather
-// than risk clobbering it.
+//   - Durability is per-SESSION, not per-transaction. The durable artifact is
+//     the snapshot written at Close; a crash while the database is open loses
+//     that session's changes (no corruption — the file reverts to its previous
+//     Close).
+//   - The working copy is plaintext on disk for the lifetime of the handle, so
+//     it is NOT a substitute for at-rest encryption.
+//
+// [OpenSnapshot] fits archival, distribution, backups, and open-modify-close
+// tooling. Opening a raw (uncompressed) database with it adopts the file
+// (rewritten compressed on Close).
+//
+// [Pack] and [Unpack] are the same transform without a session — compress an
+// existing .db for shipping or storage, and inflate it back.
 //
 // # Untrusted input
 //
 // Opening a compressed file from an untrusted source (a downloaded or
 // distributed artifact) can inflate a tiny crafted frame into an arbitrarily
 // large working copy — a decompression bomb that fills the disk. Set
-// [Options.MaxInflatedSize] to cap how much Open will inflate, so a malformed
-// or hostile file fails instead.
+// [Options.MaxInflatedSize] to cap how much [OpenSnapshot] will inflate, so a
+// malformed or hostile file fails instead. [Open] validates its container's
+// metadata on open and bounds every page decode, so it rejects a hostile
+// container rather than trusting it.
 //
 // # Compression
 //
@@ -80,12 +74,11 @@
 //
 // # Combining with encryption
 //
-// The snapshot [Open] does not encrypt: its working copy is plaintext, and
-// compressing already-encrypted data saves nothing. The live [OpenLive] writes
-// only compressed bytes, but does not yet encrypt them either — its
-// block-aligned container is designed so per-block encryption can be added in
-// the block read/write path (a later increment), giving on-disk bytes that are
-// always BOTH compressed and encrypted without VFS chaining. Until then, for a
-// shipped artifact, [Pack] output can be piped through any encryptor; for a live
-// encrypted database without compression, use [gosqlite.org/vfs/crypto].
+// Neither mode encrypts. [OpenSnapshot]'s working copy is plaintext; [Open]
+// writes only compressed bytes but does not yet encrypt them — its block-aligned
+// container is designed so per-block encryption can be added in the read/write
+// path (a later increment), giving on-disk bytes that are always BOTH compressed
+// and encrypted without VFS chaining. Until then, for a shipped artifact, [Pack]
+// output can be piped through any encryptor; for a live encrypted database
+// without compression, use [gosqlite.org/vfs/crypto].
 package compress // import "gosqlite.org/vfs/compress"

@@ -38,9 +38,11 @@ func (c Compression) azLevel() az.Level {
 }
 
 // compressStream writes everything read from src into dst as a single az frame
-// at level c.
+// at level c. The az frame checksum is disabled: every stored slot already
+// carries a container CRC32C (verified on read) and the decode bounds output to
+// the page size, so the frame's own checksum is redundant work and bytes.
 func compressStream(dst io.Writer, src io.Reader, c Compression) error {
-	w := az.NewWriter(dst, az.WithLevel(c.azLevel()))
+	w := az.NewWriter(dst, az.WithLevel(c.azLevel()), az.WithChecksum(false))
 	if _, err := io.Copy(w, src); err != nil {
 		w.Close()
 		return err
@@ -66,16 +68,19 @@ func encodePage(page []byte, c Compression) (stored []byte, verbatim bool, err e
 // decodePage decompresses a stored slot into dst, which must be exactly the
 // logical page size; decoding is bounded to it (a slot that inflates past the
 // page size is corrupt). It is the inverse of [encodePage]'s non-verbatim path.
+//
+// It decompresses straight into dst's backing array — bytes.NewBuffer(dst[:0])
+// writes in place as long as the output stays within len(dst), which the bound
+// guarantees for a valid page — so a correct page needs no intermediate buffer
+// or copy.
 func decodePage(dst, stored []byte) error {
-	var buf bytes.Buffer
-	buf.Grow(len(dst))
-	if _, err := decompressStream(&buf, bytes.NewReader(stored), int64(len(dst))); err != nil {
+	n, err := decompressStream(bytes.NewBuffer(dst[:0]), bytes.NewReader(stored), int64(len(dst)))
+	if err != nil {
 		return err
 	}
-	if buf.Len() != len(dst) {
-		return fmt.Errorf("compress: decoded page is %d bytes, want %d", buf.Len(), len(dst))
+	if int(n) != len(dst) {
+		return fmt.Errorf("compress: decoded page is %d bytes, want %d", n, len(dst))
 	}
-	copy(dst, buf.Bytes())
 	return nil
 }
 

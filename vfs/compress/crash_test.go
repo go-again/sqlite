@@ -271,7 +271,7 @@ func latestSuperblockOffset(t *testing.T, img []byte) int64 {
 }
 
 // TestLiveRecoversFromCorruptLatestSuperblock is the end-to-end recovery proof:
-// a real database through OpenLive whose newest superblock is corrupted reopens
+// a real database through Open whose newest superblock is corrupted reopens
 // at the previous committed transaction, intact and verifiable.
 func TestLiveRecoversFromCorruptLatestSuperblock(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "recover.dbz")

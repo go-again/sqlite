@@ -16,9 +16,9 @@ import (
 func TestLiveConcurrentReadersAndWriter(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "concurrent.dbz")
 
-	db, err := OpenLive(sqlite.Config{Path: path, MaxOpenConns: 4}, Options{})
+	db, err := Open(sqlite.Config{Path: path, MaxOpenConns: 4}, Options{})
 	if err != nil {
-		t.Fatalf("OpenLive: %v", err)
+		t.Fatalf("Open: %v", err)
 	}
 	if _, err := db.Exec(`CREATE TABLE t (k INTEGER PRIMARY KEY, v INTEGER)`); err != nil {
 		t.Fatalf("create: %v", err)
@@ -86,13 +86,13 @@ func TestLiveConcurrentReadersAndWriter(t *testing.T) {
 func TestLiveConcurrentWritersSerialize(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "writers.dbz")
 
-	db, err := OpenLive(sqlite.Config{
+	db, err := Open(sqlite.Config{
 		Path:         path,
 		MaxOpenConns: 4,
 		Pragmas:      sqlite.Pragmas{BusyTimeout: 30 * time.Second},
 	}, Options{})
 	if err != nil {
-		t.Fatalf("OpenLive: %v", err)
+		t.Fatalf("Open: %v", err)
 	}
 	defer db.Close()
 	if _, err := db.Exec(`CREATE TABLE t (k INTEGER PRIMARY KEY)`); err != nil {

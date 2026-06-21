@@ -7,6 +7,7 @@ package compress
 import (
 	"encoding/binary"
 	"hash/crc32"
+	"math"
 	"reflect"
 	"testing"
 )
@@ -267,3 +268,86 @@ func TestRebuildAllocatorFromDirectory(t *testing.T) {
 // crc32Checksum re-seals a hand-edited block with the package's superblock CRC
 // so a test can isolate a non-checksum failure (e.g. a version mismatch).
 func crc32Checksum(b []byte) uint32 { return crc32.Checksum(b, crc32C) }
+
+func TestSuperblockValidateRejectsHostileFields(t *testing.T) {
+	const fileSize = 1 << 20
+	good := func() superblock {
+		return superblock{blockSize: defaultBlockSize, pageSize: defaultPageSize, pageCount: 4, dirOffset: 2 * defaultBlockSize, dirBlocks: 1}
+	}
+	if err := (func() *superblock { s := good(); return &s }()).validate(fileSize); err != nil {
+		t.Fatalf("valid superblock rejected: %v", err)
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*superblock)
+	}{
+		{"zero block size", func(s *superblock) { s.blockSize = 0 }},
+		{"zero page size", func(s *superblock) { s.pageSize = 0 }},
+		{"non-pow2 block size", func(s *superblock) { s.blockSize = 4097 }},
+		{"block size exceeds page size", func(s *superblock) { s.blockSize = 65536; s.pageSize = 4096 }},
+		{"overflowing page count", func(s *superblock) { s.pageCount = math.MaxUint64 }},
+		{"directory past EOF", func(s *superblock) { s.dirOffset = fileSize + 1 }},
+		{"directory too small for pages", func(s *superblock) { s.pageCount = 1000; s.dirBlocks = 1 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := good()
+			tc.mutate(&s)
+			if err := s.validate(fileSize); err == nil {
+				t.Fatalf("validate accepted a hostile superblock (%s)", tc.name)
+			}
+		})
+	}
+}
+
+func TestValidateDirectoryRejectsHostileEntries(t *testing.T) {
+	const fileSize = 1 << 20
+	sb := &superblock{blockSize: defaultBlockSize, pageSize: defaultPageSize}
+	good := []dirEntry{
+		{}, // sparse
+		{physOffset: 2 * defaultBlockSize, storedLen: defaultBlockSize, blocks: 1, checksum: 1},
+	}
+	if err := validateDirectory(good, sb, fileSize); err != nil {
+		t.Fatalf("valid directory rejected: %v", err)
+	}
+	for _, tc := range []struct {
+		name  string
+		entry dirEntry
+	}{
+		{"slot longer than a page", dirEntry{physOffset: 2 * defaultBlockSize, storedLen: defaultPageSize + 1, blocks: 17}},
+		{"zero stored length", dirEntry{physOffset: 2 * defaultBlockSize, storedLen: 0, blocks: 0}},
+		{"inconsistent block count", dirEntry{physOffset: 2 * defaultBlockSize, storedLen: defaultBlockSize, blocks: 99}},
+		{"unaligned slot", dirEntry{physOffset: 2*defaultBlockSize + 1, storedLen: defaultBlockSize, blocks: 1}},
+		{"slot past EOF", dirEntry{physOffset: fileSize, storedLen: defaultBlockSize, blocks: 1}},
+		{"overflowing slot extent", dirEntry{physOffset: 0xFFFFFFFFFFFFF000, storedLen: defaultBlockSize, blocks: 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validateDirectory([]dirEntry{tc.entry}, sb, fileSize); err == nil {
+				t.Fatalf("validateDirectory accepted a hostile entry (%s)", tc.name)
+			}
+		})
+	}
+}
+
+// TestOpenRejectsMaliciousContainerNoPanic crafts superblocks with a valid CRC
+// but hostile fields and confirms the open path returns a clean error rather
+// than panicking — a panic would crash the host process through the CGo VFS
+// callback. These are exactly the inputs that previously overflowed a slice
+// bound, requested a multi-TiB allocation, or divided by zero.
+func TestOpenRejectsMaliciousContainerNoPanic(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*superblock)
+	}{
+		{"zero block size", func(s *superblock) { s.blockSize = 0 }},
+		{"overflowing page count", func(s *superblock) { s.pageCount = math.MaxUint64 }},
+		{"huge directory extent", func(s *superblock) { s.dirOffset = 0; s.dirBlocks = 0xFFFFFFFF; s.pageCount = 1 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sb := &superblock{blockSize: defaultBlockSize, pageSize: defaultPageSize, generation: 1}
+			tc.mutate(sb)
+			if _, err := openMainOver(newCrashBacking(sb.marshal()), false, defaultBlockSize, defaultPageSize, CompressionDefault); err == nil {
+				t.Fatalf("opened a malicious container (%s) without error", tc.name)
+			}
+		})
+	}
+}

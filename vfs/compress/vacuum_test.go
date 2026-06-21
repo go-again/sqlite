@@ -2,7 +2,7 @@ package compress
 
 // Increment-4 VACUUM and churn tests: VACUUM rewrites every page, the hardest
 // workout for the block allocator (mass allocation + supersession + reuse).
-// These run a real database through OpenLive.
+// These run a real database through Open.
 
 import (
 	"fmt"

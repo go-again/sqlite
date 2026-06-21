@@ -1,21 +1,59 @@
 ---
 title: Compressed databases
-description: Store a SQLite database compressed on disk with gosqlite — compress.Open inflates it for a session and recompresses on close, plus Pack / Unpack for shipping a compressed .db.
+description: Store a SQLite database compressed on disk with gosqlite — compress.Open queries it compressed in place (durable per transaction, multi-connection, optional WAL); compress.OpenSnapshot inflates a working copy; plus Pack / Unpack for shipping a compressed .db.
 sidebar:
   order: 19
 ---
 
 # Compressed databases
 
-`compress.Open` keeps a SQLite database compressed on disk and hands back a normal database handle. It inflates the compressed file into a private working copy, opens that copy, and recompresses it back over the original path when you close the handle — so a single `defer db.Close()` both drains the pool and rewrites the compressed file, the same shape as a plain [`sqlite.Open`](configuration.md) or [`crypto.Open`](encryption.md).
+`vfs/compress` keeps a SQLite database compressed on disk, in two modes. Pick by how the database is used:
+
+- **[Live](#live-compressed-in-place--open) — `compress.Open`:** query the database while it stays compressed on disk, durable per transaction, with a connection pool and optional WAL. Reach for this for a large, compressible database that stays open and must survive a crash mid-session.
+- **[Snapshot](#snapshot-inflate-for-the-session--opensnapshot) — `compress.OpenSnapshot`:** inflate the whole database into a private working copy for the session, recompress it at `Close`. Reach for this for archival, distribution, backups, and open-modify-close tooling.
+
+Both are pure Go, ship as a separate module, and share the same level ladder. Neither encrypts (see [Combining with encryption](#combining-with-encryption)).
+
+## Live: compressed in place — `Open`
+
+`compress.Open` hands back a normal database handle whose on-disk file stays compressed the entire time it is open. It is a real storage engine — a pure-Go, file-backed VFS that translates SQLite's page reads and writes to compressed, block-aligned slots in a block-structured container — so **nothing is ever written to disk uncompressed**.
 
 ```go
 import "gosqlite.org/vfs/compress"
 
 db, _ := compress.Open(sqlite.Config{Path: "app.db.az"}, compress.Options{})
 defer db.Close()
-// use db exactly like *sql.DB — query, exec, transactions
+// use db exactly like *sql.DB — query, exec, transactions, a connection pool
 ```
+
+- **Durable per transaction.** Each commit atomically flips a ping-pong superblock, so a crash leaves the previous committed state intact and SQLite's rollback journal recovers the rest — this is fault-injection tested at every step of the commit.
+- **Multiple connections.** A connection pool is safe: connections that open the same path share one in-memory container and coordinate through the VFS's in-process advisory locks — many readers, one writer at a time.
+- **Rollback journal by default; WAL optional.** Set `Pragmas.JournalMode` to WAL to opt in. In WAL mode the main database stays compressed and only the transient `-wal` frames are uncompressed (folded into compressed slots on checkpoint). WAL coordination is in-process — multiple connections within one process.
+- **Compressed at rest.** On log/JSON-shaped data at the default large page size, the on-disk container is a small fraction of the logical database.
+
+`compress.Open` refuses to open a file that is not one of its containers rather than risk clobbering it, and rejects a malformed or hostile container with an error instead of trusting it.
+
+It is a good fit for a large, compressible database that must stay open continuously and survive crashes — and a poor fit for hot, random small writes (every page write recompresses).
+
+## Snapshot: inflate for the session — `OpenSnapshot`
+
+`compress.OpenSnapshot` inflates the compressed file into a private working copy, opens that copy as an ordinary database, and recompresses it back over the original path at `Close` — so a single `defer db.Close()` both drains the pool and rewrites the compressed file, the same shape as a plain [`sqlite.Open`](configuration.md) or [`crypto.Open`](encryption.md).
+
+```go
+db, _ := compress.OpenSnapshot(sqlite.Config{Path: "app.db.az"}, compress.Options{})
+defer db.Close()
+```
+
+It compresses the database **at rest only**: while open it runs from a full, uncompressed working copy under the OS temp directory (or `Options.TempDir`). Two consequences follow, and they are the whole reason to choose `Open` over this for a long-lived database:
+
+- **Durability is per-session, not per-transaction.** The durable artifact is the snapshot written at `Close`; a crash while the database is open loses that session's changes (no corruption — the file reverts to its previous `Close`).
+- **The working copy is plaintext on disk** for the lifetime of the handle — so this is **not** a substitute for at-rest encryption.
+
+Opening a raw, uncompressed `.db` with `compress.OpenSnapshot` adopts it (rewritten compressed on `Close`); the on-disk file is recognised by its header, so you can point it at either form.
+
+Opening a compressed file from an **untrusted source** can inflate a tiny crafted frame into an arbitrarily large working copy (a decompression bomb). Set `Options.MaxInflatedSize` to cap how much `OpenSnapshot` will inflate, so a malformed or hostile file fails instead.
+
+### Shipping a compressed `.db`
 
 To compress or inflate a `.db` without a session — for shipping, backups, or cold storage — use the file transforms:
 
@@ -24,26 +62,23 @@ compress.Pack("app.db.az", "app.db", compress.CompressionBest) // compress an ex
 compress.Unpack("app.db", "app.db.az")                          // inflate it back
 ```
 
-## Snapshot model — read this first
+## Choosing a mode
 
-This compresses a database **at rest**. While it is open, it runs from a full, uncompressed working copy under the OS temp directory (or `Options.TempDir`); the compressed file is rewritten only at `Close`. Two consequences follow, and they are the whole reason to reach for this instead of a plain database:
-
-- **Durability is per-session, not per-transaction.** The durable artifact is the snapshot written at `Close`. A crash *while the database is open* leaves the on-disk file at its previous `Close` — no corruption, but changes made in the interrupted session are lost. A plain database (or an encrypting VFS) is durable per committed transaction; this is not.
-- **The working copy is plaintext on disk** for the lifetime of the handle. So this is **not** a substitute for at-rest encryption.
-
-That makes it a good fit for archival, distribution, backups, and open-modify-close tooling over compressible data — and a poor fit for a large database that must stay open continuously, or that must survive a crash mid-session.
+| | `Open` (live) | `OpenSnapshot` (snapshot) |
+|---|---|---|
+| On disk while open | compressed, in place | inflated working copy (plaintext) |
+| Durability | per transaction | per session (at `Close`) |
+| Survives a mid-session crash | yes | reverts to last `Close` |
+| Connection pool / WAL | yes / opt-in | works, but session-scoped |
+| Best for | a large database held open, crash-durable | archival, distribution, open-modify-close |
 
 ## Levels
 
 Set the level with `Options.Level`; the zero value uses a balanced default. The ladder runs `CompressionFastest` → `CompressionFast` → `CompressionDefault` → `CompressionBetter` → `CompressionBest` (the lower levels are LZ4, the higher ones zstd). Decoding auto-detects the algorithm, so a file written at one level always reads back regardless of the level configured later. `CompressionNone` is not meaningful here (use a plain `sqlite.Open` for an uncompressed database) and falls back to the default.
 
-## Adopting an existing database
-
-Opening a raw, uncompressed `.db` with `compress.Open` adopts it: the file is rewritten compressed on `Close`. The on-disk file is recognised by its header, so you can point `compress.Open` at either form.
-
 ## Combining with encryption
 
-At-rest encryption of the compressed file is not built in here. Because the working copy is plaintext, encrypting it during the session would have to happen underneath this package, and compressing already-encrypted data saves nothing — so transparent, per-transaction compression *and* encryption together is a job for a live compressing VFS composed with [`vfs/crypto`](encryption.md), not this snapshot mode. For a shipped artifact, pipe [`Pack`](https://pkg.go.dev/gosqlite.org/vfs/compress) output through any encryptor.
+Neither mode encrypts. `OpenSnapshot`'s working copy is plaintext; `Open` writes only compressed bytes but does not yet encrypt them — its block-aligned container is designed so per-block encryption can be added in the read/write path (a planned increment), giving on-disk bytes that are always *both* compressed and encrypted with no VFS chaining. Until then: for a shipped artifact, pipe [`Pack`](https://pkg.go.dev/gosqlite.org/vfs/compress) output through any encryptor; for a live **encrypted** database without compression, use [`vfs/crypto`](encryption.md).
 
 ## Module and reference
 

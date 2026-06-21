@@ -38,7 +38,7 @@ func mustExec(t *testing.T, db *sqlite.DB, q string, args ...any) {
 func TestRoundTrip(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "app.db.az")
 
-	db, err := Open(sqlite.Config{Path: dest}, Options{Level: CompressionBest})
+	db, err := OpenSnapshot(sqlite.Config{Path: dest}, Options{Level: CompressionBest})
 	if err != nil {
 		t.Fatalf("open fresh: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatal("on-disk file is a raw SQLite database, want compressed")
 	}
 
-	db2, err := Open(sqlite.Config{Path: dest}, Options{})
+	db2, err := OpenSnapshot(sqlite.Config{Path: dest}, Options{})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestCompressionRatio(t *testing.T) {
 	const rows = 1000
 	logical := int64(len(row)) * rows
 
-	db, err := Open(sqlite.Config{Path: dest}, Options{Level: CompressionDefault})
+	db, err := OpenSnapshot(sqlite.Config{Path: dest}, Options{Level: CompressionDefault})
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestAdoptRawDatabase(t *testing.T) {
 	}
 
 	// Opening it with compress.Open adopts it; Close rewrites it compressed.
-	db, err := Open(sqlite.Config{Path: dest}, Options{})
+	db, err := OpenSnapshot(sqlite.Config{Path: dest}, Options{})
 	if err != nil {
 		t.Fatalf("adopt open: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestAdoptRawDatabase(t *testing.T) {
 		t.Fatal("adopted file was not compressed on close")
 	}
 
-	db2, err := Open(sqlite.Config{Path: dest}, Options{})
+	db2, err := OpenSnapshot(sqlite.Config{Path: dest}, Options{})
 	if err != nil {
 		t.Fatalf("reopen adopted: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestAdoptRawDatabase(t *testing.T) {
 
 func TestReadOnlySkipsRecompress(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "ro.db.az")
-	db, err := Open(sqlite.Config{Path: dest}, Options{})
+	db, err := OpenSnapshot(sqlite.Config{Path: dest}, Options{})
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestReadOnlySkipsRecompress(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ro, err := Open(sqlite.Config{Path: dest, Mode: sqlite.ModeReadOnly}, Options{})
+	ro, err := OpenSnapshot(sqlite.Config{Path: dest, Mode: sqlite.ModeReadOnly}, Options{})
 	if err != nil {
 		t.Fatalf("open ro: %v", err)
 	}
@@ -221,8 +221,8 @@ func TestRejectInMemoryAndVFS(t *testing.T) {
 		{Path: ""},
 	}
 	for i, cfg := range cases {
-		if _, err := Open(cfg, Options{}); err == nil {
-			t.Errorf("case %d: Open(%+v) succeeded, want error", i, cfg)
+		if _, err := OpenSnapshot(cfg, Options{}); err == nil {
+			t.Errorf("case %d: OpenSnapshot(%+v) succeeded, want error", i, cfg)
 		}
 	}
 }
@@ -231,7 +231,7 @@ func TestOpenFailureLeavesDestUntouched(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "missing.db.az")
 	// Read-only open of a path that does not exist must fail — and must not
 	// create or write the destination (the unarmed recompressor stays inert).
-	if _, err := Open(sqlite.Config{Path: dest, Mode: sqlite.ModeReadOnly}, Options{}); err == nil {
+	if _, err := OpenSnapshot(sqlite.Config{Path: dest, Mode: sqlite.ModeReadOnly}, Options{}); err == nil {
 		t.Fatal("read-only open of a missing file succeeded, want error")
 	}
 	if _, err := os.Stat(dest); !os.IsNotExist(err) {
@@ -244,14 +244,14 @@ func TestUnknownFormatRejected(t *testing.T) {
 	if err := os.WriteFile(dest, []byte("not sqlite, not an az frame, just junk bytes"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Open(sqlite.Config{Path: dest}, Options{}); err == nil {
+	if _, err := OpenSnapshot(sqlite.Config{Path: dest}, Options{}); err == nil {
 		t.Fatal("Open of an unknown-format file succeeded, want error")
 	}
 }
 
 func TestWALPersistence(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "wal.db.az")
-	db, err := Open(sqlite.Config{Path: dest, Pragmas: sqlite.RecommendedPragmas()}, Options{})
+	db, err := OpenSnapshot(sqlite.Config{Path: dest, Pragmas: sqlite.RecommendedPragmas()}, Options{})
 	if err != nil {
 		t.Fatalf("open wal: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestWALPersistence(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	db2, err := Open(sqlite.Config{Path: dest}, Options{})
+	db2, err := OpenSnapshot(sqlite.Config{Path: dest}, Options{})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -290,7 +290,7 @@ func TestTinyJunkRejectedNoClobber(t *testing.T) {
 		if err := os.WriteFile(dest, []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Open(sqlite.Config{Path: dest}, Options{}); err == nil {
+		if _, err := OpenSnapshot(sqlite.Config{Path: dest}, Options{}); err == nil {
 			t.Fatalf("Open of %d-byte junk succeeded, want error", len(content))
 		}
 		got, err := os.ReadFile(dest) // must be untouched (no clobber)
@@ -305,14 +305,14 @@ func TestTinyJunkRejectedNoClobber(t *testing.T) {
 
 func TestMissingDestDirRejected(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "nope", "app.db.az") // parent "nope" does not exist
-	if _, err := Open(sqlite.Config{Path: dest}, Options{}); err == nil {
+	if _, err := OpenSnapshot(sqlite.Config{Path: dest}, Options{}); err == nil {
 		t.Fatal("Open with a missing destination directory succeeded, want error")
 	}
 }
 
 func TestDoubleCloseIdempotent(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "dc.db.az")
-	db, err := Open(sqlite.Config{Path: dest}, Options{})
+	db, err := OpenSnapshot(sqlite.Config{Path: dest}, Options{})
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -341,7 +341,7 @@ func TestEmptyFileTreatedAsFresh(t *testing.T) {
 	if err := os.WriteFile(dest, nil, 0o600); err != nil { // 0-byte file
 		t.Fatal(err)
 	}
-	db, err := Open(sqlite.Config{Path: dest}, Options{})
+	db, err := OpenSnapshot(sqlite.Config{Path: dest}, Options{})
 	if err != nil {
 		t.Fatalf("open empty: %v", err)
 	}
@@ -353,7 +353,7 @@ func TestEmptyFileTreatedAsFresh(t *testing.T) {
 	if !isCompressed(t, dest) {
 		t.Fatal("fresh DB from an empty file was not compressed on close")
 	}
-	db2, err := Open(sqlite.Config{Path: dest}, Options{})
+	db2, err := OpenSnapshot(sqlite.Config{Path: dest}, Options{})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -366,7 +366,7 @@ func TestEmptyFileTreatedAsFresh(t *testing.T) {
 
 func TestMaxInflatedSizeCapsInflation(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "big.db.az")
-	db, err := Open(sqlite.Config{Path: dest}, Options{})
+	db, err := OpenSnapshot(sqlite.Config{Path: dest}, Options{})
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -385,14 +385,14 @@ func TestMaxInflatedSizeCapsInflation(t *testing.T) {
 	}
 	// A tiny cap must reject the inflation (the DB is many MB) and leave dest
 	// untouched — the decompression-bomb guard.
-	if _, err := Open(sqlite.Config{Path: dest}, Options{MaxInflatedSize: 64 << 10}); err == nil {
+	if _, err := OpenSnapshot(sqlite.Config{Path: dest}, Options{MaxInflatedSize: 64 << 10}); err == nil {
 		t.Fatal("Open with a tiny MaxInflatedSize succeeded, want error")
 	}
 	if after, _ := os.ReadFile(dest); !bytes.Equal(before, after) {
 		t.Fatal("a capped open that should have failed clobbered dest")
 	}
 	// A generous cap opens normally.
-	db2, err := Open(sqlite.Config{Path: dest}, Options{MaxInflatedSize: 1 << 30})
+	db2, err := OpenSnapshot(sqlite.Config{Path: dest}, Options{MaxInflatedSize: 1 << 30})
 	if err != nil {
 		t.Fatalf("generous cap: %v", err)
 	}

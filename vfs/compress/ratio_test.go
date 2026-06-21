@@ -111,7 +111,7 @@ func benchInsert(b *testing.B, db *sqlite.DB) {
 }
 
 func BenchmarkLiveInsert(b *testing.B) {
-	db, err := OpenLive(sqlite.Config{Path: filepath.Join(b.TempDir(), "bench.dbz")}, Options{})
+	db, err := Open(sqlite.Config{Path: filepath.Join(b.TempDir(), "bench.dbz")}, Options{})
 	if err != nil {
 		b.Fatal(err)
 	}

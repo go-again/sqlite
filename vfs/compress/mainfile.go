@@ -76,9 +76,15 @@ type container struct {
 	readOnly       bool
 
 	// Advisory-lock state, shared by every handle on this container. Guarded by
-	// lmu, independent of mu. Mirrors the reference File: many SHARED holders,
-	// one RESERVED..EXCLUSIVE writer; EXCLUSIVE additionally requires no other
-	// connection holds SHARED.
+	// lmu, independent of mu. Many SHARED holders, one RESERVED..EXCLUSIVE
+	// writer; EXCLUSIVE additionally requires no other connection holds SHARED.
+	//
+	// The Lock/Unlock/CheckReservedLock state machine is a deliberate port of
+	// the reference File in gosqlite.org/vfs/interface_test.go (refMemFile) —
+	// kept byte-identical so the two cannot silently drift. It is duplicated
+	// rather than shared only because the reference lives in a _test.go (not
+	// importable) and this is an isolated module; promoting it to a public vfs
+	// helper both embed is the real fix (tracked separately).
 	lmu     sync.Mutex
 	nShared int
 	writer  *mainFile
@@ -110,6 +116,11 @@ func (f *mainFile) Sync(vfs.SyncFlags) error                 { return f.c.sync()
 // (closing the backing and unregistering it when the last handle goes away).
 // Buffered-but-unsynced writes are intentionally NOT committed: only Sync'd
 // data is durable, and the orphaned slots are reclaimed by the next open.
+//
+// Unlock(LockNone) MUST run before release: c.writer is a back-pointer to the
+// handle holding RESERVED+, and only that handle's own Unlock clears it.
+// Unlocking first guarantees the pointer is cleared before the handle can go
+// away, so a surviving connection never dereferences a freed handle.
 func (f *mainFile) Close() error {
 	_ = f.Unlock(vfs.LockNone)
 	return f.c.release()
@@ -136,6 +147,17 @@ func (c *container) readAt(p []byte, off int64) (int, error) {
 		}
 		pageNo := uint64(cur) / c.pageSize
 		intra := uint64(cur) % c.pageSize
+		// Fast path: an aligned, full-page read (the overwhelmingly common case)
+		// decodes straight into the caller's buffer — no per-page allocation, no
+		// copy. The logical size is always a whole number of pages, so a full
+		// page here never runs past EOF.
+		if intra == 0 && uint64(len(p)-read) >= c.pageSize {
+			if err := c.loadPageInto(p[read:read+int(c.pageSize)], pageNo); err != nil {
+				return read, err
+			}
+			read += int(c.pageSize)
+			continue
+		}
 		page, err := c.loadPage(pageNo)
 		if err != nil {
 			return read, err
@@ -200,7 +222,7 @@ func (c *container) truncate(size int64) error {
 	}
 	for i := newCount; i < uint64(len(c.dir)); i++ {
 		if e := c.dir[i]; e.physOffset != 0 {
-			c.pendingRelease = append(c.pendingRelease, extent{start: e.physOffset / c.blockSize, count: uint64(e.blocks)})
+			c.releaseLater(e.physOffset, e.blocks)
 		}
 	}
 	if newCount < uint64(len(c.dir)) {
@@ -226,32 +248,45 @@ func (c *container) sync() error {
 	return c.commit()
 }
 
-// loadPage returns the pageSize-byte content of a logical page, zero-filled if
-// the page is sparse (never written). The caller holds c.mu (R or W).
+// loadPage returns a freshly allocated pageSize buffer holding a logical page.
+// Prefer loadPageInto on the hot path to decode straight into the destination.
 func (c *container) loadPage(pageNo uint64) ([]byte, error) {
 	buf := make([]byte, c.pageSize)
+	if err := c.loadPageInto(buf, pageNo); err != nil {
+		return nil, err
+	}
+	return buf, nil
+}
+
+// loadPageInto fills dst (which must be exactly pageSize) with a logical page,
+// zero-filling if the page is sparse (never written). It verifies the slot
+// checksum and bounds decompression to the page size. The caller holds c.mu
+// (R or W).
+func (c *container) loadPageInto(dst []byte, pageNo uint64) error {
 	if pageNo >= uint64(len(c.dir)) {
-		return buf, nil
+		clear(dst)
+		return nil
 	}
 	e := c.dir[pageNo]
 	if e.physOffset == 0 {
-		return buf, nil
+		clear(dst)
+		return nil
 	}
 	stored := make([]byte, e.storedLen)
 	if _, err := c.back.ReadAt(stored, int64(e.physOffset)); err != nil {
-		return nil, fmt.Errorf("compress: read page %d slot: %w", pageNo, err)
+		return fmt.Errorf("compress: read page %d slot: %w", pageNo, err)
 	}
 	if crc32.Checksum(stored, crc32C) != e.checksum {
-		return nil, fmt.Errorf("compress: page %d slot checksum mismatch (corruption)", pageNo)
+		return fmt.Errorf("compress: page %d slot checksum mismatch (corruption)", pageNo)
 	}
 	if e.flags&dirFlagVerbatim != 0 {
-		copy(buf, stored)
-		return buf, nil
+		copy(dst, stored) // verbatim slot is exactly pageSize
+		return nil
 	}
-	if err := decodePage(buf, stored); err != nil {
-		return nil, fmt.Errorf("compress: decode page %d: %w", pageNo, err)
+	if err := decodePage(dst, stored); err != nil {
+		return fmt.Errorf("compress: decode page %d: %w", pageNo, err)
 	}
-	return buf, nil
+	return nil
 }
 
 // storePage compresses a full page, COW-allocates a fresh block run for it, and
@@ -271,7 +306,7 @@ func (c *container) storePage(pageNo uint64, page []byte) error {
 
 	c.growDir(pageNo)
 	if old := c.dir[pageNo]; old.physOffset != 0 {
-		c.pendingRelease = append(c.pendingRelease, extent{start: old.physOffset / c.blockSize, count: uint64(old.blocks)})
+		c.releaseLater(old.physOffset, old.blocks)
 	}
 	var flags uint16
 	if verbatim {
@@ -293,6 +328,16 @@ func (c *container) growDir(pageNo uint64) {
 	for uint64(len(c.dir)) <= pageNo {
 		c.dir = append(c.dir, dirEntry{})
 	}
+}
+
+// releaseLater schedules a physical extent (a byte offset plus a block count)
+// for return to the allocator at the next durable commit. Centralizing the
+// byte→block conversion keeps the single off-by-blockSize that would corrupt
+// the free list in one place; the deferral is the crash-safety invariant —
+// superseded blocks are reusable only once the commit that vacated them is
+// durable (see commit).
+func (c *container) releaseLater(physOffset uint64, blocks uint32) {
+	c.pendingRelease = append(c.pendingRelease, extent{start: physOffset / c.blockSize, count: uint64(blocks)})
 }
 
 // writeBlocks writes data to a block run, zero-padding the final block so the
@@ -318,6 +363,20 @@ func (c *container) writeBlocks(data []byte, physOffset, blocks uint64) error {
 // A crash before step 5 completes leaves the older generation as the
 // highest-valid superblock, so reopen reconstructs the previous committed
 // state; SQLite's rollback journal then recovers the logical transaction.
+//
+// Tradeoffs (intentional, do not "optimize" away):
+//   - Two fsyncs are the required minimum for this COW + ping-pong protocol —
+//     slots+directory must be durable before the superblock flip is durable.
+//     Collapsing to one fsync would break atomicity.
+//   - The whole directory is re-marshalled and rewritten every commit (its size
+//     is O(pageCount)), even for a one-page change. This is fine up to a few
+//     hundred MB; for large databases with a high small-transaction rate it is
+//     the main scaling cost, and an incremental/segmented directory is a
+//     deliberate future format change.
+//   - commit holds c.mu (write lock) across both fsyncs, so a reader stalls for
+//     the commit window. Correct (no reader overlaps a writer), but the
+//     critical section should be shrunk before optimizing for heavy multi-reader
+//     concurrency.
 func (c *container) commit() error {
 	var dirOffset uint64
 	var dirBlocks uint32
@@ -355,7 +414,7 @@ func (c *container) commit() error {
 	}
 
 	if c.committedDirBlocks > 0 {
-		c.pendingRelease = append(c.pendingRelease, extent{start: c.committedDirOffset / c.blockSize, count: uint64(c.committedDirBlocks)})
+		c.releaseLater(c.committedDirOffset, c.committedDirBlocks)
 	}
 	for _, e := range c.pendingRelease {
 		c.alloc.release(e.start, e.count)
@@ -438,3 +497,13 @@ func (f *mainFile) CheckReservedLock() (bool, error) {
 	defer c.lmu.Unlock()
 	return c.writer != nil && c.writer.lock >= vfs.LockReserved, nil
 }
+
+// ShmGroup implements vfs.ShmFile to unlock WAL: it returns the container's
+// canonical path, so the dispatcher hands every connection on the same database
+// one shared WAL index. The shared-memory regions and WAL lock table are the
+// dispatcher's; this is all a File must declare. (An unshared container —
+// tests / anonymous — returns "", a private group it never actually uses, since
+// those handles are driven directly and never enter WAL.)
+func (f *mainFile) ShmGroup() string { return f.c.name }
+
+var _ vfs.ShmFile = (*mainFile)(nil)

@@ -3,14 +3,14 @@ package compress
 // live.go is the live compressing VFS: a pure-Go, file-backed implementation of
 // the public vfs.VFS interface whose main-database file is a compressed
 // container (mainfile.go) and whose journal/temp files pass straight through to
-// the OS. Unlike the snapshot Open (compress.go) — which inflates to a plaintext
-// working copy and recompresses at Close — this queries the database while it
-// stays compressed on disk, durable per transaction.
+// the OS. Unlike the snapshot OpenSnapshot (compress.go) — which inflates to a
+// plaintext working copy and recompresses at Close — this queries the database
+// while it stays compressed on disk, durable per transaction.
 //
-// Phase 1 is single-connection, rollback-journal: OpenLive forces
-// MaxOpenConns(1) and a rollback journal mode, and the files embed vfs.NoLock.
-// WAL (which needs the shared-memory capability) and multi-connection locking
-// are later increments.
+// Multiple connections that open the same path share one container and
+// coordinate through the in-process advisory locks (mainfile.go). The default
+// journal is rollback; WAL is available via the ShmFile capability (mainFile
+// implements ShmGroup).
 
 import (
 	"errors"
@@ -28,10 +28,10 @@ import (
 	"gosqlite.org/vfs"
 )
 
-// LiveVFS is a registered live compressing VFS. Its Close unregisters it; wire
-// it into [sqlite.Config.VFSCloser] (as [OpenLive] does) so a single
+// VFS is a registered live compressing VFS. Its Close unregisters it; wire
+// it into [sqlite.Config.VFSCloser] (as [Open] does) so a single
 // db.Close() both drains the pool and releases the VFS.
-type LiveVFS struct {
+type VFS struct {
 	name      string
 	blockSize uint64
 	pageSize  uint64
@@ -39,10 +39,10 @@ type LiveVFS struct {
 }
 
 // Name is the registered VFS name, for use as sqlite.Config.VFS.
-func (v *LiveVFS) Name() string { return v.name }
+func (v *VFS) Name() string { return v.name }
 
 // Close unregisters the VFS. It is idempotent: a second call is a no-op.
-func (v *LiveVFS) Close() error {
+func (v *VFS) Close() error {
 	if v.name == "" {
 		return nil
 	}
@@ -55,7 +55,7 @@ func (v *LiveVFS) Close() error {
 // (rollback journal, temp DB/journal, super-/sub-journal) to a pass-through
 // File. Journals are sequential and transient, so compressing them buys
 // nothing and would only complicate recovery.
-func (v *LiveVFS) Open(name string, flags vfs.OpenFlags) (vfs.File, vfs.OpenFlags, error) {
+func (v *VFS) Open(name string, flags vfs.OpenFlags) (vfs.File, vfs.OpenFlags, error) {
 	if flags.Has(vfs.OpenMainDB) {
 		f, err := openMain(name, flags, v.blockSize, v.pageSize, v.codec)
 		if err != nil {
@@ -71,7 +71,7 @@ func (v *LiveVFS) Open(name string, flags vfs.OpenFlags) (vfs.File, vfs.OpenFlag
 }
 
 // Delete removes a file (a journal, typically). A missing file is not an error.
-func (v *LiveVFS) Delete(name string, _ bool) error {
+func (v *VFS) Delete(name string, _ bool) error {
 	if err := os.Remove(name); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -79,7 +79,7 @@ func (v *LiveVFS) Delete(name string, _ bool) error {
 }
 
 // Access reports whether name exists / is accessible.
-func (v *LiveVFS) Access(name string, _ vfs.AccessOp) (bool, error) {
+func (v *VFS) Access(name string, _ vfs.AccessOp) (bool, error) {
 	switch _, err := os.Stat(name); {
 	case err == nil:
 		return true, nil
@@ -92,7 +92,7 @@ func (v *LiveVFS) Access(name string, _ vfs.AccessOp) (bool, error) {
 
 // FullPathname canonicalises to an absolute path so a database and its journal
 // siblings share a cache key.
-func (v *LiveVFS) FullPathname(name string) (string, error) { return filepath.Abs(name) }
+func (v *VFS) FullPathname(name string) (string, error) { return filepath.Abs(name) }
 
 // containers is the process-global registry of open compressed databases, keyed
 // by canonical path. Every connection that opens the same path shares one
@@ -218,6 +218,13 @@ func newContainerOver(back backing, readOnly bool, cfgBlockSize, cfgPageSize uin
 		_ = back.Close()
 		return nil, fmt.Errorf("not a compressed container: %w", err)
 	}
+	// Bound the superblock fields before using them: the container may be
+	// untrusted, and the CRC alone does not stop an adversary choosing hostile
+	// values (a crafted file would otherwise panic or exhaust memory here).
+	if err := sb.validate(size); err != nil {
+		_ = back.Close()
+		return nil, err
+	}
 
 	c.blockSize = uint64(sb.blockSize)
 	c.pageSize = uint64(sb.pageSize)
@@ -242,6 +249,10 @@ func newContainerOver(back backing, readOnly bool, cfgBlockSize, cfgPageSize uin
 		if err != nil {
 			_ = back.Close()
 			return nil, fmt.Errorf("parse directory: %w", err)
+		}
+		if err := validateDirectory(dir, sb, size); err != nil {
+			_ = back.Close()
+			return nil, err
 		}
 		c.dir = dir
 	}
@@ -328,14 +339,14 @@ func (p *passFile) Close() error {
 // NewVFS registers a live compressing VFS configured by opts and returns it.
 // The caller is responsible for using the returned name as sqlite.Config.VFS,
 // for ensuring the database's page_size equals the resolved page size, and for
-// calling Close to unregister. Most callers want [OpenLive], which wires all of
+// calling Close to unregister. Most callers want [Open], which wires all of
 // that up.
-func NewVFS(opts Options) (*LiveVFS, error) {
+func NewVFS(opts Options) (*VFS, error) {
 	blockSize, pageSize, err := opts.resolveLive()
 	if err != nil {
 		return nil, err
 	}
-	v := &LiveVFS{
+	v := &VFS{
 		name:      cabi.UniqueName("compressz"),
 		blockSize: blockSize,
 		pageSize:  pageSize,
@@ -347,10 +358,10 @@ func NewVFS(opts Options) (*LiveVFS, error) {
 	return v, nil
 }
 
-// OpenLive opens cfg.Path as a database that stays compressed on disk, queried
+// Open opens cfg.Path as a database that stays compressed on disk, queried
 // in place and durable per transaction (the ZIPVFS use case), pure Go.
 //
-//	db, err := compress.OpenLive(sqlite.Config{Path: "app.db.az"}, compress.Options{})
+//	db, err := compress.Open(sqlite.Config{Path: "app.db.az"}, compress.Options{})
 //	if err != nil { ... }
 //	defer db.Close()
 //
@@ -358,18 +369,18 @@ func NewVFS(opts Options) (*LiveVFS, error) {
 // cfg.VFSCloser — unregisters it when the returned handle closes. Multiple
 // pooled connections are supported: they share one in-memory container and
 // coordinate through the VFS's in-process advisory locks (many readers, one
-// writer). OpenLive sets the page size to match the container, disables mmap,
+// writer). Open sets the page size to match the container, disables mmap,
 // defaults a busy timeout, and selects a rollback journal (WAL needs the
 // shared-memory capability and is a later increment, so a WAL request is
 // overridden). cfg.VFS must be empty and the path must be on disk.
 //
-// OpenLive is distinct from the snapshot [Open]: Open trades per-transaction
+// Open is distinct from the snapshot [OpenSnapshot]: Open trades per-transaction
 // durability and an at-rest-only footprint for simplicity (a plaintext working
-// copy, recompressed at Close); OpenLive keeps the on-disk file compressed
+// copy, recompressed at Close); Open keeps the on-disk file compressed
 // throughout and never materialises the whole database in the clear.
-func OpenLive(cfg sqlite.Config, opts Options) (*sqlite.DB, error) {
+func Open(cfg sqlite.Config, opts Options) (*sqlite.DB, error) {
 	if cfg.VFS != "" {
-		return nil, errors.New("compress: Config.VFS must be empty (OpenLive sets it to the live compressing VFS)")
+		return nil, errors.New("compress: Config.VFS must be empty (Open sets it to the live compressing VFS)")
 	}
 	if cfg.Path == sqlite.InMemory || cfg.Mode == sqlite.ModeMemory {
 		return nil, errors.New("compress: a compressed database requires an on-disk path (refusing :memory: / mode=memory)")
@@ -385,11 +396,15 @@ func OpenLive(cfg sqlite.Config, opts Options) (*sqlite.DB, error) {
 
 	cfg.VFS = v.name
 	cfg.VFSCloser = v
-	// Rollback journal only (WAL needs the shm capability, a later increment).
 	// Multiple connections are allowed and coordinate through the VFS's
 	// in-process advisory locks; default a busy timeout so writer contention
-	// retries rather than failing immediately.
-	cfg.Pragmas.JournalMode = sqlite.JournalDelete
+	// retries rather than failing immediately. Rollback journal is the default
+	// (no uncompressed working set on disk); the caller may request WAL — the
+	// main DB stays compressed and only the transient -wal frames are
+	// uncompressed, folded into compressed slots on checkpoint.
+	if cfg.Pragmas.JournalMode == "" {
+		cfg.Pragmas.JournalMode = sqlite.JournalDelete
+	}
 	if cfg.Pragmas.BusyTimeout == 0 {
 		cfg.Pragmas.BusyTimeout = 5 * time.Second
 	}
