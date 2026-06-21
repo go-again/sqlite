@@ -1,11 +1,22 @@
 package blobstore
 
 import (
-	"bytes"
 	"errors"
-	"io"
+	"sync"
 
 	"github.com/go-again/az"
+)
+
+// encoderPool and decoderPool reuse az.Encoders and az.Decoders across chunk
+// writes and reads, so a high-throughput stream does not construct a fresh,
+// heavyweight lz4/zstd codec per chunk. An az.Encoder/az.Decoder is not safe for
+// concurrent use, so a pool hands one to a single goroutine for the duration of
+// a single EncodeAll / DecodeAllLimit. Both append into a caller slice and
+// return an independent result, so the codec is safe to return to the pool
+// immediately.
+var (
+	encoderPool = sync.Pool{New: func() any { return az.NewEncoder() }}
+	decoderPool = sync.Pool{New: func() any { return az.NewDecoder() }}
 )
 
 // This file is the ONLY place that touches github.com/go-again/az. The public
@@ -69,7 +80,9 @@ func (c Compression) azLevel() (az.Level, bool) {
 // its payload. The returned slice is bound directly into the INSERT, which
 // copies it, so aliasing plain is safe.
 func encodeChunk(plain []byte, lvl az.Level) (data []byte, enc int, err error) {
-	comp, err := az.Compress(plain, lvl)
+	e := encoderPool.Get().(*az.Encoder)
+	comp, err := e.EncodeAll(nil, plain, lvl) // EncodeAll output is identical to az.Compress
+	encoderPool.Put(e)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -79,11 +92,11 @@ func encodeChunk(plain []byte, lvl az.Level) (data []byte, enc int, err error) {
 	return comp, encAZ, nil
 }
 
-// decodeChunk reverses encodeChunk. enc=encVerbatim returns data unchanged.
-// enc=encAZ az-decompresses through a bounded reader: a well-formed chunk
-// decompresses to exactly the chunk size, so anything larger than max is a
-// corrupt or hostile frame (a decompression bomb) and is rejected rather than
-// allowed to allocate without limit.
+// decodeChunk reverses encodeChunk. enc=encVerbatim returns data unchanged (after
+// a length check). enc=encAZ decompresses with a pooled decoder bounded to max: a
+// well-formed chunk decompresses to exactly the chunk size, so DecodeAllLimit
+// caps the output at max and reports a larger frame (a corrupt or hostile one — a
+// decompression bomb) as ErrTooLarge rather than allowing an unbounded allocation.
 func decodeChunk(data []byte, enc, max int) ([]byte, error) {
 	if enc == encVerbatim {
 		if len(data) > max {
@@ -91,16 +104,14 @@ func decodeChunk(data []byte, enc, max int) ([]byte, error) {
 		}
 		return data, nil
 	}
-	r := az.NewReader(bytes.NewReader(data))
-	defer r.Close()
-	var buf bytes.Buffer
-	buf.Grow(max)
-	n, err := io.Copy(&buf, io.LimitReader(r, int64(max)+1))
+	d := decoderPool.Get().(*az.Decoder)
+	plain, err := d.DecodeAllLimit(nil, data, max)
+	decoderPool.Put(d)
+	if errors.Is(err, az.ErrTooLarge) {
+		return nil, errors.New("blobstore: decompressed chunk exceeds chunk size (corrupt data)")
+	}
 	if err != nil {
 		return nil, err
 	}
-	if n > int64(max) {
-		return nil, errors.New("blobstore: decompressed chunk exceeds chunk size (corrupt data)")
-	}
-	return buf.Bytes(), nil
+	return plain, nil
 }

@@ -354,6 +354,81 @@ func TestConcurrentDistinctObjects(t *testing.T) {
 	}
 }
 
+// TestConcurrentCompressedRoundTrip exercises the pooled az.Encoder and
+// az.Decoder under concurrency: many goroutines each compress and write a
+// distinct object, then many goroutines each read one back. Compressed objects
+// use whole-value chunk I/O (no OpenBlob), so this runs under -race and validates
+// that both codec pools are used safely (one codec per goroutine at a time).
+func TestConcurrentCompressedRoundTrip(t *testing.T) {
+	s, _ := newStore(t, WithCompression(CompressionBest), WithChunkSize(4096))
+	ctx := context.Background()
+
+	const n = 16
+	ids := make([]int64, n)
+	payloads := make([][]byte, n)
+	for i := range ids {
+		id, err := s.Create(ctx) // compressed (Store default)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids[i] = id
+		payloads[i] = compressibleBlob(10_000 + i*97) // spans several chunks
+	}
+
+	// Concurrent writes exercise the pooled encoder.
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	for i := range ids {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			w, err := s.Writer(ctx, ids[i])
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			defer w.Close()
+			_, errs[i] = w.WriteAt(payloads[i], 0)
+		}(i)
+	}
+	wg.Wait()
+	for i := range errs {
+		if errs[i] != nil {
+			t.Fatalf("write object %d: %v", i, errs[i])
+		}
+	}
+
+	// Concurrent reads exercise the pooled decoder.
+	got := make([][]byte, n)
+	for i := range ids {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			r, err := s.Reader(ctx, ids[i])
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			defer r.Close()
+			buf := make([]byte, len(payloads[i]))
+			if _, err := r.ReadAt(buf, 0); err != nil && err != io.EOF {
+				errs[i] = err
+				return
+			}
+			got[i] = buf
+		}(i)
+	}
+	wg.Wait()
+	for i := range ids {
+		if errs[i] != nil {
+			t.Fatalf("read object %d: %v", i, errs[i])
+		}
+		if !bytes.Equal(got[i], payloads[i]) {
+			t.Fatalf("object %d round-trip mismatch", i)
+		}
+	}
+}
+
 func TestOverwriteBelowSize(t *testing.T) {
 	skipUnderRace(t)
 	s, _ := newStore(t, WithChunkSize(8))

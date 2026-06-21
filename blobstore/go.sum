@@ -1,7 +1,7 @@
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
-github.com/go-again/az v0.2.0 h1:fvspiQI8rTJwDGgdZLPyxQtoqCAe/QTY/6G0OoaDhYw=
-github.com/go-again/az v0.2.0/go.mod h1:Z86bTdHKlVnPyZ9rVM0vbGv0s5cRqBugRvuZQ3QOZLw=
+github.com/go-again/az v0.4.0 h1:poRTr5acTlmPBawsngcDulzjkFw81hIvM9Ie8W4DFyg=
+github.com/go-again/az v0.4.0/go.mod h1:Z86bTdHKlVnPyZ9rVM0vbGv0s5cRqBugRvuZQ3QOZLw=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
 github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs4luLUK2k=
