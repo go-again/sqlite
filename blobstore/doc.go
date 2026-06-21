@@ -73,6 +73,20 @@
 // so raw and compressed objects coexist in one store. Sparse holes stay free
 // (an unwritten chunk stores nothing and reads as zeros).
 //
+// Override compression for a single object with [WithObjectCompression] at
+// Create — [CompressionNone] stores it raw, any level stores it compressed at
+// THAT level, regardless of the Store default. Objects of different modes and
+// levels coexist in one store, so you can compress small or cold objects hard
+// (e.g. [CompressionBest]) while keeping large or hot ones raw or lightly
+// compressed for speed.
+//
+// The storage MODE (raw vs compressed) is fixed at Create, but the compression
+// LEVEL is changeable with [Store.SetCompression] — e.g. write a head at
+// [CompressionBest], then lower the level before appending a large tail. Chunks
+// written at different levels read back fine (decode is level-agnostic).
+// [Store.Stat] returns an object's metadata, including its actual at-rest
+// compression ratio (computed from the stored chunk sizes).
+//
 // The cost: a compressed object can't use in-place incremental BLOB I/O, so
 // every operation works on a full chunk in memory — a read decompresses the
 // whole chunk, and a partial write read-modify-writes it (a write covering a

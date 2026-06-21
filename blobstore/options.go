@@ -52,6 +52,28 @@ func WithCompression(c Compression) Option {
 	return func(s *Store) { s.compression = c }
 }
 
+// CreateOption customizes a single [Store.Create].
+type CreateOption func(*createConfig)
+
+type createConfig struct {
+	compression Compression
+	set         bool
+}
+
+// WithObjectCompression overrides the Store's [WithCompression] default for this
+// one object at [Store.Create]: [CompressionNone] stores it raw, any level
+// stores it compressed AT THAT LEVEL. Objects of different modes and levels
+// coexist in one store — every read is mode- and level-agnostic — so a store can
+// compress small or cold objects hard (e.g. [CompressionBest]) while keeping
+// large or hot ones raw or lightly compressed for speed.
+//
+// The chosen level is frozen on the object: later writes use it regardless of
+// the Store handle that performs them. Without this option an object inherits
+// the Store's mode at Create, and its writes use the writing Store's level.
+func WithObjectCompression(c Compression) CreateOption {
+	return func(cc *createConfig) { cc.compression = c; cc.set = true }
+}
+
 // WithVacuumOnDelete makes [Store.Delete] and shrinking [Store.Truncate]
 // issue PRAGMA incremental_vacuum after freeing chunks, returning the freed
 // pages to the OS. This is a no-op unless the database is in incremental

@@ -81,9 +81,9 @@ func (s *Store) writeAt(ctx context.Context, id int64, p []byte, off int64) (int
 	}
 	defer sc.Close()
 
-	var chunk, codec int64
+	var chunk, codec, level int64
 	err = sc.QueryRowContext(ctx,
-		`SELECT chunk, codec FROM `+s.objs+` WHERE id = ?`, id).Scan(&chunk, &codec)
+		`SELECT chunk, codec, level FROM `+s.objs+` WHERE id = ?`, id).Scan(&chunk, &codec, &level)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, fmt.Errorf("blobstore: WriteAt %d: %w", id, ErrNotFound)
 	}
@@ -105,12 +105,13 @@ func (s *Store) writeAt(ctx context.Context, id int64, p []byte, off int64) (int
 	defer rollbackIf(sc, &committed)
 
 	compressed := codec == codecAZ
+	objLevel := Compression(level)
 	written := 0
 	err = eachChunkSpan(off, int64(len(p)), chunk, func(seq, inOff, span, bufOff int64) error {
 		src := p[bufOff : bufOff+span]
 		var werr error
 		if compressed {
-			werr = s.writeChunkCompressed(ctx, sc, id, seq, chunk, inOff, src)
+			werr = s.writeChunkCompressed(ctx, sc, id, seq, chunk, inOff, src, objLevel)
 		} else {
 			werr = s.writeChunkRaw(ctx, sc, id, seq, chunk, inOff, src)
 		}
@@ -245,9 +246,9 @@ func (s *Store) writeChunkRaw(ctx context.Context, sc *sql.Conn, id, seq, chunk,
 // writeChunkCompressed writes src at in-chunk offset inOff into chunk (id, seq)
 // of a compressed object. A write covering the whole chunk skips the read (fast
 // path); a partial write read-modify-writes the chunk's plaintext.
-func (s *Store) writeChunkCompressed(ctx context.Context, sc *sql.Conn, id, seq, chunk, inOff int64, src []byte) error {
+func (s *Store) writeChunkCompressed(ctx context.Context, sc *sql.Conn, id, seq, chunk, inOff int64, src []byte, objLevel Compression) error {
 	if inOff == 0 && int64(len(src)) == chunk { // full chunk — no read needed
-		return s.chunkPutCompressed(ctx, sc, id, seq, src)
+		return s.chunkPutCompressed(ctx, sc, id, seq, src, objLevel)
 	}
 	plain, ok, err := s.chunkGetCompressed(ctx, sc, id, seq, chunk)
 	if err != nil {
@@ -257,7 +258,7 @@ func (s *Store) writeChunkCompressed(ctx context.Context, sc *sql.Conn, id, seq,
 		plain = make([]byte, chunk) // sparse: start from zeros
 	}
 	copy(plain[inOff:], src)
-	return s.chunkPutCompressed(ctx, sc, id, seq, plain)
+	return s.chunkPutCompressed(ctx, sc, id, seq, plain, objLevel)
 }
 
 // readChunkRaw reads into dst at in-chunk offset inOff from chunk (id, seq); a

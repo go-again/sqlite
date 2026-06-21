@@ -211,6 +211,204 @@ func TestDecodeChunkBoundRejectsBomb(t *testing.T) {
 	}
 }
 
+// objectCodec returns the stored per-object codec (codecRaw / codecAZ).
+func objectCodec(t *testing.T, db *sqlite.DB, id int64) int {
+	t.Helper()
+	var codec int
+	if err := db.QueryRow(`SELECT codec FROM files_objects WHERE id=?`, id).Scan(&codec); err != nil {
+		t.Fatal(err)
+	}
+	return codec
+}
+
+// chunkEnc returns the per-chunk encoding of an object's first chunk.
+func chunkEnc(t *testing.T, db *sqlite.DB, id int64) int {
+	t.Helper()
+	var enc int
+	if err := db.QueryRow(`SELECT enc FROM files_chunks WHERE obj=? AND seq=0`, id).Scan(&enc); err != nil {
+		t.Fatal(err)
+	}
+	return enc
+}
+
+// TestObjectCompressionOverride: a compressed-default Store can create an
+// individual raw object via WithObjectCompression(CompressionNone) — the
+// "leave hot files raw, compress the rest" case — and both round-trip.
+func TestObjectCompressionOverride(t *testing.T) {
+	skipUnderRace(t) // the raw object uses incremental BLOB I/O (checkptr trips under -race)
+	s, db := newStore(t, WithChunkSize(4096), WithCompression(CompressionBest))
+	ctx := context.Background()
+	data := compressibleBlob(20_000)
+
+	comp, _ := s.Create(ctx)                                        // Store default → compressed
+	raw, _ := s.Create(ctx, WithObjectCompression(CompressionNone)) // override → raw
+
+	writeAt(t, s, comp, data, 0)
+	writeAt(t, s, raw, data, 0)
+
+	if !bytes.Equal(readAll(t, s, comp), data) {
+		t.Fatal("compressed object round-trip mismatch")
+	}
+	if !bytes.Equal(readAll(t, s, raw), data) {
+		t.Fatal("raw override object round-trip mismatch")
+	}
+	if c := objectCodec(t, db, comp); c != codecAZ {
+		t.Fatalf("default object codec = %d, want az (%d)", c, codecAZ)
+	}
+	if c := objectCodec(t, db, raw); c != codecRaw {
+		t.Fatalf("WithObjectCompression(None) object codec = %d, want raw (%d)", c, codecRaw)
+	}
+	if enc := chunkEnc(t, db, comp); enc != encAZ {
+		t.Fatalf("compressed object's first chunk enc = %d, want az (%d)", enc, encAZ)
+	}
+}
+
+// TestObjectCompressionForceCompressedOnRawStore: a raw-default Store can create
+// an individual compressed object via WithObjectCompression(level).
+func TestObjectCompressionForceCompressedOnRawStore(t *testing.T) {
+	s, db := newStore(t, WithChunkSize(4096)) // raw default
+	ctx := context.Background()
+	data := compressibleBlob(20_000)
+
+	id, _ := s.Create(ctx, WithObjectCompression(CompressionDefault)) // override → compressed
+	writeAt(t, s, id, data, 0)
+
+	if !bytes.Equal(readAll(t, s, id), data) {
+		t.Fatal("forced-compressed object round-trip mismatch")
+	}
+	if c := objectCodec(t, db, id); c != codecAZ {
+		t.Fatalf("forced-compressed object codec = %d, want az (%d)", c, codecAZ)
+	}
+	if enc := chunkEnc(t, db, id); enc != encAZ {
+		t.Fatalf("forced-compressed object's first chunk enc = %d, want az (%d)", enc, encAZ)
+	}
+}
+
+// objectLevel returns the stored per-object compression-level override.
+func objectLevel(t *testing.T, db *sqlite.DB, id int64) int {
+	t.Helper()
+	var level int
+	if err := db.QueryRow(`SELECT level FROM files_objects WHERE id=?`, id).Scan(&level); err != nil {
+		t.Fatal(err)
+	}
+	return level
+}
+
+// chunkData returns the raw stored bytes of an object's first chunk.
+func chunkData(t *testing.T, db *sqlite.DB, id int64) []byte {
+	t.Helper()
+	var data []byte
+	if err := db.QueryRow(`SELECT data FROM files_chunks WHERE obj=? AND seq=0`, id).Scan(&data); err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+// TestObjectCompressionPerLevel: two objects in one store, created at different
+// levels, are each compressed at their own frozen level — not the Store's.
+func TestObjectCompressionPerLevel(t *testing.T) {
+	s, db := newStore(t, WithChunkSize(64<<10)) // raw-default store; payload fits one chunk
+	ctx := context.Background()
+	data := compressibleBlob(40_000)
+
+	best, _ := s.Create(ctx, WithObjectCompression(CompressionBest))
+	fast, _ := s.Create(ctx, WithObjectCompression(CompressionFastest))
+	writeAt(t, s, best, data, 0)
+	writeAt(t, s, fast, data, 0)
+
+	if !bytes.Equal(readAll(t, s, best), data) || !bytes.Equal(readAll(t, s, fast), data) {
+		t.Fatal("per-level round-trip mismatch")
+	}
+	if l := objectLevel(t, db, best); l != int(CompressionBest) {
+		t.Fatalf("Best object level column = %d, want %d", l, int(CompressionBest))
+	}
+	if l := objectLevel(t, db, fast); l != int(CompressionFastest) {
+		t.Fatalf("Fastest object level column = %d, want %d", l, int(CompressionFastest))
+	}
+	// Best (zstd) and Fastest (lz4) produce different stored bytes for the same
+	// input — proof each object was compressed at its OWN level/codec, not a
+	// shared store level. (Which is smaller is data-dependent, so don't assert
+	// that — only that they differ.)
+	if bytes.Equal(chunkData(t, db, best), chunkData(t, db, fast)) {
+		t.Fatal("Best and Fastest objects stored identical bytes — per-object level not applied")
+	}
+}
+
+// TestSetCompressionChangesLevel: a head written at Best, then the level lowered
+// to Default and a tail appended — both round-trip (reads are level-agnostic),
+// and the object's stored level reflects the change.
+func TestSetCompressionChangesLevel(t *testing.T) {
+	const chunk = 64 << 10
+	s, db := newStore(t, WithChunkSize(chunk)) // raw-default store
+	ctx := context.Background()
+	data := compressibleBlob(20_000)
+
+	id, _ := s.Create(ctx, WithObjectCompression(CompressionBest))
+	writeAt(t, s, id, data, 0) // chunk 0 @ Best
+	if l := objectLevel(t, db, id); l != int(CompressionBest) {
+		t.Fatalf("initial level = %d, want %d", l, int(CompressionBest))
+	}
+
+	if err := s.SetCompression(ctx, id, CompressionDefault); err != nil {
+		t.Fatalf("SetCompression: %v", err)
+	}
+	if l := objectLevel(t, db, id); l != int(CompressionDefault) {
+		t.Fatalf("level after change = %d, want %d", l, int(CompressionDefault))
+	}
+	writeAt(t, s, id, data, chunk) // chunk 1 @ Default
+
+	want := make([]byte, chunk+len(data))
+	copy(want, data)
+	copy(want[chunk:], data)
+	if got := readAll(t, s, id); !bytes.Equal(got, want) {
+		t.Fatal("mixed-level object did not round-trip")
+	}
+
+	// SetCompression rejects raw objects and CompressionNone.
+	raw, _ := s.Create(ctx) // raw (Store default)
+	if err := s.SetCompression(ctx, raw, CompressionDefault); err == nil {
+		t.Fatal("SetCompression on a raw object: want error")
+	}
+	if err := s.SetCompression(ctx, id, CompressionNone); err == nil {
+		t.Fatal("SetCompression(None): want error")
+	}
+}
+
+// TestStatRatioAndMetadata: Stat reports the actual at-rest ratio (computed from
+// chunk sizes) and the object's metadata.
+func TestStatRatioAndMetadata(t *testing.T) {
+	s, _ := newStore(t, WithChunkSize(4096))
+	ctx := context.Background()
+	data := compressibleBlob(20_000)
+
+	comp, _ := s.Create(ctx, WithObjectCompression(CompressionBest))
+	writeAt(t, s, comp, data, 0)
+	ci, err := s.Stat(ctx, comp)
+	if err != nil {
+		t.Fatalf("Stat compressed: %v", err)
+	}
+	if ci.Size != int64(len(data)) || ci.ChunkSize != 4096 || !ci.Compressed || ci.Level != CompressionBest {
+		t.Fatalf("compressed Stat = %+v", ci)
+	}
+	if ci.StoredBytes >= ci.Size || ci.Ratio <= 0 || ci.Ratio >= 1 {
+		t.Fatalf("compressed object not smaller at rest: stored=%d size=%d ratio=%.3f", ci.StoredBytes, ci.Size, ci.Ratio)
+	}
+
+	raw, _ := s.Create(ctx) // raw
+	writeAt(t, s, raw, data, 0)
+	ri, err := s.Stat(ctx, raw)
+	if err != nil {
+		t.Fatalf("Stat raw: %v", err)
+	}
+	if ri.Compressed {
+		t.Fatalf("raw object reported as compressed: %+v", ri)
+	}
+	if ri.Ratio <= ci.Ratio || ri.StoredBytes <= ci.StoredBytes {
+		t.Fatalf("raw (ratio %.3f, stored %d) should exceed compressed (ratio %.3f, stored %d)",
+			ri.Ratio, ri.StoredBytes, ci.Ratio, ci.StoredBytes)
+	}
+}
+
 func TestEncodeChunkVerbatimFallback(t *testing.T) {
 	data := incompressibleBlob(4096, 99)
 	out, enc, err := encodeChunk(data, az.Level5)

@@ -30,6 +30,9 @@
 | Compression: sparse / truncate / full-chunk fast path | ✓ typed | `TestCompressSparseHoles`, `TestCompressTruncateShrinkGrow`, `TestCompressFullChunkFastPathAndPartialRMW` | Same invariants as raw mode. |
 | Compression: incompressible fallback (no expansion) | ✓ typed | `TestCompressIncompressibleFallback`, `TestEncodeChunkVerbatimFallback` | `chunks.enc=0` (verbatim) when `az` doesn't shrink. |
 | Compression: per-object mode + reattach + mixed | ✓ typed | `TestCompressReattachAndMixedModes` | `objects.codec` frozen at Create; any Store reads any object; raw+compressed coexist. |
+| Compression: per-object mode + level override (`WithObjectCompression`) | ✓ typed | `TestObjectCompressionOverride`, `TestObjectCompressionForceCompressedOnRawStore`, `TestObjectCompressionPerLevel` | `CompressionNone` forces a raw object in a compressed-default Store and vice-versa; an explicit level is set in the `objects.level` column and used at write (two objects at different levels store different bytes). Old objects / no override → `level=0` → the writing Store's level (unchanged). |
+| Compression: change an object's level (`SetCompression`) | ✓ typed | `TestSetCompressionChangesLevel` | Updates `objects.level` for future writes; a head at Best + a tail at Default round-trips (chunks at mixed levels read fine). Rejects raw objects and `CompressionNone` (mode is fixed at Create). |
+| Object metadata + at-rest ratio (`Stat`) | ✓ typed | `TestStatRatioAndMetadata` | Returns logical size, stored bytes, compression ratio (computed `sum(length(data))/size` — not a maintained column), chunk size, mode, level. |
 | Compression: bounded decode (bomb defense) | ✓ typed | `TestDecodeChunkBoundRejectsBomb` | Decode capped at chunk size + 1; rejects over-large frames. |
 
 ## Design invariants (asserted by the tests above)

@@ -82,7 +82,8 @@ func (s *Store) migrate(ctx context.Context) error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS ` + s.objs + ` (` +
 			`id INTEGER PRIMARY KEY, size INTEGER NOT NULL DEFAULT 0, ` +
-			`chunk INTEGER NOT NULL CHECK(chunk > 0), codec INTEGER NOT NULL DEFAULT 0)`,
+			`chunk INTEGER NOT NULL CHECK(chunk > 0), codec INTEGER NOT NULL DEFAULT 0, ` +
+			`level INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE TABLE IF NOT EXISTS ` + s.chunks + ` (` +
 			`id INTEGER PRIMARY KEY, obj INTEGER NOT NULL, seq INTEGER NOT NULL, ` +
 			`data BLOB NOT NULL, enc INTEGER NOT NULL DEFAULT 0)`,
@@ -93,9 +94,14 @@ func (s *Store) migrate(ctx context.Context) error {
 			return fmt.Errorf("blobstore: migrate: %w", err)
 		}
 	}
-	// Tables created by an older schema lack codec/enc; add them. No-op for
-	// tables this version creates (the columns are already there).
+	// Tables created by an older schema lack codec/level/enc; add them. No-op
+	// for tables this version creates (the columns are already there). A level
+	// of 0 means "no per-object override — use the writing Store's level", so
+	// older objects keep their existing behavior.
 	if err := s.ensureColumn(ctx, s.objs, "codec", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return fmt.Errorf("blobstore: migrate: %w", err)
+	}
+	if err := s.ensureColumn(ctx, s.objs, "level", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return fmt.Errorf("blobstore: migrate: %w", err)
 	}
 	if err := s.ensureColumn(ctx, s.chunks, "enc", "INTEGER NOT NULL DEFAULT 0"); err != nil {
@@ -137,15 +143,29 @@ func (s *Store) ensureColumn(ctx context.Context, quotedTable, col, decl string)
 }
 
 // Create inserts a new, empty object and returns its id. The object's storage
-// mode (raw or compressed) is frozen here from the Store's [WithCompression]
-// setting.
-func (s *Store) Create(ctx context.Context) (int64, error) {
+// MODE (raw or compressed) is frozen here from the Store's [WithCompression]
+// setting or a per-object [WithObjectCompression] override, and cannot change
+// later. Its compression LEVEL is set here too but stays mutable — change it
+// with [Store.SetCompression] before appending.
+func (s *Store) Create(ctx context.Context, opts ...CreateOption) (int64, error) {
+	var cc createConfig
+	for _, o := range opts {
+		o(&cc)
+	}
+	comp := s.compression
+	level := 0 // 0 = no per-object override; writes use the Store's level
+	if cc.set {
+		comp = cc.compression
+		if _, ok := comp.azLevel(); ok {
+			level = int(comp) // freeze the override level on this object
+		}
+	}
 	codec := codecRaw
-	if _, ok := s.compression.azLevel(); ok {
+	if _, ok := comp.azLevel(); ok {
 		codec = codecAZ
 	}
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO `+s.objs+` (size, chunk, codec) VALUES (0, ?, ?)`, s.chunkSize, codec)
+		`INSERT INTO `+s.objs+` (size, chunk, codec, level) VALUES (0, ?, ?, ?)`, s.chunkSize, codec, level)
 	if err != nil {
 		return 0, fmt.Errorf("blobstore: create: %w", err)
 	}
@@ -154,6 +174,75 @@ func (s *Store) Create(ctx context.Context) (int64, error) {
 		return 0, fmt.Errorf("blobstore: create: %w", err)
 	}
 	return id, nil
+}
+
+// SetCompression changes the compression LEVEL used for future writes to object
+// id; c must be a compressing level ([CompressionNone] is rejected). Already
+// written chunks keep their bytes — reads are level-agnostic, so an object may
+// hold chunks written at different levels (e.g. a small head at
+// [CompressionBest], a large appended tail at [CompressionDefault]).
+//
+// Only a compressed object's level can change: the raw-vs-compressed mode is
+// fixed at [Store.Create] (chunks of one object must share a mode), so this
+// returns an error for a raw object.
+func (s *Store) SetCompression(ctx context.Context, id int64, c Compression) error {
+	if _, ok := c.azLevel(); !ok {
+		return fmt.Errorf("blobstore: SetCompression %d: level must be a compressing level (not CompressionNone)", id)
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE `+s.objs+` SET level = ? WHERE id = ? AND codec = ?`, int(c), id, codecAZ)
+	if err != nil {
+		return fmt.Errorf("blobstore: SetCompression %d: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		// No compressed row matched: the object is missing or raw. Disambiguate.
+		var codec int
+		switch err := s.db.QueryRowContext(ctx, `SELECT codec FROM `+s.objs+` WHERE id = ?`, id).Scan(&codec); {
+		case errors.Is(err, sql.ErrNoRows):
+			return fmt.Errorf("blobstore: SetCompression %d: %w", id, ErrNotFound)
+		case err != nil:
+			return fmt.Errorf("blobstore: SetCompression %d: %w", id, err)
+		default:
+			return fmt.Errorf("blobstore: SetCompression %d: object is raw; the storage mode is fixed at Create", id)
+		}
+	}
+	return nil
+}
+
+// ObjectInfo is an object's storage metadata, including its actual at-rest
+// compression ratio (computed from the stored chunk sizes, not maintained).
+type ObjectInfo struct {
+	Size        int64       // logical (uncompressed) length in bytes
+	StoredBytes int64       // total bytes the object's chunks occupy on disk
+	Ratio       float64     // StoredBytes/Size (0 when Size==0); below 1 means compressed or sparse
+	ChunkSize   int64       // the object's chunk size
+	Compressed  bool        // whether the object is stored compressed
+	Level       Compression // compression level for future writes (0 = none / Store's level)
+}
+
+// Stat returns object id's storage metadata. The compression ratio and stored
+// size are computed from the chunk sizes on demand (a single aggregate over the
+// object's chunks), so they are always accurate without a maintained column.
+func (s *Store) Stat(ctx context.Context, id int64) (ObjectInfo, error) {
+	var info ObjectInfo
+	var codec, level int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT size, chunk, codec, level, `+
+			`(SELECT coalesce(sum(length(data)), 0) FROM `+s.chunks+` WHERE obj = `+s.objs+`.id) `+
+			`FROM `+s.objs+` WHERE id = ?`, id).
+		Scan(&info.Size, &info.ChunkSize, &codec, &level, &info.StoredBytes)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ObjectInfo{}, fmt.Errorf("blobstore: Stat %d: %w", id, ErrNotFound)
+	}
+	if err != nil {
+		return ObjectInfo{}, fmt.Errorf("blobstore: Stat %d: %w", id, err)
+	}
+	info.Compressed = codec == codecAZ
+	info.Level = Compression(level)
+	if info.Size > 0 {
+		info.Ratio = float64(info.StoredBytes) / float64(info.Size)
+	}
+	return info, nil
 }
 
 // Size reports the logical length in bytes of object id.
@@ -227,9 +316,9 @@ func (s *Store) Truncate(ctx context.Context, id, size int64) error {
 	committed := false
 	defer rollbackIf(sc, &committed)
 
-	var cur, chunk, codec int64
+	var cur, chunk, codec, level int64
 	err = sc.QueryRowContext(ctx,
-		`SELECT size, chunk, codec FROM `+s.objs+` WHERE id = ?`, id).Scan(&cur, &chunk, &codec)
+		`SELECT size, chunk, codec, level FROM `+s.objs+` WHERE id = ?`, id).Scan(&cur, &chunk, &codec, &level)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("blobstore: truncate %d: %w", id, ErrNotFound)
 	}
@@ -250,7 +339,7 @@ func (s *Store) Truncate(ctx context.Context, id, size int64) error {
 		// Zero the live tail of the boundary chunk so a later re-grow reads
 		// zeros there rather than resurrecting old bytes.
 		if rem := size % chunk; rem != 0 {
-			if err := s.zeroChunkTail(ctx, sc, id, size/chunk, rem, chunk, codec == codecAZ); err != nil {
+			if err := s.zeroChunkTail(ctx, sc, id, size/chunk, rem, chunk, codec == codecAZ, Compression(level)); err != nil {
 				return fmt.Errorf("blobstore: truncate %d: %w", id, err)
 			}
 		}
@@ -273,7 +362,7 @@ func (s *Store) Truncate(ctx context.Context, id, size int64) error {
 
 // zeroChunkTail zeroes bytes [from:chunk) of the chunk at (id, seq) if it
 // exists. Caller holds an open transaction on sc.
-func (s *Store) zeroChunkTail(ctx context.Context, sc *sql.Conn, id, seq, from, chunk int64, compressed bool) error {
+func (s *Store) zeroChunkTail(ctx context.Context, sc *sql.Conn, id, seq, from, chunk int64, compressed bool, objLevel Compression) error {
 	if compressed {
 		plain, ok, err := s.chunkGetCompressed(ctx, sc, id, seq, chunk)
 		if err != nil || !ok {
@@ -282,7 +371,7 @@ func (s *Store) zeroChunkTail(ctx context.Context, sc *sql.Conn, id, seq, from, 
 		for i := from; i < chunk; i++ {
 			plain[i] = 0
 		}
-		return s.chunkPutCompressed(ctx, sc, id, seq, plain)
+		return s.chunkPutCompressed(ctx, sc, id, seq, plain, objLevel)
 	}
 	rowid, ok, err := s.chunkRowid(ctx, sc, id, seq)
 	if err != nil || !ok {
@@ -316,9 +405,10 @@ func (s *Store) chunkGetCompressed(ctx context.Context, sc *sql.Conn, id, seq, c
 }
 
 // chunkPutCompressed stores plain (length == chunk) as chunk (id, seq),
-// compressed at the Store's level. Upserts the row.
-func (s *Store) chunkPutCompressed(ctx context.Context, sc *sql.Conn, id, seq int64, plain []byte) error {
-	data, enc, err := encodeChunk(plain, s.compression.azLevelOrDefault())
+// compressed at the object's frozen level (objLevel) or, if it has none, the
+// Store's. Upserts the row.
+func (s *Store) chunkPutCompressed(ctx context.Context, sc *sql.Conn, id, seq int64, plain []byte, objLevel Compression) error {
+	data, enc, err := encodeChunk(plain, writeLevel(objLevel, s.compression))
 	if err != nil {
 		return err
 	}

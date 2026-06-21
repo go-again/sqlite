@@ -34,6 +34,17 @@ func (c Compression) azLevelOrDefault() az.Level {
 	return az.Level3
 }
 
+// writeLevel picks the level for compressing a chunk: the object's frozen level
+// override when set, otherwise the writing Store's level (defaulting if the
+// Store has none). objOverride is the object's stored level column read back as
+// a Compression — CompressionNone (0) means "no override".
+func writeLevel(objOverride, store Compression) az.Level {
+	if lvl, ok := objOverride.azLevel(); ok {
+		return lvl
+	}
+	return store.azLevelOrDefault()
+}
+
 // azLevel maps a Compression to an az.Level. ok is false for CompressionNone.
 func (c Compression) azLevel() (az.Level, bool) {
 	switch c {
