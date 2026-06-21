@@ -68,10 +68,11 @@
 //	store, _ := blobstore.Open(db, "files", blobstore.WithCompression(blobstore.CompressionDefault))
 //
 // Each chunk is stored as a whole compressed value (incompressible chunks fall
-// back to verbatim, so a chunk is never larger than its payload). The mode is
-// frozen per object at Create; a Store reads any object regardless of its mode,
-// so raw and compressed objects coexist in one store. Sparse holes stay free
-// (an unwritten chunk stores nothing and reads as zeros).
+// back to verbatim, so a chunk is never larger than its payload). Each object
+// starts in the Store's mode at Create (override per object with
+// [WithObjectCompression]); a Store reads any object regardless of its mode, so
+// raw and compressed objects coexist in one store. Sparse holes stay free (an
+// unwritten chunk stores nothing and reads as zeros).
 //
 // Override compression for a single object with [WithObjectCompression] at
 // Create — [CompressionNone] stores it raw, any level stores it compressed at
@@ -80,12 +81,15 @@
 // (e.g. [CompressionBest]) while keeping large or hot ones raw or lightly
 // compressed for speed.
 //
-// The storage MODE (raw vs compressed) is fixed at Create, but the compression
-// LEVEL is changeable with [Store.SetCompression] — e.g. write a head at
-// [CompressionBest], then lower the level before appending a large tail. Chunks
-// written at different levels read back fine (decode is level-agnostic).
-// [Store.Stat] returns an object's metadata, including its actual at-rest
-// compression ratio (computed from the stored chunk sizes).
+// [Store.SetCompression] changes an existing object. Changing only the LEVEL of
+// a compressed object rewrites nothing — reads are level-agnostic, so an object
+// may hold chunks at different levels (e.g. a head at [CompressionBest], an
+// appended tail at [CompressionDefault]). Changing the MODE — raw↔compressed,
+// including [CompressionNone] to go raw — converts every existing chunk in one
+// transaction (an O(object size) pass), so you can compress an object first
+// stored raw or decompress one back to in-place random I/O. [Store.Stat] returns
+// an object's metadata, including its actual at-rest compression ratio (computed
+// from the stored chunk sizes).
 //
 // The cost: a compressed object can't use in-place incremental BLOB I/O, so
 // every operation works on a full chunk in memory — a read decompresses the

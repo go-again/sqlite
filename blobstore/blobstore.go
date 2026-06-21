@@ -35,12 +35,26 @@ type Store struct {
 	compression    Compression
 }
 
-// errCorruptChunk reports an object row whose chunk size is non-positive.
-// Create only ever writes a validated positive size, so this is reachable
-// only if something outside this package wrote the row — we surface it as an
-// error instead of letting the chunk arithmetic divide by zero.
+// maxChunkSize bounds a stored chunk size. A chunk is held whole in memory, so
+// this caps the largest single allocation a read or convert can be driven to
+// make, guarding against a foreign/corrupt objects row (our own CHECK only
+// enforces chunk > 0). It also keeps int(chunk) lossless on 32-bit builds.
+const maxChunkSize = 1 << 30 // 1 GiB
+
+// errCorruptChunk reports an object row whose chunk size is out of range.
+// Create only ever writes a validated size, so this is reachable only if
+// something outside this package wrote the row — we surface it as an error
+// instead of dividing by zero or attempting an absurd allocation.
 func errCorruptChunk(id, chunk int64) error {
 	return fmt.Errorf("blobstore: object %d: invalid chunk size %d", id, chunk)
+}
+
+// checkChunk validates a chunk size read back from the objects table.
+func checkChunk(id, chunk int64) error {
+	if chunk <= 0 || chunk > maxChunkSize {
+		return errCorruptChunk(id, chunk)
+	}
+	return nil
 }
 
 // Open prepares a Store backed by two tables derived from name:
@@ -69,8 +83,8 @@ func Open(db *sqlite.DB, name string, opts ...Option) (*Store, error) {
 	for _, o := range opts {
 		o(s)
 	}
-	if s.chunkSize <= 0 {
-		return nil, errors.New("blobstore: chunk size must be positive")
+	if s.chunkSize <= 0 || s.chunkSize > maxChunkSize {
+		return nil, fmt.Errorf("blobstore: chunk size must be in 1..%d bytes", maxChunkSize)
 	}
 	if err := s.migrate(context.Background()); err != nil {
 		return nil, err
@@ -142,11 +156,12 @@ func (s *Store) ensureColumn(ctx context.Context, quotedTable, col, decl string)
 	return err
 }
 
-// Create inserts a new, empty object and returns its id. The object's storage
-// MODE (raw or compressed) is frozen here from the Store's [WithCompression]
-// setting or a per-object [WithObjectCompression] override, and cannot change
-// later. Its compression LEVEL is set here too but stays mutable — change it
-// with [Store.SetCompression] before appending.
+// Create inserts a new, empty object and returns its id. Its storage MODE (raw
+// or compressed) and compression LEVEL are initialized here from the Store's
+// [WithCompression] setting or a per-object [WithObjectCompression] override.
+// Both stay mutable: change them later with [Store.SetCompression], which
+// rewrites the object's existing chunks when the mode changes. (The chunk size,
+// by contrast, is fixed at Create.)
 func (s *Store) Create(ctx context.Context, opts ...CreateOption) (int64, error) {
 	var cc createConfig
 	for _, o := range opts {
@@ -176,37 +191,126 @@ func (s *Store) Create(ctx context.Context, opts ...CreateOption) (int64, error)
 	return id, nil
 }
 
-// SetCompression changes the compression LEVEL used for future writes to object
-// id; c must be a compressing level ([CompressionNone] is rejected). Already
-// written chunks keep their bytes — reads are level-agnostic, so an object may
-// hold chunks written at different levels (e.g. a small head at
-// [CompressionBest], a large appended tail at [CompressionDefault]).
+// SetCompression sets object id's storage to compression c, converting the
+// object when the storage mode must change. A compressing level makes the
+// object compressed at that level; [CompressionNone] makes it raw.
 //
-// Only a compressed object's level can change: the raw-vs-compressed mode is
-// fixed at [Store.Create] (chunks of one object must share a mode), so this
-// returns an error for a raw object.
+// Changing only the LEVEL of an already-compressed object rewrites nothing:
+// reads are level-agnostic, so already-written chunks keep their bytes and only
+// future writes use the new level. An object may therefore hold chunks
+// compressed at different levels (e.g. a small head at [CompressionBest], a
+// large appended tail at [CompressionDefault]).
+//
+// Changing the MODE (raw↔compressed) rewrites every existing chunk into the new
+// representation in one transaction — an O(object size) pass, so the object is
+// never left half-converted. Use it to compress an object first stored raw, or
+// to decompress one back to in-place random I/O. Setting the mode an object
+// already has only records the level (a no-op for a raw object). Content is
+// preserved either way.
 func (s *Store) SetCompression(ctx context.Context, id int64, c Compression) error {
-	if _, ok := c.azLevel(); !ok {
-		return fmt.Errorf("blobstore: SetCompression %d: level must be a compressing level (not CompressionNone)", id)
-	}
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE `+s.objs+` SET level = ? WHERE id = ? AND codec = ?`, int(c), id, codecAZ)
-	if err != nil {
-		return fmt.Errorf("blobstore: SetCompression %d: %w", id, err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		// No compressed row matched: the object is missing or raw. Disambiguate.
-		var codec int
-		switch err := s.db.QueryRowContext(ctx, `SELECT codec FROM `+s.objs+` WHERE id = ?`, id).Scan(&codec); {
-		case errors.Is(err, sql.ErrNoRows):
+	return s.withTx(ctx, func(sc *sql.Conn) error {
+		var chunk, codec, level int64
+		err := sc.QueryRowContext(ctx,
+			`SELECT chunk, codec, level FROM `+s.objs+` WHERE id = ?`, id).Scan(&chunk, &codec, &level)
+		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("blobstore: SetCompression %d: %w", id, ErrNotFound)
-		case err != nil:
-			return fmt.Errorf("blobstore: SetCompression %d: %w", id, err)
-		default:
-			return fmt.Errorf("blobstore: SetCompression %d: object is raw; the storage mode is fixed at Create", id)
 		}
+		if err != nil {
+			return fmt.Errorf("blobstore: SetCompression %d: %w", id, err)
+		}
+		if err := checkChunk(id, chunk); err != nil {
+			return err
+		}
+
+		fromCompressed := codec == codecAZ
+		_, toCompressed := c.azLevel()
+
+		if fromCompressed == toCompressed {
+			// Mode unchanged. Record the level — the only thing that can differ;
+			// it is unused (so stored as 0) for a raw object.
+			newLevel := 0
+			if toCompressed {
+				newLevel = int(c)
+			}
+			if _, err := sc.ExecContext(ctx,
+				`UPDATE `+s.objs+` SET level = ? WHERE id = ?`, newLevel, id); err != nil {
+				return fmt.Errorf("blobstore: SetCompression %d: %w", id, err)
+			}
+			return nil
+		}
+
+		// Mode change: rewrite every existing chunk, then flip codec + level.
+		if err := s.convertChunks(ctx, sc, id, chunk, fromCompressed, toCompressed, c); err != nil {
+			return fmt.Errorf("blobstore: SetCompression %d: %w", id, err)
+		}
+		newCodec, newLevel := codecRaw, 0
+		if toCompressed {
+			newCodec, newLevel = codecAZ, int(c)
+		}
+		if _, err := sc.ExecContext(ctx,
+			`UPDATE `+s.objs+` SET codec = ?, level = ? WHERE id = ?`, newCodec, newLevel, id); err != nil {
+			return fmt.Errorf("blobstore: SetCompression %d: %w", id, err)
+		}
+		return nil
+	})
+}
+
+// convertChunks rewrites every existing chunk of object id from its current
+// storage mode into the target mode (toCompressed), reading each chunk's full
+// plaintext and writing it back in the new representation. It walks the chunk
+// seqs in order via the (obj, seq) index — O(1) extra memory regardless of
+// object size — and leaves sparse holes (absent rows) untouched, since a hole
+// reads as zeros in either mode. The caller holds an open write transaction on
+// sc; each rewrite is a fresh statement, so no cursor stays open across a write.
+func (s *Store) convertChunks(ctx context.Context, sc *sql.Conn, id, chunk int64, fromCompressed, toCompressed bool, lvl Compression) error {
+	var seq int64 = -1
+	for {
+		var next int64
+		err := sc.QueryRowContext(ctx,
+			`SELECT seq FROM `+s.chunks+` WHERE obj = ? AND seq > ? ORDER BY seq LIMIT 1`, id, seq).Scan(&next)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		plain, err := s.readChunkPlain(ctx, sc, id, next, chunk, fromCompressed)
+		if err != nil {
+			return err
+		}
+		if toCompressed {
+			err = s.chunkPutCompressed(ctx, sc, id, next, plain, lvl)
+		} else {
+			err = s.chunkPutRaw(ctx, sc, id, next, plain)
+		}
+		if err != nil {
+			return err
+		}
+		seq = next
 	}
-	return nil
+}
+
+// readChunkPlain returns the full chunk-size plaintext of the existing chunk
+// (id, seq), reading it per the source mode. The row must exist (the caller
+// only passes seqs it just found).
+func (s *Store) readChunkPlain(ctx context.Context, sc *sql.Conn, id, seq, chunk int64, fromCompressed bool) ([]byte, error) {
+	if fromCompressed {
+		plain, ok, err := s.chunkGetCompressed(ctx, sc, id, seq, chunk)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("blobstore: object %d chunk %d vanished during convert", id, seq)
+		}
+		return plain, nil
+	}
+	// Raw chunk: the stored value is the plaintext itself (a chunk-size blob).
+	var data []byte
+	if err := sc.QueryRowContext(ctx,
+		`SELECT data FROM `+s.chunks+` WHERE obj = ? AND seq = ?`, id, seq).Scan(&data); err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 // ObjectInfo is an object's storage metadata, including its actual at-rest
@@ -264,37 +368,37 @@ func (s *Store) Size(ctx context.Context, id int64) (int64, error) {
 // [WithVacuumOnDelete] and the database is in incremental auto_vacuum mode,
 // the freed pages are returned to the OS.
 func (s *Store) Delete(ctx context.Context, id int64) error {
-	sc, err := s.db.Conn(ctx)
+	err := s.withTx(ctx, func(sc *sql.Conn) error {
+		res, err := sc.ExecContext(ctx, `DELETE FROM `+s.objs+` WHERE id = ?`, id)
+		if err != nil {
+			return fmt.Errorf("blobstore: delete %d: %w", id, err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("blobstore: delete %d: %w", id, err)
+		}
+		if n == 0 {
+			return fmt.Errorf("blobstore: delete %d: %w", id, ErrNotFound)
+		}
+		if _, err := sc.ExecContext(ctx, `DELETE FROM `+s.chunks+` WHERE obj = ?`, id); err != nil {
+			return fmt.Errorf("blobstore: delete %d: %w", id, err)
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-	defer sc.Close()
-
-	if err := begin(ctx, sc); err != nil {
-		return err
-	}
-	committed := false
-	defer rollbackIf(sc, &committed)
-
-	res, err := sc.ExecContext(ctx, `DELETE FROM `+s.objs+` WHERE id = ?`, id)
-	if err != nil {
-		return fmt.Errorf("blobstore: delete %d: %w", id, err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("blobstore: delete %d: %w", id, ErrNotFound)
-	}
-	if _, err := sc.ExecContext(ctx, `DELETE FROM `+s.chunks+` WHERE obj = ?`, id); err != nil {
-		return fmt.Errorf("blobstore: delete %d: %w", id, err)
-	}
-	if err := commit(ctx, sc); err != nil {
-		return err
-	}
-	committed = true
-
-	if s.vacuumOnDelete {
-		_, _ = sc.ExecContext(ctx, `PRAGMA incremental_vacuum`)
-	}
+	s.maybeVacuum(ctx)
 	return nil
+}
+
+// maybeVacuum runs PRAGMA incremental_vacuum (best effort) when the Store was
+// opened with [WithVacuumOnDelete]. It is a no-op unless the database is in
+// incremental auto_vacuum mode. Run after the freeing transaction commits.
+func (s *Store) maybeVacuum(ctx context.Context) {
+	if s.vacuumOnDelete {
+		_, _ = s.db.ExecContext(ctx, `PRAGMA incremental_vacuum`)
+	}
 }
 
 // Truncate sets object id to exactly size bytes. Shrinking deletes the chunks
@@ -304,58 +408,48 @@ func (s *Store) Truncate(ctx context.Context, id, size int64) error {
 	if size < 0 {
 		return errors.New("blobstore: truncate: negative size")
 	}
-	sc, err := s.db.Conn(ctx)
-	if err != nil {
-		return err
-	}
-	defer sc.Close()
-
-	if err := begin(ctx, sc); err != nil {
-		return err
-	}
-	committed := false
-	defer rollbackIf(sc, &committed)
-
-	var cur, chunk, codec, level int64
-	err = sc.QueryRowContext(ctx,
-		`SELECT size, chunk, codec, level FROM `+s.objs+` WHERE id = ?`, id).Scan(&cur, &chunk, &codec, &level)
-	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("blobstore: truncate %d: %w", id, ErrNotFound)
-	}
-	if err != nil {
-		return fmt.Errorf("blobstore: truncate %d: %w", id, err)
-	}
-	if chunk <= 0 {
-		return errCorruptChunk(id, chunk)
-	}
-
-	if size < cur {
-		// Chunks whose first byte is at or past the new size are gone.
-		firstDead := (size + chunk - 1) / chunk // ceil(size/chunk)
-		if _, err := sc.ExecContext(ctx,
-			`DELETE FROM `+s.chunks+` WHERE obj = ? AND seq >= ?`, id, firstDead); err != nil {
+	var cur int64 // old size, captured for the post-commit vacuum decision
+	err := s.withTx(ctx, func(sc *sql.Conn) error {
+		var chunk, codec, level int64
+		err := sc.QueryRowContext(ctx,
+			`SELECT size, chunk, codec, level FROM `+s.objs+` WHERE id = ?`, id).Scan(&cur, &chunk, &codec, &level)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("blobstore: truncate %d: %w", id, ErrNotFound)
+		}
+		if err != nil {
 			return fmt.Errorf("blobstore: truncate %d: %w", id, err)
 		}
-		// Zero the live tail of the boundary chunk so a later re-grow reads
-		// zeros there rather than resurrecting old bytes.
-		if rem := size % chunk; rem != 0 {
-			if err := s.zeroChunkTail(ctx, sc, id, size/chunk, rem, chunk, codec == codecAZ, Compression(level)); err != nil {
+		if err := checkChunk(id, chunk); err != nil {
+			return err
+		}
+
+		if size < cur {
+			// Chunks whose first byte is at or past the new size are gone.
+			firstDead := (size + chunk - 1) / chunk // ceil(size/chunk)
+			if _, err := sc.ExecContext(ctx,
+				`DELETE FROM `+s.chunks+` WHERE obj = ? AND seq >= ?`, id, firstDead); err != nil {
 				return fmt.Errorf("blobstore: truncate %d: %w", id, err)
 			}
+			// Zero the live tail of the boundary chunk so a later re-grow reads
+			// zeros there rather than resurrecting old bytes.
+			if rem := size % chunk; rem != 0 {
+				if err := s.zeroChunkTail(ctx, sc, id, size/chunk, rem, chunk, codec == codecAZ, Compression(level)); err != nil {
+					return fmt.Errorf("blobstore: truncate %d: %w", id, err)
+				}
+			}
 		}
-	}
 
-	if _, err := sc.ExecContext(ctx,
-		`UPDATE `+s.objs+` SET size = ? WHERE id = ?`, size, id); err != nil {
-		return fmt.Errorf("blobstore: truncate %d: %w", id, err)
-	}
-	if err := commit(ctx, sc); err != nil {
+		if _, err := sc.ExecContext(ctx,
+			`UPDATE `+s.objs+` SET size = ? WHERE id = ?`, size, id); err != nil {
+			return fmt.Errorf("blobstore: truncate %d: %w", id, err)
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
-	committed = true
-
-	if s.vacuumOnDelete && size < cur {
-		_, _ = sc.ExecContext(ctx, `PRAGMA incremental_vacuum`)
+	if size < cur {
+		s.maybeVacuum(ctx)
 	}
 	return nil
 }
@@ -368,9 +462,7 @@ func (s *Store) zeroChunkTail(ctx context.Context, sc *sql.Conn, id, seq, from, 
 		if err != nil || !ok {
 			return err
 		}
-		for i := from; i < chunk; i++ {
-			plain[i] = 0
-		}
+		clear(plain[from:])
 		return s.chunkPutCompressed(ctx, sc, id, seq, plain, objLevel)
 	}
 	rowid, ok, err := s.chunkRowid(ctx, sc, id, seq)
@@ -412,7 +504,23 @@ func (s *Store) chunkPutCompressed(ctx context.Context, sc *sql.Conn, id, seq in
 	if err != nil {
 		return err
 	}
-	_, err = sc.ExecContext(ctx,
+	return s.upsertChunk(ctx, sc, id, seq, data, enc)
+}
+
+// chunkPutRaw stores plain (length == chunk) as the raw chunk (id, seq): the
+// stored value is the plaintext itself — a chunk-size blob OpenBlob can address
+// in place — with enc reset to verbatim. Upserts the row. Used when converting
+// an object to raw mode; the normal raw write path allocates with zeroblob and
+// writes in place via blobWrite instead.
+func (s *Store) chunkPutRaw(ctx context.Context, sc *sql.Conn, id, seq int64, plain []byte) error {
+	return s.upsertChunk(ctx, sc, id, seq, plain, encVerbatim)
+}
+
+// upsertChunk inserts the data+enc of chunk (id, seq), replacing the row if it
+// already exists. It is the single owner of the chunk upsert statement shared by
+// the compressed and raw put paths.
+func (s *Store) upsertChunk(ctx context.Context, sc *sql.Conn, id, seq int64, data []byte, enc int) error {
+	_, err := sc.ExecContext(ctx,
 		`INSERT INTO `+s.chunks+` (obj, seq, data, enc) VALUES (?, ?, ?, ?) `+
 			`ON CONFLICT(obj, seq) DO UPDATE SET data = excluded.data, enc = excluded.enc`,
 		id, seq, data, enc)

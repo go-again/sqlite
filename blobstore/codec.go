@@ -86,6 +86,9 @@ func encodeChunk(plain []byte, lvl az.Level) (data []byte, enc int, err error) {
 // allowed to allocate without limit.
 func decodeChunk(data []byte, enc, max int) ([]byte, error) {
 	if enc == encVerbatim {
+		if len(data) > max {
+			return nil, errors.New("blobstore: verbatim chunk exceeds chunk size (corrupt data)")
+		}
 		return data, nil
 	}
 	r := az.NewReader(bytes.NewReader(data))

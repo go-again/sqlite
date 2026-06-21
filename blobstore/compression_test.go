@@ -3,6 +3,7 @@ package blobstore
 import (
 	"bytes"
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -364,19 +365,99 @@ func TestSetCompressionChangesLevel(t *testing.T) {
 		t.Fatal("mixed-level object did not round-trip")
 	}
 
-	// SetCompression rejects raw objects and CompressionNone.
-	raw, _ := s.Create(ctx) // raw (Store default)
-	if err := s.SetCompression(ctx, raw, CompressionDefault); err == nil {
-		t.Fatal("SetCompression on a raw object: want error")
+	// A missing object still reports ErrNotFound.
+	if err := s.SetCompression(ctx, 999, CompressionDefault); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetCompression on a missing id = %v, want ErrNotFound", err)
 	}
-	if err := s.SetCompression(ctx, id, CompressionNone); err == nil {
-		t.Fatal("SetCompression(None): want error")
+}
+
+// TestSetCompressionConvertsMode: SetCompression now changes the storage MODE,
+// not just the level. A raw object converts to compressed and back, every
+// existing chunk rewritten, content preserved, and later writes honor the new
+// mode.
+func TestSetCompressionConvertsMode(t *testing.T) {
+	skipUnderRace(t) // writes a raw object (OpenBlob trips checkptr under -race)
+	const chunk = 4096
+	s, db := newStore(t, WithChunkSize(chunk)) // raw-default store
+	ctx := context.Background()
+	data := compressibleBlob(3*chunk + 100) // several chunks + a partial tail
+
+	id, _ := s.Create(ctx) // raw
+	writeAt(t, s, id, data, 0)
+	if c := objectCodec(t, db, id); c != codecRaw {
+		t.Fatalf("created object codec = %d, want raw", c)
+	}
+	rawStat, _ := s.Stat(ctx, id)
+
+	// raw -> compressed: every chunk rewritten, content preserved, now smaller.
+	if err := s.SetCompression(ctx, id, CompressionBest); err != nil {
+		t.Fatalf("SetCompression to Best: %v", err)
+	}
+	if c := objectCodec(t, db, id); c != codecAZ {
+		t.Fatalf("after convert codec = %d, want az", c)
+	}
+	if !bytes.Equal(readAll(t, s, id), data) {
+		t.Fatal("raw->compressed lost data")
+	}
+	comp, _ := s.Stat(ctx, id)
+	if !comp.Compressed || comp.Level != CompressionBest {
+		t.Fatalf("after convert Stat = %+v", comp)
+	}
+	if comp.StoredBytes >= rawStat.StoredBytes {
+		t.Fatalf("compressed (%d) not smaller than raw (%d)", comp.StoredBytes, rawStat.StoredBytes)
+	}
+
+	// A further write lands compressed and reads back with the rest.
+	more := compressibleBlob(chunk)
+	writeAt(t, s, id, more, int64(len(data)))
+	want := append(append([]byte{}, data...), more...)
+	if !bytes.Equal(readAll(t, s, id), want) {
+		t.Fatal("post-convert write did not round-trip")
+	}
+
+	// compressed -> raw: convert back, content preserved, mode raw again.
+	if err := s.SetCompression(ctx, id, CompressionNone); err != nil {
+		t.Fatalf("SetCompression to None: %v", err)
+	}
+	if c := objectCodec(t, db, id); c != codecRaw {
+		t.Fatalf("after convert-to-raw codec = %d, want raw", c)
+	}
+	back, _ := s.Stat(ctx, id)
+	if back.Compressed || back.Level != CompressionNone {
+		t.Fatalf("after convert-to-raw Stat = %+v", back)
+	}
+	if !bytes.Equal(readAll(t, s, id), want) {
+		t.Fatal("compressed->raw lost data")
+	}
+}
+
+// TestSetCompressionConvertIncompressible: converting a raw object whose data
+// does not compress into compressed mode falls back to verbatim per chunk (no
+// expansion) and still round-trips.
+func TestSetCompressionConvertIncompressible(t *testing.T) {
+	skipUnderRace(t) // writes a raw object (OpenBlob trips checkptr under -race)
+	const chunk = 4096
+	s, db := newStore(t, WithChunkSize(chunk))
+	ctx := context.Background()
+	data := incompressibleBlob(2*chunk, 7)
+
+	id, _ := s.Create(ctx)
+	writeAt(t, s, id, data, 0)
+	if err := s.SetCompression(ctx, id, CompressionBest); err != nil {
+		t.Fatalf("SetCompression: %v", err)
+	}
+	if enc := chunkEnc(t, db, id); enc != encVerbatim {
+		t.Fatalf("incompressible chunk enc = %d, want verbatim", enc)
+	}
+	if !bytes.Equal(readAll(t, s, id), data) {
+		t.Fatal("incompressible convert lost data")
 	}
 }
 
 // TestStatRatioAndMetadata: Stat reports the actual at-rest ratio (computed from
 // chunk sizes) and the object's metadata.
 func TestStatRatioAndMetadata(t *testing.T) {
+	skipUnderRace(t) // writes a raw object (OpenBlob trips checkptr under -race)
 	s, _ := newStore(t, WithChunkSize(4096))
 	ctx := context.Background()
 	data := compressibleBlob(20_000)

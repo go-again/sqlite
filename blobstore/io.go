@@ -75,64 +75,62 @@ func (s *Store) writeAt(ctx context.Context, id int64, p []byte, off int64) (int
 	if len(p) == 0 {
 		return 0, nil
 	}
-	sc, err := s.db.Conn(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer sc.Close()
-
-	var chunk, codec, level int64
-	err = sc.QueryRowContext(ctx,
-		`SELECT chunk, codec, level FROM `+s.objs+` WHERE id = ?`, id).Scan(&chunk, &codec, &level)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, fmt.Errorf("blobstore: WriteAt %d: %w", id, ErrNotFound)
-	}
-	if err != nil {
-		return 0, fmt.Errorf("blobstore: WriteAt %d: %w", id, err)
-	}
-	if chunk <= 0 {
-		return 0, errCorruptChunk(id, chunk)
-	}
 	end := off + int64(len(p))
 	if end < off { // off + len overflowed int64
 		return 0, errors.New("blobstore: WriteAt: offset + length overflows int64")
 	}
 
-	if err := begin(ctx, sc); err != nil {
-		return 0, err
-	}
-	committed := false
-	defer rollbackIf(sc, &committed)
-
-	compressed := codec == codecAZ
-	objLevel := Compression(level)
 	written := 0
-	err = eachChunkSpan(off, int64(len(p)), chunk, func(seq, inOff, span, bufOff int64) error {
-		src := p[bufOff : bufOff+span]
-		var werr error
-		if compressed {
-			werr = s.writeChunkCompressed(ctx, sc, id, seq, chunk, inOff, src, objLevel)
-		} else {
-			werr = s.writeChunkRaw(ctx, sc, id, seq, chunk, inOff, src)
+	err := s.withTx(ctx, func(sc *sql.Conn) error {
+		// Read the object row INSIDE the transaction. BEGIN IMMEDIATE already
+		// holds the write lock, so codec/level cannot change under us — a
+		// concurrent SetCompression mode-convert is serialized against this, and
+		// the raw-vs-compressed dispatch below can't act on a stale mode.
+		var chunk, codec, level int64
+		err := sc.QueryRowContext(ctx,
+			`SELECT chunk, codec, level FROM `+s.objs+` WHERE id = ?`, id).Scan(&chunk, &codec, &level)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("blobstore: WriteAt %d: %w", id, ErrNotFound)
 		}
-		if werr != nil {
-			return werr
+		if err != nil {
+			return fmt.Errorf("blobstore: WriteAt %d: %w", id, err)
 		}
-		written += int(span)
+		if err := checkChunk(id, chunk); err != nil {
+			return err
+		}
+
+		compressed := codec == codecAZ
+		objLevel := Compression(level)
+		w := 0
+		if err := eachChunkSpan(off, int64(len(p)), chunk, func(seq, inOff, span, bufOff int64) error {
+			src := p[bufOff : bufOff+span]
+			var werr error
+			if compressed {
+				werr = s.writeChunkCompressed(ctx, sc, id, seq, chunk, inOff, src, objLevel)
+			} else {
+				werr = s.writeChunkRaw(ctx, sc, id, seq, chunk, inOff, src)
+			}
+			if werr != nil {
+				return werr
+			}
+			w += int(span)
+			return nil
+		}); err != nil {
+			return fmt.Errorf("blobstore: WriteAt %d: %w", id, err)
+		}
+
+		if _, err := sc.ExecContext(ctx,
+			`UPDATE `+s.objs+` SET size = max(size, ?) WHERE id = ?`, end, id); err != nil {
+			return fmt.Errorf("blobstore: WriteAt %d: %w", id, err)
+		}
+		written = w // success path only; the commit still follows in withTx
 		return nil
 	})
 	if err != nil {
-		return written, fmt.Errorf("blobstore: WriteAt %d: %w", id, err)
+		// The transaction rolled back (or commit failed): nothing was persisted,
+		// so report 0 written per io.WriterAt rather than a count that didn't stick.
+		return 0, err
 	}
-
-	if _, err := sc.ExecContext(ctx,
-		`UPDATE `+s.objs+` SET size = max(size, ?) WHERE id = ?`, end, id); err != nil {
-		return written, fmt.Errorf("blobstore: WriteAt %d: %w", id, err)
-	}
-	if err := commit(ctx, sc); err != nil {
-		return written, err
-	}
-	committed = true
 	return written, nil
 }
 
@@ -170,8 +168,8 @@ func (s *Store) readAt(ctx context.Context, id int64, p []byte, off int64) (int,
 	if err != nil {
 		return 0, fmt.Errorf("blobstore: ReadAt %d: %w", id, err)
 	}
-	if chunk <= 0 {
-		return 0, errCorruptChunk(id, chunk)
+	if err := checkChunk(id, chunk); err != nil {
+		return 0, err
 	}
 	if off >= size {
 		return 0, io.EOF
@@ -269,9 +267,7 @@ func (s *Store) readChunkRaw(ctx context.Context, sc *sql.Conn, id, seq, inOff i
 		return err
 	}
 	if !ok {
-		for i := range dst {
-			dst[i] = 0
-		}
+		clear(dst)
 		return nil
 	}
 	return s.blobRead(sc, rowid, dst, inOff)
@@ -285,9 +281,7 @@ func (s *Store) readChunkCompressed(ctx context.Context, sc *sql.Conn, id, seq, 
 		return err
 	}
 	if !ok {
-		for i := range dst {
-			dst[i] = 0
-		}
+		clear(dst)
 		return nil
 	}
 	copy(dst, plain[inOff:inOff+int64(len(dst))])
@@ -319,4 +313,31 @@ func rollbackIf(sc *sql.Conn, committed *bool) {
 	if !*committed {
 		_, _ = sc.ExecContext(context.Background(), "ROLLBACK")
 	}
+}
+
+// withTx borrows a pooled connection, runs fn inside a single BEGIN IMMEDIATE
+// write transaction, and commits — rolling back if fn returns an error or
+// panics. It is the shared write-path lifecycle for the mutating methods; the
+// transaction is all-or-nothing, so a caller that gets a non-nil error knows
+// nothing was persisted. (readAt uses a read-only snapshot with nothing to
+// commit and stays separate.)
+func (s *Store) withTx(ctx context.Context, fn func(sc *sql.Conn) error) error {
+	sc, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer sc.Close()
+	if err := begin(ctx, sc); err != nil {
+		return err
+	}
+	committed := false
+	defer rollbackIf(sc, &committed)
+	if err := fn(sc); err != nil {
+		return err
+	}
+	if err := commit(ctx, sc); err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }

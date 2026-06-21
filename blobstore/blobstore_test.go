@@ -476,8 +476,10 @@ func TestInvalidChunkGuard(t *testing.T) {
 	id, _ := res.LastInsertId()
 
 	w, _ := s.Writer(ctx, id)
-	if _, err := w.WriteAt([]byte("x"), 0); err == nil {
+	if n, err := w.WriteAt([]byte("x"), 0); err == nil {
 		t.Error("WriteAt on chunk=0 row: want error, got nil (panic?)")
+	} else if n != 0 {
+		t.Errorf("WriteAt error path returned n=%d, want 0 (nothing persisted)", n)
 	}
 	r, _ := s.Reader(ctx, id)
 	if _, err := r.ReadAt(make([]byte, 1), 0); err == nil {
@@ -485,6 +487,33 @@ func TestInvalidChunkGuard(t *testing.T) {
 	}
 	if err := s.Truncate(ctx, id, 5); err == nil {
 		t.Error("Truncate on chunk=0 row: want error")
+	}
+
+	// A chunk size past the ceiling is rejected before any allocation, rather
+	// than driving a multi-GiB make/Grow.
+	res, err = db.ExecContext(ctx, `INSERT INTO files_objects(size, chunk) VALUES (10, ?)`, int64(maxChunkSize)+1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	big, _ := res.LastInsertId()
+	rb, _ := s.Reader(ctx, big)
+	if _, err := rb.ReadAt(make([]byte, 1), 0); err == nil {
+		t.Error("ReadAt on oversized-chunk row: want error")
+	}
+}
+
+// TestChunkSizeBounds: Open rejects a non-positive or oversized chunk size.
+func TestChunkSizeBounds(t *testing.T) {
+	db, err := sqlite.OpenWAL(filepath.Join(t.TempDir(), "b.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if _, err := Open(db, "files", WithChunkSize(0)); err == nil {
+		t.Error("Open with zero chunk size: want error")
+	}
+	if _, err := Open(db, "files", WithChunkSize(maxChunkSize+1)); err == nil {
+		t.Error("Open with oversized chunk size: want error")
 	}
 }
 
@@ -529,6 +558,79 @@ func TestSameIDConcurrentWriters(t *testing.T) {
 		if want := bytes.Repeat([]byte{byte('A' + i)}, 10); !bytes.Equal(got[i*10:(i+1)*10], want) {
 			t.Fatalf("region %d = %q, want %q", i, got[i*10:(i+1)*10], want)
 		}
+	}
+}
+
+// TestWriteVsConvertConcurrent guards the A1 fix: WriteAt reads the object's
+// codec INSIDE its write transaction, so a concurrent SetCompression mode
+// conversion can never make a writer store a chunk in the wrong representation.
+// Each writer owns a disjoint byte region, so the final content is deterministic
+// regardless of interleaving and of mode toggles — conversion preserves content
+// and BEGIN IMMEDIATE serializes the writers. A converter flips the object
+// between raw and compressed underneath them; the object must stay fully
+// readable (no decode error) with every region intact. With the bug (codec read
+// before BEGIN) a stale-mode write corrupts a chunk and a region read fails.
+func TestWriteVsConvertConcurrent(t *testing.T) {
+	skipUnderRace(t) // writers hit the raw OpenBlob path in raw phases
+	s, _ := newStore(t, WithChunkSize(16))
+	ctx := context.Background()
+	id, _ := s.Create(ctx, WithObjectCompression(CompressionBest))
+
+	const writers = 4
+	regions := make([][]byte, writers)
+	for i := range regions {
+		regions[i] = bytes.Repeat([]byte{byte('A' + i)}, 10) // disjoint 10-byte slot
+	}
+
+	var wg sync.WaitGroup
+	errs := make([]error, writers)
+	for i := range writers {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for r := 0; r < 8; r++ { // re-write idempotently to widen the race window
+				w, err := s.Writer(ctx, id)
+				if err != nil {
+					errs[i] = err
+					return
+				}
+				_, err = w.WriteAt(regions[i], int64(i*10))
+				w.Close()
+				if err != nil {
+					errs[i] = err
+					return
+				}
+			}
+		}(i)
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		levels := []Compression{CompressionNone, CompressionBest}
+		for r := 0; r < 16; r++ {
+			// A conversion error (e.g. busy) leaves the object consistent in
+			// whatever mode it is in; the content checks below still hold.
+			_ = s.SetCompression(ctx, id, levels[r%2])
+		}
+	}()
+	wg.Wait()
+
+	for i := range errs {
+		if errs[i] != nil {
+			t.Fatalf("writer %d: %v", i, errs[i])
+		}
+	}
+	got := readAll(t, s, id) // surfaces any undecodable chunk as a fatal error
+	if int64(len(got)) < int64(writers*10) {
+		t.Fatalf("short read: got %d bytes, want >= %d", len(got), writers*10)
+	}
+	for i := range writers {
+		if want := regions[i]; !bytes.Equal(got[i*10:(i+1)*10], want) {
+			t.Fatalf("region %d = %q, want %q (stale-codec corruption?)", i, got[i*10:(i+1)*10], want)
+		}
+	}
+	if _, err := s.Stat(ctx, id); err != nil {
+		t.Fatalf("Stat after concurrent convert: %v", err)
 	}
 }
 

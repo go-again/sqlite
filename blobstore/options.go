@@ -24,8 +24,9 @@ func WithChunkSize(n int) Option {
 
 // Compression selects whether (and how hard) a Store compresses the objects
 // it creates. Levels run from fastest (least reduction) to best (most), with
-// the underlying codec abstracted away. Compression is frozen per object at
-// [Store.Create] time; the zero value [CompressionNone] stores objects raw.
+// the underlying codec abstracted away. Each object's compression is chosen at
+// [Store.Create] (defaulting to the Store's setting) and can be changed later
+// with [Store.SetCompression]; the zero value [CompressionNone] stores raw.
 //
 // Compression trades CPU and memory for storage: a compressed object can't use
 // in-place incremental BLOB I/O, so a partial write read-modify-writes its
@@ -45,9 +46,9 @@ const (
 )
 
 // WithCompression makes the Store store newly [Store.Create]d objects
-// compressed at level c. Objects that already exist keep the mode they were
-// created with (the mode is frozen per object); the Store reads any object
-// regardless of its mode. Default is [CompressionNone].
+// compressed at level c. This only affects objects created afterward; existing
+// objects keep their mode until you change it with [Store.SetCompression], and
+// the Store reads any object regardless of its mode. Default is [CompressionNone].
 func WithCompression(c Compression) Option {
 	return func(s *Store) { s.compression = c }
 }
@@ -67,9 +68,10 @@ type createConfig struct {
 // compress small or cold objects hard (e.g. [CompressionBest]) while keeping
 // large or hot ones raw or lightly compressed for speed.
 //
-// The chosen level is frozen on the object: later writes use it regardless of
-// the Store handle that performs them. Without this option an object inherits
-// the Store's mode at Create, and its writes use the writing Store's level.
+// The chosen level is recorded on the object and used by later writes
+// regardless of the Store handle that performs them, until changed with
+// [Store.SetCompression]. Without this option an object inherits the Store's
+// mode at Create, and its writes use the writing Store's level.
 func WithObjectCompression(c Compression) CreateOption {
 	return func(cc *createConfig) { cc.compression = c; cc.set = true }
 }
