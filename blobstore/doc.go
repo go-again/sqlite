@@ -61,6 +61,35 @@
 // store, so blobstore writes would appear to vanish — use OpenShared for
 // in-memory use.
 //
+// For write-heavy or streamed objects, consider opening the database with
+// synchronous=NORMAL. [gosqlite.org.OpenWAL] leaves SQLite's default (FULL),
+// which fsyncs the WAL on every commit — and since each WriteAt is its own
+// transaction, that is one fsync per chunk. NORMAL defers the fsync to
+// checkpoint, so commits are cheap; in WAL mode it stays crash-consistent (no
+// corruption) across application and OS crashes, and only a power loss can drop
+// transactions committed since the last checkpoint.
+//
+// # Bulk and atomic writes
+//
+// [Store.WriteAt] commits each write in its own transaction. To run many writes
+// in one transaction — amortizing the per-write commit (and fsync) for a bulk
+// load or stream, and committing them atomically — use [Store.Batch]:
+//
+//	err := store.Batch(ctx, id, func(w io.WriterAt) error {
+//		if _, err := w.WriteAt(head, 0); err != nil {
+//			return err
+//		}
+//		_, err := w.WriteAt(tail, int64(len(head)))
+//		return err
+//	})
+//
+// Every write in fn commits together when fn returns nil, or rolls back entirely
+// if fn returns an error or panics — a half-written batch never persists. The
+// [io.WriterAt] is bound to one transaction (drive it sequentially), and Batch
+// holds the write lock for the whole callback, so keep fn tight: buffer a slow
+// source first rather than reading it inside. [Store.WriteAtFrom] is the
+// convenience form — it copies an [io.Reader] into an object in one Batch.
+//
 // # Compression
 //
 // Open a Store with [WithCompression] to store new objects compressed:

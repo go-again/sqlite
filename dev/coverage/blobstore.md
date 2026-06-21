@@ -22,6 +22,9 @@
 | `Truncate(ctx, id, size)` — shrink | ✓ typed | `TestTruncateShrinkThenRegrow` | Deletes chunks past the cut; zeroes the boundary-chunk tail so a re-grow reads zeros. |
 | `Truncate(ctx, id, size)` — grow (sparse) | ✓ typed | `TestTruncateShrinkThenRegrow` | Bumps logical size only. |
 | `Delete(ctx, id)` | ✓ typed | `TestDelete`, `TestNotFound` | Frees object + chunks in one tx; `ErrNotFound` on a missing id. |
+| `Batch(ctx, id, fn)` — many writes in one tx | ✓ typed | `TestBatchRoundTrip`, `TestConcurrentBatch` | All of fn's `WriteAt` calls commit together with one size update; the `io.WriterAt` is bound to one pinned conn/transaction. |
+| `Batch` atomic rollback | ✓ typed | `TestBatchAtomicRollback`, `TestBatchNotFound` | fn returning an error (or panicking) rolls back the whole batch — a half-written batch never persists; `ErrNotFound` before fn runs for a missing id. |
+| `WriteAtFrom(ctx, id, off, r)` | ✓ typed | `TestWriteAtFrom` | Streams an `io.Reader` into an object in one `Batch`; returns bytes written; a sparse gap before off reads as zero. |
 | `WithChunkSize(n)` | ✓ typed | `TestMultiChunkSpan`, `TestConcurrentDistinctObjects` | Per-object; default `DefaultChunkSize` (64 KiB). |
 | `WithVacuumOnDelete()` | ✓ typed | (option wiring; effect needs incremental auto_vacuum) | Issues `PRAGMA incremental_vacuum` after frees. |
 | `ErrNotFound` (`errors.Is`) | ✓ typed | `TestNotFound`, `TestDelete` | Wrapped on every id-not-present path. |

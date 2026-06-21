@@ -47,6 +47,24 @@ Because each operation uses a *pooled* connection, the database must be one ever
 
 To return freed pages to the OS on delete or shrink, open the database in incremental auto-vacuum mode and pass `blobstore.WithVacuumOnDelete()`.
 
+For write-heavy or streamed objects, consider opening the database with `synchronous = NORMAL`. `OpenWAL` leaves SQLite's default (`FULL`), which fsyncs the WAL on every commit — and because each `WriteAt` is its own transaction, that is one fsync per chunk. `NORMAL` defers the fsync to checkpoint, so commits are cheap; in WAL mode it stays crash-consistent (no corruption) across application and OS crashes, and only a hard power loss can drop transactions committed since the last checkpoint — an appropriate trade for blob storage.
+
+## Bulk and atomic writes
+
+`WriteAt` commits each write in its own transaction. To run many writes in one transaction — amortizing the per-write commit (and fsync) for a bulk load or stream, and committing them atomically — use `store.Batch`:
+
+```go
+err := store.Batch(ctx, id, func(w io.WriterAt) error {
+    if _, err := w.WriteAt(head, 0); err != nil {
+        return err
+    }
+    _, err := w.WriteAt(tail, int64(len(head)))
+    return err
+})
+```
+
+Every write in the callback commits together when it returns `nil`, or rolls back entirely if it returns an error (or panics) — so a half-written batch never persists. The `io.WriterAt` is bound to one transaction (drive it sequentially), and `Batch` holds the write lock for the whole callback, so keep it tight: buffer a slow source first rather than reading it inside. `store.WriteAtFrom(ctx, id, off, r)` is the convenience form — it streams an `io.Reader` into an object in one `Batch`.
+
 ## Compression
 
 Open a Store with `blobstore.WithCompression(level)` to store its objects compressed — the same `Writer`/`Reader` API, transparently:

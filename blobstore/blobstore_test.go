@@ -429,6 +429,147 @@ func TestConcurrentCompressedRoundTrip(t *testing.T) {
 	}
 }
 
+// TestBatchRoundTrip: several WriteAt calls inside one Batch commit together and
+// read back, including out-of-order and chunk-spanning writes.
+func TestBatchRoundTrip(t *testing.T) {
+	skipUnderRace(t) // raw object uses OpenBlob
+	const chunk = 16
+	s, _ := newStore(t, WithChunkSize(chunk))
+	ctx := context.Background()
+	id, _ := s.Create(ctx)
+
+	want := compressibleBlob(5*chunk + 7) // several chunks + a partial tail
+	if err := s.Batch(ctx, id, func(w io.WriterAt) error {
+		if _, err := w.WriteAt(want[chunk:], chunk); err != nil { // tail first
+			return err
+		}
+		_, err := w.WriteAt(want[:chunk], 0) // then head
+		return err
+	}); err != nil {
+		t.Fatalf("Batch: %v", err)
+	}
+	if got := readAll(t, s, id); !bytes.Equal(got, want) {
+		t.Fatalf("Batch round-trip mismatch (got %d, want %d)", len(got), len(want))
+	}
+	if sz, _ := s.Size(ctx, id); sz != int64(len(want)) {
+		t.Fatalf("size after batch = %d, want %d", sz, len(want))
+	}
+}
+
+// TestBatchAtomicRollback: a Batch that fails after writing leaves the object
+// exactly as it was before the batch (all-or-nothing). Uses a compressed object
+// so it runs under -race.
+func TestBatchAtomicRollback(t *testing.T) {
+	const chunk = 64
+	s, _ := newStore(t, WithCompression(CompressionBest), WithChunkSize(chunk))
+	ctx := context.Background()
+	id, _ := s.Create(ctx)
+
+	orig := compressibleBlob(3 * chunk)
+	writeAt(t, s, id, orig, 0) // committed baseline
+
+	boom := errors.New("boom")
+	err := s.Batch(ctx, id, func(w io.WriterAt) error {
+		if _, err := w.WriteAt(bytes.Repeat([]byte("Z"), 2*chunk), 0); err != nil {
+			return err
+		}
+		return boom // abort after writing
+	})
+	if !errors.Is(err, boom) {
+		t.Fatalf("Batch error = %v, want boom", err)
+	}
+	if got := readAll(t, s, id); !bytes.Equal(got, orig) {
+		t.Fatal("Batch rollback did not restore the original content")
+	}
+	if sz, _ := s.Size(ctx, id); sz != int64(len(orig)) {
+		t.Fatalf("size after rollback = %d, want %d", sz, len(orig))
+	}
+}
+
+// TestBatchNotFound: Batch on a missing id returns ErrNotFound and never runs fn.
+func TestBatchNotFound(t *testing.T) {
+	s, _ := newStore(t)
+	called := false
+	err := s.Batch(context.Background(), 999, func(w io.WriterAt) error {
+		called = true
+		return nil
+	})
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Batch on missing id = %v, want ErrNotFound", err)
+	}
+	if called {
+		t.Fatal("fn ran for a missing object")
+	}
+}
+
+// TestWriteAtFrom: copies a reader into an object at off 0 and at a sparse off.
+func TestWriteAtFrom(t *testing.T) {
+	skipUnderRace(t) // raw object uses OpenBlob
+	const chunk = 32
+	s, _ := newStore(t, WithChunkSize(chunk))
+	ctx := context.Background()
+
+	id, _ := s.Create(ctx)
+	src := compressibleBlob(4*chunk + 5)
+	n, err := s.WriteAtFrom(ctx, id, 0, bytes.NewReader(src))
+	if err != nil || n != int64(len(src)) {
+		t.Fatalf("WriteAtFrom = (%d, %v), want (%d, nil)", n, err, len(src))
+	}
+	if got := readAll(t, s, id); !bytes.Equal(got, src) {
+		t.Fatal("WriteAtFrom content mismatch")
+	}
+
+	// At a non-zero offset the gap before it reads as zeros.
+	id2, _ := s.Create(ctx)
+	if _, err := s.WriteAtFrom(ctx, id2, int64(chunk), bytes.NewReader(src)); err != nil {
+		t.Fatalf("WriteAtFrom at offset: %v", err)
+	}
+	want := append(make([]byte, chunk), src...)
+	if got := readAll(t, s, id2); !bytes.Equal(got, want) {
+		t.Fatalf("WriteAtFrom at offset: gap+content mismatch (got %d, want %d)", len(got), len(want))
+	}
+}
+
+// TestConcurrentBatch: many goroutines each Batch-write a distinct compressed
+// object with two WriteAt calls; all read back intact. Runs under -race.
+func TestConcurrentBatch(t *testing.T) {
+	s, _ := newStore(t, WithCompression(CompressionDefault), WithChunkSize(64))
+	ctx := context.Background()
+	const n = 12
+	ids := make([]int64, n)
+	payloads := make([][]byte, n)
+	for i := range ids {
+		id, _ := s.Create(ctx)
+		ids[i] = id
+		payloads[i] = compressibleBlob(200 + i*40)
+	}
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	for i := range ids {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = s.Batch(ctx, ids[i], func(w io.WriterAt) error {
+				half := len(payloads[i]) / 2
+				if _, err := w.WriteAt(payloads[i][half:], int64(half)); err != nil {
+					return err
+				}
+				_, err := w.WriteAt(payloads[i][:half], 0)
+				return err
+			})
+		}(i)
+	}
+	wg.Wait()
+	for i := range ids {
+		if errs[i] != nil {
+			t.Fatalf("batch %d: %v", i, errs[i])
+		}
+		if got := readAll(t, s, ids[i]); !bytes.Equal(got, payloads[i]) {
+			t.Fatalf("object %d mismatch", i)
+		}
+	}
+}
+
 func TestOverwriteBelowSize(t *testing.T) {
 	skipUnderRace(t)
 	s, _ := newStore(t, WithChunkSize(8))

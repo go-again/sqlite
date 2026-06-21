@@ -64,66 +64,78 @@ func (r *Reader) ReadAt(p []byte, off int64) (int, error) {
 // resources — so there is nothing to release.
 func (r *Reader) Close() error { return nil }
 
-// writeAt writes p at object offset off, allocating chunks as needed, in a
-// single BEGIN IMMEDIATE transaction so the whole call is atomic. It dispatches
-// each chunk span to the raw (in-place) or compressed (read-modify-write) path
-// per the object's stored codec.
-func (s *Store) writeAt(ctx context.Context, id int64, p []byte, off int64) (int, error) {
+// writeArgs validates a WriteAt's offset and length and returns the end offset
+// off+len(p). ok is false for a zero-length write (nothing to do, no error).
+func writeArgs(p []byte, off int64) (end int64, ok bool, err error) {
 	if off < 0 {
-		return 0, errors.New("blobstore: WriteAt: negative offset")
+		return 0, false, errors.New("blobstore: WriteAt: negative offset")
 	}
 	if len(p) == 0 {
-		return 0, nil
+		return 0, false, nil
 	}
-	end := off + int64(len(p))
+	end = off + int64(len(p))
 	if end < off { // off + len overflowed int64
-		return 0, errors.New("blobstore: WriteAt: offset + length overflows int64")
+		return 0, false, errors.New("blobstore: WriteAt: offset + length overflows int64")
 	}
+	return end, true, nil
+}
 
-	written := 0
-	err := s.withTx(ctx, func(sc *sql.Conn) error {
-		// Read the object row INSIDE the transaction. BEGIN IMMEDIATE already
-		// holds the write lock, so codec/level cannot change under us — a
-		// concurrent SetCompression mode-convert is serialized against this, and
-		// the raw-vs-compressed dispatch below can't act on a stale mode.
-		var chunk, codec, level int64
-		err := sc.QueryRowContext(ctx,
-			`SELECT chunk, codec, level FROM `+s.objs+` WHERE id = ?`, id).Scan(&chunk, &codec, &level)
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("blobstore: WriteAt %d: %w", id, ErrNotFound)
+// objWriteMeta reads the object row a write needs (chunk size, mode, level)
+// INSIDE an open transaction, mapping a missing object to ErrNotFound and
+// validating the chunk size. Reading the row under the write lock means a
+// concurrent SetCompression mode-convert is serialized against the write, so the
+// raw-vs-compressed dispatch can't act on a stale mode. op names the operation
+// for error context.
+func (s *Store) objWriteMeta(ctx context.Context, sc *sql.Conn, id int64, op string) (chunk, codec, level int64, err error) {
+	err = sc.QueryRowContext(ctx,
+		`SELECT chunk, codec, level FROM `+s.objs+` WHERE id = ?`, id).Scan(&chunk, &codec, &level)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, 0, fmt.Errorf("blobstore: %s %d: %w", op, id, ErrNotFound)
+	}
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("blobstore: %s %d: %w", op, id, err)
+	}
+	if err = checkChunk(id, chunk); err != nil {
+		return 0, 0, 0, err
+	}
+	return chunk, codec, level, nil
+}
+
+// writeSpans writes p at object offset off on the in-transaction conn sc,
+// dispatching each chunk span to the raw (in-place) or compressed
+// (read-modify-write) path per the object's already-read codec/level. It manages
+// no transaction and updates no size — the caller owns those.
+func (s *Store) writeSpans(ctx context.Context, sc *sql.Conn, id, chunk, codec, level, off int64, p []byte) error {
+	compressed := codec == codecAZ
+	objLevel := Compression(level)
+	return eachChunkSpan(off, int64(len(p)), chunk, func(seq, inOff, span, bufOff int64) error {
+		src := p[bufOff : bufOff+span]
+		if compressed {
+			return s.writeChunkCompressed(ctx, sc, id, seq, chunk, inOff, src, objLevel)
 		}
+		return s.writeChunkRaw(ctx, sc, id, seq, chunk, inOff, src)
+	})
+}
+
+// writeAt writes p at object offset off, allocating chunks as needed, in a
+// single BEGIN IMMEDIATE transaction so the whole call is atomic.
+func (s *Store) writeAt(ctx context.Context, id int64, p []byte, off int64) (int, error) {
+	end, ok, err := writeArgs(p, off)
+	if err != nil || !ok {
+		return 0, err
+	}
+	err = s.withTx(ctx, func(sc *sql.Conn) error {
+		chunk, codec, level, err := s.objWriteMeta(ctx, sc, id, "WriteAt")
 		if err != nil {
-			return fmt.Errorf("blobstore: WriteAt %d: %w", id, err)
-		}
-		if err := checkChunk(id, chunk); err != nil {
 			return err
 		}
-
-		compressed := codec == codecAZ
-		objLevel := Compression(level)
-		w := 0
-		if err := eachChunkSpan(off, int64(len(p)), chunk, func(seq, inOff, span, bufOff int64) error {
-			src := p[bufOff : bufOff+span]
-			var werr error
-			if compressed {
-				werr = s.writeChunkCompressed(ctx, sc, id, seq, chunk, inOff, src, objLevel)
-			} else {
-				werr = s.writeChunkRaw(ctx, sc, id, seq, chunk, inOff, src)
-			}
-			if werr != nil {
-				return werr
-			}
-			w += int(span)
-			return nil
-		}); err != nil {
+		if err := s.writeSpans(ctx, sc, id, chunk, codec, level, off, p); err != nil {
 			return fmt.Errorf("blobstore: WriteAt %d: %w", id, err)
 		}
-
 		if _, err := sc.ExecContext(ctx,
 			`UPDATE `+s.objs+` SET size = max(size, ?) WHERE id = ?`, end, id); err != nil {
 			return fmt.Errorf("blobstore: WriteAt %d: %w", id, err)
 		}
-		written = w // success path only; the commit still follows in withTx
 		return nil
 	})
 	if err != nil {
@@ -131,7 +143,108 @@ func (s *Store) writeAt(ctx context.Context, id int64, p []byte, off int64) (int
 		// so report 0 written per io.WriterAt rather than a count that didn't stick.
 		return 0, err
 	}
-	return written, nil
+	return len(p), nil
+}
+
+// Batch runs fn's writes against object id in a single transaction: all of fn's
+// WriteAt calls commit together when fn returns nil, and roll back if fn returns
+// an error or panics. It amortizes the per-write transaction (one fsync, one
+// size update, one lock acquisition for the whole batch) and makes the batch
+// atomic — useful for bulk-loading or streaming an object.
+//
+// The [io.WriterAt] passed to fn is valid only for the duration of the call and
+// is NOT safe for concurrent use (it is bound to one connection/transaction);
+// drive its WriteAt calls sequentially. [Store.WriteAt] is unaffected — it keeps
+// its own per-call transaction and stays safe for concurrent use across handles.
+//
+// Batch holds the write lock for the whole callback, so keep fn tight: do not
+// block on slow I/O (a network read) while inside it — buffer the source first,
+// or split a large object across several Batch calls. Returns [ErrNotFound] if
+// id does not exist.
+func (s *Store) Batch(ctx context.Context, id int64, fn func(w io.WriterAt) error) error {
+	return s.withTx(ctx, func(sc *sql.Conn) error {
+		chunk, codec, level, err := s.objWriteMeta(ctx, sc, id, "Batch")
+		if err != nil {
+			return err
+		}
+		bw := &batchWriter{s: s, ctx: ctx, sc: sc, id: id, chunk: chunk, codec: codec, level: level}
+		if err := fn(bw); err != nil {
+			return err
+		}
+		if bw.maxEnd > 0 {
+			if _, err := sc.ExecContext(ctx,
+				`UPDATE `+s.objs+` SET size = max(size, ?) WHERE id = ?`, bw.maxEnd, id); err != nil {
+				return fmt.Errorf("blobstore: Batch %d: %w", id, err)
+			}
+		}
+		return nil
+	})
+}
+
+// batchWriter is the io.WriterAt handed to a [Store.Batch] callback. It writes on
+// the batch's single pinned connection/transaction — no per-call transaction or
+// size update — and tracks the high-water end offset so Batch can do one size
+// update at commit.
+type batchWriter struct {
+	s                   *Store
+	ctx                 context.Context
+	sc                  *sql.Conn
+	id                  int64
+	chunk, codec, level int64
+	maxEnd              int64
+}
+
+// WriteAt implements [io.WriterAt] within a batch. A write error leaves the
+// batch's transaction to be rolled back by Batch, so it reports 0 written.
+func (b *batchWriter) WriteAt(p []byte, off int64) (int, error) {
+	end, ok, err := writeArgs(p, off)
+	if err != nil || !ok {
+		return 0, err
+	}
+	if err := b.s.writeSpans(b.ctx, b.sc, b.id, b.chunk, b.codec, b.level, off, p); err != nil {
+		return 0, fmt.Errorf("blobstore: Batch %d WriteAt: %w", b.id, err)
+	}
+	if end > b.maxEnd {
+		b.maxEnd = end
+	}
+	return len(p), nil
+}
+
+// WriteAtFrom copies all of r into object id starting at off, in one [Store.Batch]
+// (a single transaction), and returns the number of bytes written. Because it
+// holds the write lock for the whole copy, r should be a fast or local (or
+// pre-buffered) reader; for a slow source, read it into memory first or drive
+// Batch yourself in segments. Like Batch it is atomic: on error nothing is
+// persisted and it returns 0.
+func (s *Store) WriteAtFrom(ctx context.Context, id, off int64, r io.Reader) (int64, error) {
+	if off < 0 {
+		return 0, errors.New("blobstore: WriteAtFrom: negative offset")
+	}
+	var total int64
+	err := s.Batch(ctx, id, func(w io.WriterAt) error {
+		buf := make([]byte, s.chunkSize) // staging buffer for reads
+		pos := off
+		for {
+			n, rerr := r.Read(buf)
+			if n > 0 {
+				if _, werr := w.WriteAt(buf[:n], pos); werr != nil {
+					return werr
+				}
+				pos += int64(n)
+				total += int64(n)
+			}
+			if rerr == io.EOF {
+				return nil
+			}
+			if rerr != nil {
+				return rerr
+			}
+		}
+	})
+	if err != nil {
+		return 0, err
+	}
+	return total, nil
 }
 
 // readAt reads into p from object offset off, clamping to logical size and
