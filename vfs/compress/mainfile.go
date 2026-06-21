@@ -1,18 +1,30 @@
 package compress
 
-// mainfile.go is the compressing main-database File of the live VFS: it
-// translates SQLite's logical, page-aligned reads and writes into compressed,
-// block-aligned slots in the container (container.go), and implements the
-// crash-safe commit protocol on Sync. It backs onto a plain *os.File; the whole
-// storage engine is ordinary Go, which is what makes the commit path
-// crash-injectable (Inc 3). Journals and temp files do NOT come here — the VFS
-// routes them to a pass-through File (live.go).
+// mainfile.go is the compressing main-database storage engine. State is split
+// in two:
+//
+//   - container: the shared, refcounted in-memory state for one database file —
+//     the page directory, block allocator, superblock metadata, and the backing
+//     *os.File. Every connection that opens the same canonical path shares one
+//     container (see the registry in live.go), so they all observe the same
+//     committed state with no disk re-read.
+//   - mainFile: a per-connection handle over a container, carrying only this
+//     connection's advisory lock level.
+//
+// SQLite's advisory-lock protocol (implemented in-process below, like the
+// reference VFS) provides the logical mutual exclusion — many SHARED readers,
+// one RESERVED..EXCLUSIVE writer, and EXCLUSIVE excludes all readers — so the
+// single writer never overlaps a reader. The container's RWMutex guards the
+// in-memory structures for memory-safety. Because only one writer runs at a
+// time and no reader overlaps a commit, copy-on-write allocation and the
+// superblock flip never race.
 
 import (
 	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
+	"sync"
 
 	"gosqlite.org/vfs"
 )
@@ -21,9 +33,12 @@ import (
 // in Phase 1; 0 is reserved for an all-raw container).
 const codecAZ uint8 = 1
 
-var errReadOnly = errors.New("compress: write to a read-only database")
+var (
+	errReadOnly = errors.New("compress: write to a read-only database")
+	errLockBusy = vfs.Errno(5) // SQLITE_BUSY
+)
 
-// backing is the physical block store behind a mainFile. A real *os.File
+// backing is the physical block store behind a container. A real *os.File
 // satisfies it via fileBacking (live.go); tests substitute an in-memory,
 // fault-injecting backing to prove the commit protocol survives a crash at any
 // step. The interface is exactly what the storage engine needs — block I/O,
@@ -36,11 +51,11 @@ type backing interface {
 	Close() error
 }
 
-// mainFile is one open compressed main database. It is reached by a single
-// connection at a time (the live VFS forces MaxOpenConns(1)), so it embeds
-// vfs.NoLock and needs no internal synchronisation.
-type mainFile struct {
-	vfs.NoLock
+// container is the shared in-memory state for one open database file.
+type container struct {
+	// mu guards the storage-engine state below (directory, allocator,
+	// superblock metadata). RLock for reads, Lock for writes/commit.
+	mu   sync.RWMutex
 	back backing // physical block-structured container
 
 	blockSize uint64      // physical block granularity B
@@ -59,32 +74,69 @@ type mainFile struct {
 	pendingRelease []extent // extents superseded since the last commit; freed only after the next durable commit
 	dirty          bool     // logical writes since the last commit
 	readOnly       bool
+
+	// Advisory-lock state, shared by every handle on this container. Guarded by
+	// lmu, independent of mu. Mirrors the reference File: many SHARED holders,
+	// one RESERVED..EXCLUSIVE writer; EXCLUSIVE additionally requires no other
+	// connection holds SHARED.
+	lmu     sync.Mutex
+	nShared int
+	writer  *mainFile
+
+	// Registry bookkeeping (guarded by the registry mutex in live.go). name is
+	// the canonical path, or "" for an unshared container (tests / anonymous).
+	name string
+	refs int
 }
 
-// Size reports the logical database size, derived from the page count — never
-// the physical (compressed) file length.
-func (f *mainFile) Size() (int64, error) { return int64(f.pageSize * f.pageCount), nil }
+// mainFile is one connection's handle over a shared container.
+type mainFile struct {
+	c    *container
+	lock vfs.LockLevel
+}
 
-// SectorSize reports the physical block size; DeviceCharacteristics advertises
-// no special guarantees, so SQLite keeps full journal discipline.
-func (f *mainFile) SectorSize() int                        { return int(f.blockSize) }
+// --- vfs.File: I/O (delegates to the shared container under its RWMutex) ---
+
+func (f *mainFile) Size() (int64, error)                   { return f.c.size() }
+func (f *mainFile) SectorSize() int                        { return int(f.c.blockSize) }
 func (f *mainFile) DeviceCharacteristics() vfs.DeviceFlags { return 0 }
 
-// ReadAt serves a logical, page-aligned read by decompressing the slots it
+func (f *mainFile) ReadAt(p []byte, off int64) (int, error)  { return f.c.readAt(p, off) }
+func (f *mainFile) WriteAt(p []byte, off int64) (int, error) { return f.c.writeAt(p, off) }
+func (f *mainFile) Truncate(size int64) error                { return f.c.truncate(size) }
+func (f *mainFile) Sync(vfs.SyncFlags) error                 { return f.c.sync() }
+
+// Close drops this connection's advisory lock and releases the container
+// (closing the backing and unregistering it when the last handle goes away).
+// Buffered-but-unsynced writes are intentionally NOT committed: only Sync'd
+// data is durable, and the orphaned slots are reclaimed by the next open.
+func (f *mainFile) Close() error {
+	_ = f.Unlock(vfs.LockNone)
+	return f.c.release()
+}
+
+func (c *container) size() (int64, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return int64(c.pageSize * c.pageCount), nil
+}
+
+// readAt serves a logical, page-aligned read by decompressing the slots it
 // spans. A read at or past the logical end returns io.EOF with a short count,
-// so the dispatcher zero-fills and reports SQLITE_IOERR_SHORT_READ — exactly
-// like the native VFS on a fresh or truncated database.
-func (f *mainFile) ReadAt(p []byte, off int64) (int, error) {
-	logical := int64(f.pageSize * f.pageCount)
+// so the dispatcher zero-fills and reports SQLITE_IOERR_SHORT_READ.
+func (c *container) readAt(p []byte, off int64) (int, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	logical := int64(c.pageSize * c.pageCount)
 	read := 0
 	for read < len(p) {
 		cur := off + int64(read)
 		if cur >= logical {
 			return read, io.EOF
 		}
-		pageNo := uint64(cur) / f.pageSize
-		intra := uint64(cur) % f.pageSize
-		page, err := f.loadPage(pageNo)
+		pageNo := uint64(cur) / c.pageSize
+		intra := uint64(cur) % c.pageSize
+		page, err := c.loadPage(pageNo)
 		if err != nil {
 			return read, err
 		}
@@ -93,101 +145,100 @@ func (f *mainFile) ReadAt(p []byte, off int64) (int, error) {
 	return read, nil
 }
 
-// WriteAt stores a logical, page-aligned write. SQLite writes whole pages, but
+// writeAt stores a logical, page-aligned write. SQLite writes whole pages, but
 // a partial write (e.g. the 100-byte header alone) is handled by
 // read-modify-write so the rest of the page is preserved.
-func (f *mainFile) WriteAt(p []byte, off int64) (int, error) {
-	if f.readOnly {
+func (c *container) writeAt(p []byte, off int64) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.readOnly {
 		return 0, errReadOnly
 	}
 	written := 0
 	for written < len(p) {
 		cur := off + int64(written)
-		pageNo := uint64(cur) / f.pageSize
-		intra := uint64(cur) % f.pageSize
-		n := min(int(f.pageSize-intra), len(p)-written)
+		pageNo := uint64(cur) / c.pageSize
+		intra := uint64(cur) % c.pageSize
+		n := min(int(c.pageSize-intra), len(p)-written)
 
 		var page []byte
-		if intra == 0 && n == int(f.pageSize) {
-			page = make([]byte, f.pageSize)
+		if intra == 0 && n == int(c.pageSize) {
+			page = make([]byte, c.pageSize)
 			copy(page, p[written:written+n])
 		} else {
 			var err error
-			if page, err = f.loadPage(pageNo); err != nil {
+			if page, err = c.loadPage(pageNo); err != nil {
 				return written, err
 			}
 			copy(page[intra:], p[written:written+n])
 		}
-		if err := f.storePage(pageNo, page); err != nil {
+		if err := c.storePage(pageNo, page); err != nil {
 			return written, err
 		}
-		if pageNo+1 > f.pageCount {
-			f.pageCount = pageNo + 1
+		if pageNo+1 > c.pageCount {
+			c.pageCount = pageNo + 1
 		}
 		written += n
 	}
-	f.dirty = true
+	c.dirty = true
 	return written, nil
 }
 
-// Truncate resizes the logical database. Slots above the new page count are
+// truncate resizes the logical database. Slots above the new page count are
 // scheduled for release at the next commit; the physical file is not shrunk
 // here (reclaimed space is reused by the allocator, and fully reclaimed on the
 // next open's directory scan).
-func (f *mainFile) Truncate(size int64) error {
-	if f.readOnly {
+func (c *container) truncate(size int64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.readOnly {
 		return errReadOnly
 	}
-	newCount := uint64(size) / f.pageSize
-	if uint64(size)%f.pageSize != 0 {
+	newCount := uint64(size) / c.pageSize
+	if uint64(size)%c.pageSize != 0 {
 		newCount++ // defensive: SQLite truncates on page boundaries
 	}
-	for i := newCount; i < uint64(len(f.dir)); i++ {
-		if e := f.dir[i]; e.physOffset != 0 {
-			f.pendingRelease = append(f.pendingRelease, extent{start: e.physOffset / f.blockSize, count: uint64(e.blocks)})
+	for i := newCount; i < uint64(len(c.dir)); i++ {
+		if e := c.dir[i]; e.physOffset != 0 {
+			c.pendingRelease = append(c.pendingRelease, extent{start: e.physOffset / c.blockSize, count: uint64(e.blocks)})
 		}
 	}
-	if newCount < uint64(len(f.dir)) {
-		f.dir = f.dir[:newCount]
+	if newCount < uint64(len(c.dir)) {
+		c.dir = c.dir[:newCount]
 	}
-	f.pageCount = newCount
-	f.dirty = true
+	c.pageCount = newCount
+	c.dirty = true
 	return nil
 }
 
-// Sync is the commit point: it makes every write since the last Sync durable
+// sync is the commit point: it makes every write since the last Sync durable
 // and atomic. SQLite calls it once per transaction in rollback-journal mode,
 // after writing all dirty pages and before deleting the journal.
-func (f *mainFile) Sync(vfs.SyncFlags) error {
-	if f.readOnly {
+func (c *container) sync() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.readOnly {
 		return nil
 	}
-	if !f.dirty {
-		return f.back.Sync()
+	if !c.dirty {
+		return c.back.Sync()
 	}
-	return f.commit()
+	return c.commit()
 }
 
-// Close releases the backing file WITHOUT committing buffered-but-unsynced
-// writes: only Sync'd data is durable, so dropping an uncommitted tail is
-// correct (SQLite's journal rolls the logical transaction back), and the
-// orphaned slots are reclaimed by the next open's directory scan.
-func (f *mainFile) Close() error { return f.back.Close() }
-
 // loadPage returns the pageSize-byte content of a logical page, zero-filled if
-// the page is sparse (never written). It verifies the slot checksum and bounds
-// decompression to the page size.
-func (f *mainFile) loadPage(pageNo uint64) ([]byte, error) {
-	buf := make([]byte, f.pageSize)
-	if pageNo >= uint64(len(f.dir)) {
+// the page is sparse (never written). The caller holds c.mu (R or W).
+func (c *container) loadPage(pageNo uint64) ([]byte, error) {
+	buf := make([]byte, c.pageSize)
+	if pageNo >= uint64(len(c.dir)) {
 		return buf, nil
 	}
-	e := f.dir[pageNo]
+	e := c.dir[pageNo]
 	if e.physOffset == 0 {
 		return buf, nil
 	}
 	stored := make([]byte, e.storedLen)
-	if _, err := f.back.ReadAt(stored, int64(e.physOffset)); err != nil {
+	if _, err := c.back.ReadAt(stored, int64(e.physOffset)); err != nil {
 		return nil, fmt.Errorf("compress: read page %d slot: %w", pageNo, err)
 	}
 	if crc32.Checksum(stored, crc32C) != e.checksum {
@@ -205,28 +256,28 @@ func (f *mainFile) loadPage(pageNo uint64) ([]byte, error) {
 
 // storePage compresses a full page, COW-allocates a fresh block run for it, and
 // updates the in-memory directory. The page's previous slot is scheduled for
-// release at the next durable commit — never overwritten in place — so a crash
-// before the commit leaves the previous committed state fully intact.
-func (f *mainFile) storePage(pageNo uint64, page []byte) error {
-	stored, verbatim, err := encodePage(page, f.codec)
+// release at the next durable commit — never overwritten in place. The caller
+// holds c.mu for writing.
+func (c *container) storePage(pageNo uint64, page []byte) error {
+	stored, verbatim, err := encodePage(page, c.codec)
 	if err != nil {
 		return err
 	}
-	nb := blocksFor(uint64(len(stored)), f.blockSize)
-	physOffset := f.alloc.alloc(nb) * f.blockSize
-	if err := f.writeBlocks(stored, physOffset, nb); err != nil {
+	nb := blocksFor(uint64(len(stored)), c.blockSize)
+	physOffset := c.alloc.alloc(nb) * c.blockSize
+	if err := c.writeBlocks(stored, physOffset, nb); err != nil {
 		return err
 	}
 
-	f.growDir(pageNo)
-	if old := f.dir[pageNo]; old.physOffset != 0 {
-		f.pendingRelease = append(f.pendingRelease, extent{start: old.physOffset / f.blockSize, count: uint64(old.blocks)})
+	c.growDir(pageNo)
+	if old := c.dir[pageNo]; old.physOffset != 0 {
+		c.pendingRelease = append(c.pendingRelease, extent{start: old.physOffset / c.blockSize, count: uint64(old.blocks)})
 	}
 	var flags uint16
 	if verbatim {
 		flags = dirFlagVerbatim
 	}
-	f.dir[pageNo] = dirEntry{
+	c.dir[pageNo] = dirEntry{
 		physOffset: physOffset,
 		storedLen:  uint32(len(stored)),
 		blocks:     uint32(nb),
@@ -238,23 +289,23 @@ func (f *mainFile) storePage(pageNo uint64, page []byte) error {
 
 // growDir extends the directory so index pageNo exists, filling gaps with
 // sparse entries.
-func (f *mainFile) growDir(pageNo uint64) {
-	for uint64(len(f.dir)) <= pageNo {
-		f.dir = append(f.dir, dirEntry{})
+func (c *container) growDir(pageNo uint64) {
+	for uint64(len(c.dir)) <= pageNo {
+		c.dir = append(c.dir, dirEntry{})
 	}
 }
 
 // writeBlocks writes data to a block run, zero-padding the final block so the
-// physical file length stays a whole number of blocks (which keeps the
-// high-water mark unambiguous on the next open).
-func (f *mainFile) writeBlocks(data []byte, physOffset, blocks uint64) error {
-	buf := make([]byte, blocks*f.blockSize)
+// physical file length stays a whole number of blocks.
+func (c *container) writeBlocks(data []byte, physOffset, blocks uint64) error {
+	buf := make([]byte, blocks*c.blockSize)
 	copy(buf, data)
-	_, err := f.back.WriteAt(buf, int64(physOffset))
+	_, err := c.back.WriteAt(buf, int64(physOffset))
 	return err
 }
 
-// commit runs the crash-safe commit protocol synchronously:
+// commit runs the crash-safe commit protocol synchronously (caller holds c.mu
+// for writing):
 //
 //  1. (data slots are already written by storePage)
 //  2. write the new directory to fresh blocks (COW — never over the live copy)
@@ -267,53 +318,123 @@ func (f *mainFile) writeBlocks(data []byte, physOffset, blocks uint64) error {
 // A crash before step 5 completes leaves the older generation as the
 // highest-valid superblock, so reopen reconstructs the previous committed
 // state; SQLite's rollback journal then recovers the logical transaction.
-func (f *mainFile) commit() error {
+func (c *container) commit() error {
 	var dirOffset uint64
 	var dirBlocks uint32
 	var dirChecksum uint32
-	if len(f.dir) > 0 {
-		dirBytes := marshalDirectory(f.dir)
+	if len(c.dir) > 0 {
+		dirBytes := marshalDirectory(c.dir)
 		dirChecksum = crc32.Checksum(dirBytes, crc32C)
-		nb := blocksFor(uint64(len(dirBytes)), f.blockSize)
-		dirOffset = f.alloc.alloc(nb) * f.blockSize
+		nb := blocksFor(uint64(len(dirBytes)), c.blockSize)
+		dirOffset = c.alloc.alloc(nb) * c.blockSize
 		dirBlocks = uint32(nb)
-		if err := f.writeBlocks(dirBytes, dirOffset, nb); err != nil {
+		if err := c.writeBlocks(dirBytes, dirOffset, nb); err != nil {
 			return err
 		}
 	}
-	if err := f.back.Sync(); err != nil {
+	if err := c.back.Sync(); err != nil {
 		return err
 	}
 
-	newGen := f.committedGen + 1
+	newGen := c.committedGen + 1
 	sb := &superblock{
-		blockSize:   uint32(f.blockSize),
-		pageSize:    uint32(f.pageSize),
-		pageCount:   f.pageCount,
+		blockSize:   uint32(c.blockSize),
+		pageSize:    uint32(c.pageSize),
+		pageCount:   c.pageCount,
 		dirOffset:   dirOffset,
 		dirBlocks:   dirBlocks,
 		generation:  newGen,
 		codec:       codecAZ,
 		dirChecksum: dirChecksum,
 	}
-	if _, err := f.back.WriteAt(sb.marshal(), f.nextSlot*int64(f.blockSize)); err != nil {
+	if _, err := c.back.WriteAt(sb.marshal(), c.nextSlot*int64(c.blockSize)); err != nil {
 		return err
 	}
-	if err := f.back.Sync(); err != nil {
+	if err := c.back.Sync(); err != nil {
 		return err
 	}
 
-	if f.committedDirBlocks > 0 {
-		f.pendingRelease = append(f.pendingRelease, extent{start: f.committedDirOffset / f.blockSize, count: uint64(f.committedDirBlocks)})
+	if c.committedDirBlocks > 0 {
+		c.pendingRelease = append(c.pendingRelease, extent{start: c.committedDirOffset / c.blockSize, count: uint64(c.committedDirBlocks)})
 	}
-	for _, e := range f.pendingRelease {
-		f.alloc.release(e.start, e.count)
+	for _, e := range c.pendingRelease {
+		c.alloc.release(e.start, e.count)
 	}
-	f.pendingRelease = f.pendingRelease[:0]
-	f.committedGen = newGen
-	f.committedDirOffset = dirOffset
-	f.committedDirBlocks = dirBlocks
-	f.nextSlot = 1 - f.nextSlot
-	f.dirty = false
+	c.pendingRelease = c.pendingRelease[:0]
+	c.committedGen = newGen
+	c.committedDirOffset = dirOffset
+	c.committedDirBlocks = dirBlocks
+	c.nextSlot = 1 - c.nextSlot
+	c.dirty = false
 	return nil
+}
+
+// --- vfs.File: in-process advisory locking (mirrors the reference File) ---
+
+// Lock raises this connection's advisory lock toward level, arbitrating in
+// process against the other connections on the same container. Many holders may
+// share SHARED; only one may hold RESERVED..EXCLUSIVE; EXCLUSIVE additionally
+// requires that no other connection holds SHARED.
+func (f *mainFile) Lock(level vfs.LockLevel) error {
+	if level <= f.lock {
+		return nil
+	}
+	c := f.c
+	c.lmu.Lock()
+	defer c.lmu.Unlock()
+	switch level {
+	case vfs.LockShared:
+		if c.writer != nil && c.writer.lock >= vfs.LockPending {
+			return errLockBusy // a PENDING/EXCLUSIVE writer blocks new readers
+		}
+		c.nShared++
+		f.lock = vfs.LockShared
+	case vfs.LockReserved:
+		if c.writer != nil && c.writer != f {
+			return errLockBusy
+		}
+		c.writer = f
+		f.lock = vfs.LockReserved
+	case vfs.LockPending, vfs.LockExclusive:
+		if c.writer != nil && c.writer != f {
+			return errLockBusy
+		}
+		c.writer = f
+		self := 0
+		if f.lock >= vfs.LockShared {
+			self = 1
+		}
+		if c.nShared > self {
+			f.lock = vfs.LockPending // hold the intent so no new SHARED is granted
+			return errLockBusy
+		}
+		f.lock = level
+	}
+	return nil
+}
+
+// Unlock lowers this connection's advisory lock toward level.
+func (f *mainFile) Unlock(level vfs.LockLevel) error {
+	if level >= f.lock {
+		return nil
+	}
+	c := f.c
+	c.lmu.Lock()
+	defer c.lmu.Unlock()
+	if f.lock >= vfs.LockReserved && level < vfs.LockReserved && c.writer == f {
+		c.writer = nil
+	}
+	if f.lock >= vfs.LockShared && level < vfs.LockShared {
+		c.nShared--
+	}
+	f.lock = level
+	return nil
+}
+
+// CheckReservedLock reports whether some connection holds RESERVED or higher.
+func (f *mainFile) CheckReservedLock() (bool, error) {
+	c := f.c
+	c.lmu.Lock()
+	defer c.lmu.Unlock()
+	return c.writer != nil && c.writer.lock >= vfs.LockReserved, nil
 }

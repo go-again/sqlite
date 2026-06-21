@@ -49,11 +49,13 @@
 | Truncate (shrink then regrow) | ✓ typed | `TestMainFileTruncateShrinkAndGrow` | Shrinking frees slots and reports the smaller logical size; regrowth zero-fills the gap; both survive reopen. |
 | Sparse pages zero-fill | ✓ typed | `TestMainFileSparsePages` | A page never written reads back as zeros across a reopen. |
 | Compression ratio vs raw | ✓ typed | `TestLiveCompressionRatioVsRaw` | At the same page size, the compressed container is far smaller than a raw database on log/JSON rows (≈9% of raw); write throughput measured by `BenchmarkLiveInsert`/`BenchmarkRawInsert`. |
+| Multi-connection: concurrent readers + a writer | ✓ typed | `TestLiveConcurrentReadersAndWriter` | A pool of connections shares one container; readers run concurrently with a writer; final count + `integrity_check` correct; durable across reopen; `-race` clean. |
+| Multi-connection: writers serialize | ✓ typed | `TestLiveConcurrentWritersSerialize` | Concurrent write transactions on disjoint key ranges all land exactly once via the in-process advisory lock; `integrity_check == ok`. |
 
 ### Live VFS design invariants
 
 - **Crash-safe commit (fault-injection proven).** `Sync` writes the new directory to fresh blocks (COW), fsyncs, writes the *alternate* superblock with `generation+1` and a directory checksum, fsyncs, and only then releases superseded extents. A crash before the second fsync leaves the prior generation authoritative; SQLite's rollback journal recovers the logical transaction. `TestCommitCrashAtEveryStep` injects a crash at every commit op and confirms reopen is always a consistent committed generation.
-- **Single-connection, rollback-journal.** `OpenLive` forces `MaxOpenConns(1)`, `page_size` = container page size, `mmap_size=0`, and a rollback journal (overriding WAL). The files embed `vfs.NoLock`. WAL/multi-connection are later increments.
+- **Multi-connection, rollback-journal.** Connections that open the same canonical path share one refcounted in-memory `container` (process-global registry), so they observe the same committed state with no disk re-read. SQLite's advisory-lock protocol — implemented in-process on the handle (`nShared` + single `writer`, mirroring the reference File) — gives many readers / one writer; a `sync.RWMutex` on the container guards the in-memory structures. `OpenLive` sets `page_size` = container page size, `mmap_size=0`, a default busy timeout, and a rollback journal (overriding WAL). WAL is a later increment.
 - **Only the main DB is compressed.** Journals and temp files route to a plain pass-through `File`; the main DB routes to the page-translating compressing `File`.
 - **All `az` use is confined to `codec.go`** (`encodePage`/`decodePage`), mirroring the snapshot path.
 
@@ -65,7 +67,7 @@
 
 ## Non-goals
 
-- **WAL / multi-connection on the live VFS** — `OpenLive` is single-connection, rollback-journal in this increment (it forces `MaxOpenConns(1)`). WAL needs the shm capability; real multi-connection locking needs a lock implementation. Both are later increments (Inc 5).
+- **WAL on the live VFS** — `OpenLive` is rollback-journal; multiple pooled connections coordinate through in-process advisory locks. WAL needs the shared-memory (`ShmFile`) capability and is a later increment (Inc 5b). Cross-process sharing is out of scope — coordination is in-process only.
 - **Encryption on the live VFS** — `OpenLive` writes only compressed bytes but does not yet encrypt them; per-block encryption in the container read/write path is a later increment (Inc 6 / Phase 2). The snapshot `Open`'s working copy is plaintext, so it is not a substitute for at-rest encryption either.
 - **Returning freed space to the OS** — under churn the container reuses freed blocks (so the at-rest file plateaus rather than growing), but it does not shrink the physical file back to the filesystem mid-session; rebuilding the free list on reopen reclaims space for reuse. Returning bytes to the OS is an offline compaction (a future container→container rewrite), not yet implemented.
 - **Compressing an in-use database via `Pack`** — the file must not be open.

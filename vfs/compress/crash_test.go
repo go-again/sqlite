@@ -226,7 +226,7 @@ func TestDirectoryCorruptionRejected(t *testing.T) {
 	if err := f.Sync(0); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
-	dirOffset := f.committedDirOffset
+	dirOffset := f.c.committedDirOffset
 	if dirOffset == 0 {
 		t.Fatal("expected a non-empty directory")
 	}

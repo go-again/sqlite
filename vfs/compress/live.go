@@ -20,6 +20,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
+	"time"
 
 	sqlite "gosqlite.org"
 	"gosqlite.org/internal/cabi"
@@ -92,7 +94,17 @@ func (v *LiveVFS) Access(name string, _ vfs.AccessOp) (bool, error) {
 // siblings share a cache key.
 func (v *LiveVFS) FullPathname(name string) (string, error) { return filepath.Abs(name) }
 
-// openMain opens or creates the compressed main-database container at path.
+// containers is the process-global registry of open compressed databases, keyed
+// by canonical path. Every connection that opens the same path shares one
+// container, so they observe the same committed state with no disk re-read.
+var containers = struct {
+	mu sync.Mutex
+	m  map[string]*container
+}{m: map[string]*container{}}
+
+// openMain opens or creates the compressed main-database container at path and
+// returns a connection handle that shares the (possibly already-open) container
+// with other connections on the same path.
 //
 //   - empty file (size 0): a fresh container is initialised and an empty
 //     committed superblock is persisted immediately, so the file always carries
@@ -103,6 +115,14 @@ func (v *LiveVFS) FullPathname(name string) (string, error) { return filepath.Ab
 //   - existing non-container (e.g. a raw .db someone pointed us at): rejected,
 //     so the file is never clobbered.
 func openMain(path string, flags vfs.OpenFlags, blockSize, pageSize uint64, codec Compression) (*mainFile, error) {
+	containers.mu.Lock()
+	defer containers.mu.Unlock()
+
+	if ct := containers.m[path]; ct != nil {
+		ct.refs++
+		return &mainFile{c: ct}, nil
+	}
+
 	readOnly := flags.Has(vfs.OpenReadOnly)
 	oflag := os.O_RDWR
 	if readOnly {
@@ -115,35 +135,70 @@ func openMain(path string, flags vfs.OpenFlags, blockSize, pageSize uint64, code
 	if err != nil {
 		return nil, err // dispatcher maps a not-exist error to SQLITE_CANTOPEN
 	}
-	f, err := openMainOver(fileBacking{file}, readOnly, blockSize, pageSize, codec)
+	ct, err := newContainerOver(fileBacking{file}, readOnly, blockSize, pageSize, codec)
 	if err != nil {
 		return nil, fmt.Errorf("compress: open %q: %w", path, err)
 	}
-	return f, nil
+	ct.name = path
+	ct.refs = 1
+	containers.m[path] = ct
+	return &mainFile{c: ct}, nil
 }
 
-// openMainOver builds a mainFile over an already-open backing — the seam tests
-// use to drive the storage engine over an in-memory, fault-injecting store. It
-// closes back on any error.
-func openMainOver(back backing, readOnly bool, cfgBlockSize, cfgPageSize uint64, codec Compression) (*mainFile, error) {
+// release drops one handle's reference. When the last handle on a shared
+// container closes, the backing is closed and the registry entry removed; an
+// unshared container (tests / anonymous) just closes its backing.
+func (c *container) release() error {
+	if c.name == "" {
+		c.refs--
+		if c.refs > 0 {
+			return nil
+		}
+		return c.back.Close()
+	}
+	containers.mu.Lock()
+	defer containers.mu.Unlock()
+	c.refs--
+	if c.refs > 0 {
+		return nil
+	}
+	delete(containers.m, c.name)
+	return c.back.Close()
+}
+
+// openMainOver builds a single-handle, unshared mainFile over an already-open
+// backing — the seam tests use to drive the storage engine over an in-memory,
+// fault-injecting store.
+func openMainOver(back backing, readOnly bool, blockSize, pageSize uint64, codec Compression) (*mainFile, error) {
+	ct, err := newContainerOver(back, readOnly, blockSize, pageSize, codec)
+	if err != nil {
+		return nil, err
+	}
+	ct.refs = 1
+	return &mainFile{c: ct}, nil
+}
+
+// newContainerOver loads or initialises a container over an already-open
+// backing. It closes back on any error.
+func newContainerOver(back backing, readOnly bool, cfgBlockSize, cfgPageSize uint64, codec Compression) (*container, error) {
 	size, err := back.Size()
 	if err != nil {
 		_ = back.Close()
 		return nil, err
 	}
 
-	f := &mainFile{back: back, blockSize: cfgBlockSize, pageSize: cfgPageSize, codec: codec, readOnly: readOnly}
+	c := &container{back: back, blockSize: cfgBlockSize, pageSize: cfgPageSize, codec: codec, readOnly: readOnly}
 
 	if size == 0 {
-		f.alloc = newAllocator(nil, superblockBlocks)
+		c.alloc = newAllocator(nil, superblockBlocks)
 		if readOnly {
-			return f, nil // empty read-only database: behaves as empty, never written
+			return c, nil // empty read-only database: behaves as empty, never written
 		}
-		if err := f.commit(); err != nil { // persist an empty committed container
+		if err := c.commit(); err != nil { // persist an empty committed container
 			_ = back.Close()
 			return nil, fmt.Errorf("initialise container: %w", err)
 		}
-		return f, nil
+		return c, nil
 	}
 
 	// Superblock A is always at offset 0; read it first to learn the on-disk
@@ -164,16 +219,16 @@ func openMainOver(back backing, readOnly bool, cfgBlockSize, cfgPageSize uint64,
 		return nil, fmt.Errorf("not a compressed container: %w", err)
 	}
 
-	f.blockSize = uint64(sb.blockSize)
-	f.pageSize = uint64(sb.pageSize)
-	f.pageCount = sb.pageCount
-	f.committedGen = sb.generation
-	f.committedDirOffset = sb.dirOffset
-	f.committedDirBlocks = sb.dirBlocks
-	f.nextSlot = int64(1 - slot)
+	c.blockSize = uint64(sb.blockSize)
+	c.pageSize = uint64(sb.pageSize)
+	c.pageCount = sb.pageCount
+	c.committedGen = sb.generation
+	c.committedDirOffset = sb.dirOffset
+	c.committedDirBlocks = sb.dirBlocks
+	c.nextSlot = int64(1 - slot)
 
 	if sb.dirBlocks > 0 {
-		dirBuf := make([]byte, uint64(sb.dirBlocks)*f.blockSize)
+		dirBuf := make([]byte, uint64(sb.dirBlocks)*c.blockSize)
 		if _, err := back.ReadAt(dirBuf, int64(sb.dirOffset)); err != nil {
 			_ = back.Close()
 			return nil, fmt.Errorf("read directory: %w", err)
@@ -188,10 +243,10 @@ func openMainOver(back backing, readOnly bool, cfgBlockSize, cfgPageSize uint64,
 			_ = back.Close()
 			return nil, fmt.Errorf("parse directory: %w", err)
 		}
-		f.dir = dir
+		c.dir = dir
 	}
-	f.alloc = rebuildAllocator(f.dir, sb, size)
-	return f, nil
+	c.alloc = rebuildAllocator(c.dir, sb, size)
+	return c, nil
 }
 
 // readSuperblockAt reads the superblock at byte offset off, tolerating a
@@ -272,9 +327,9 @@ func (p *passFile) Close() error {
 
 // NewVFS registers a live compressing VFS configured by opts and returns it.
 // The caller is responsible for using the returned name as sqlite.Config.VFS,
-// for ensuring the database's page_size equals the resolved page size, for
-// keeping the pool at one connection, and for calling Close to unregister.
-// Most callers want [OpenLive], which wires all of that up.
+// for ensuring the database's page_size equals the resolved page size, and for
+// calling Close to unregister. Most callers want [OpenLive], which wires all of
+// that up.
 func NewVFS(opts Options) (*LiveVFS, error) {
 	blockSize, pageSize, err := opts.resolveLive()
 	if err != nil {
@@ -300,11 +355,13 @@ func NewVFS(opts Options) (*LiveVFS, error) {
 //	defer db.Close()
 //
 // It registers a live compressing VFS, routes cfg through it, and — via
-// cfg.VFSCloser — unregisters it when the returned handle closes. Phase 1 is
-// single-connection and rollback-journal, so OpenLive forces MaxOpenConns(1),
-// sets the page size to match the container, disables mmap, and selects a
-// rollback journal (overriding any WAL request). cfg.VFS must be empty and the
-// path must be on disk.
+// cfg.VFSCloser — unregisters it when the returned handle closes. Multiple
+// pooled connections are supported: they share one in-memory container and
+// coordinate through the VFS's in-process advisory locks (many readers, one
+// writer). OpenLive sets the page size to match the container, disables mmap,
+// defaults a busy timeout, and selects a rollback journal (WAL needs the
+// shared-memory capability and is a later increment, so a WAL request is
+// overridden). cfg.VFS must be empty and the path must be on disk.
 //
 // OpenLive is distinct from the snapshot [Open]: Open trades per-transaction
 // durability and an at-rest-only footprint for simplicity (a plaintext working
@@ -328,9 +385,14 @@ func OpenLive(cfg sqlite.Config, opts Options) (*sqlite.DB, error) {
 
 	cfg.VFS = v.name
 	cfg.VFSCloser = v
-	cfg.MaxOpenConns = 1
 	// Rollback journal only (WAL needs the shm capability, a later increment).
+	// Multiple connections are allowed and coordinate through the VFS's
+	// in-process advisory locks; default a busy timeout so writer contention
+	// retries rather than failing immediately.
 	cfg.Pragmas.JournalMode = sqlite.JournalDelete
+	if cfg.Pragmas.BusyTimeout == 0 {
+		cfg.Pragmas.BusyTimeout = 5 * time.Second
+	}
 	extra := map[string]string{}
 	maps.Copy(extra, cfg.Pragmas.Extra)
 	extra["page_size"] = strconv.FormatUint(v.pageSize, 10)

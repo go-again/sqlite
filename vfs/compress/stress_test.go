@@ -123,7 +123,7 @@ func TestMainFileSparsePages(t *testing.T) {
 // bytesOfSync returns the durable image of f's backing (a crashBacking).
 func bytesOfSync(t *testing.T, f *mainFile) []byte {
 	t.Helper()
-	cb, ok := f.back.(*crashBacking)
+	cb, ok := f.c.back.(*crashBacking)
 	if !ok {
 		t.Fatalf("backing is not a crashBacking")
 	}

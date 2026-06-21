@@ -49,13 +49,15 @@
 //	if err != nil { ... }
 //	defer db.Close()
 //
-// [OpenLive] is single-connection and rollback-journal in this release: it
-// forces MaxOpenConns(1), sets a large page size to match the container, and
-// selects a rollback journal (overriding any WAL request). WAL and
-// multi-connection concurrency need additional VFS capabilities and are not yet
-// implemented; for those workloads use a plain database or the snapshot [Open].
-// [NewVFS] exposes the underlying [LiveVFS] for advanced wiring; most callers
-// want [OpenLive].
+// [OpenLive] supports multiple pooled connections: they share one in-memory
+// container and coordinate through the VFS's in-process advisory locks — many
+// concurrent readers, one writer at a time — so a connection pool is safe. It
+// uses a rollback journal (it sets a large page size to match the container,
+// disables mmap, defaults a busy timeout, and overrides any WAL request). WAL
+// needs the shared-memory capability and is not yet implemented; for a
+// WAL-mode database use a plain database or the snapshot [Open]. [NewVFS]
+// exposes the underlying [LiveVFS] for advanced wiring; most callers want
+// [OpenLive].
 //
 // Opening a raw (uncompressed) database file with [Open] adopts it (rewritten
 // compressed on Close); [OpenLive] instead refuses a non-container file rather
