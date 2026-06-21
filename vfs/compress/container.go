@@ -1,437 +1,509 @@
 package compress
 
-// container.go is the on-disk format of the live compressing VFS (Phase 1):
-// the block-structured container that the public vfs.VFS in this package will
-// read and write. It holds no SQLite or codec contact — only encode/decode of
-// the metadata structures and the block allocator that the I/O path builds on.
-// Keeping it free-standing means the crash-critical bookkeeping is ordinary Go
-// over []byte and can be unit-tested exhaustively before any database is wired
-// up. The wire format and the commit protocol that drives it are described in
-// .plans/plan-compress-vfs-phase1.md.
+// container.go is the compressing main-database storage engine (the on-disk
+// wire format it reads and writes is in format.go). State is split in two:
+//
+//   - container: the shared, refcounted in-memory state for one database file —
+//     the page directory, block allocator, superblock metadata, and the backing
+//     *os.File. Every connection that opens the same canonical path shares one
+//     container (see the registry in vfs.go), so they all observe the same
+//     committed state with no disk re-read.
+//   - mainFile: a per-connection handle over a container, carrying only this
+//     connection's advisory lock level.
+//
+// SQLite's advisory-lock protocol (implemented in-process below, like the
+// reference VFS) provides the logical mutual exclusion — many SHARED readers,
+// one RESERVED..EXCLUSIVE writer, and EXCLUSIVE excludes all readers — so the
+// single writer never overlaps a reader. The container's RWMutex guards the
+// in-memory structures for memory-safety. Because only one writer runs at a
+// time and no reader overlaps a commit, copy-on-write allocation and the
+// superblock flip never race.
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"hash/crc32"
-	"math"
-	"sort"
+	"io"
+	"sync"
+
+	"gosqlite.org/vfs"
 )
 
-const (
-	// superblockMagic prefixes both superblock copies. It is deliberately not
-	// the SQLite magic: SQLite never sees the physical file, only what ReadAt
-	// synthesises, so the container is free to brand block 0 as its own.
-	superblockMagic = "goSQLZv1" // exactly 8 bytes
-
-	// containerVersion is bumped on any incompatible wire-format change.
-	containerVersion = 1
-
-	// defaultBlockSize is the physical block granularity B: every physical
-	// read and write is a multiple of it. 4 KiB matches common device sectors
-	// and leaves room for Phase 2 per-block encryption.
-	defaultBlockSize = 4096
-
-	// defaultPageSize is the logical SQLite page size. A large page amortises
-	// the per-page directory entry and widens the compression window.
-	defaultPageSize = 65536
-
-	// superblockBlocks is the reserved prefix: block 0 = superblock A,
-	// block 1 = superblock B. The data region begins at this block index.
-	superblockBlocks = 2
-
-	// superblockSize is the fixed encoded length of a superblock, padded out to
-	// occupy block 0/1 alone. The encoded fields are far smaller; the rest of
-	// the block is unused.
-	superblockSize = 64
-
-	// dirEntrySize is the fixed encoded length of one page-directory entry.
-	dirEntrySize = 24
-)
-
-// crc32C is the Castagnoli table shared by the superblock, the directory and
-// every per-slot checksum.
-var crc32C = crc32.MakeTable(crc32.Castagnoli)
+// codecAZ is the superblock codec tag for az-compressed slots (the only codec
+// in Phase 1; 0 is reserved for an all-raw container).
+const codecAZ uint8 = 1
 
 var (
-	errBadMagic     = errors.New("compress: bad superblock magic")
-	errBadChecksum  = errors.New("compress: superblock checksum mismatch")
-	errBadVersion   = errors.New("compress: unsupported container version")
-	errShortBlock   = errors.New("compress: block too short to decode")
-	errNoSuperblock = errors.New("compress: no valid superblock (not a compressed container)")
+	errReadOnly = errors.New("compress: write to a read-only database")
+	errLockBusy = vfs.Errno(5) // SQLITE_BUSY
 )
 
-// superblock is the root metadata block. Two copies live at physical blocks 0
-// and 1; the authoritative one is the valid-checksum copy with the highest
-// generation (ping-pong). The commit protocol writes the *alternate* copy and
-// flips authority only after the write is durable, so a crash leaves the prior
-// generation intact. Encoded little-endian with a trailing CRC32C.
+// backing is the physical block store behind a container. A real *os.File
+// satisfies it via fileBacking (vfs.go); tests substitute an in-memory,
+// fault-injecting backing to prove the commit protocol survives a crash at any
+// step. The interface is exactly what the storage engine needs — block I/O,
+// fsync, size, close — and nothing more.
+type backing interface {
+	io.ReaderAt
+	io.WriterAt
+	Sync() error
+	Size() (int64, error)
+	Close() error
+}
+
+// container is the shared in-memory state for one open database file.
+type container struct {
+	// mu guards the storage-engine state below (directory, allocator,
+	// superblock metadata). RLock for reads, Lock for writes/commit.
+	mu   sync.RWMutex
+	back backing // physical block-structured container
+
+	blockSize uint64      // physical block granularity B
+	pageSize  uint64      // logical SQLite page size
+	codec     Compression // level for NEW page writes
+
+	pageCount uint64     // logical page count (authoritative size source)
+	dir       []dirEntry // page directory, index = logical page number
+	alloc     *allocator // physical block allocator
+
+	committedGen       uint64 // generation of the on-disk authoritative superblock
+	committedDirOffset uint64 // its directory extent (released after the next commit)
+	committedDirBlocks uint32
+	nextSlot           int64 // physical block (0 or 1) the next superblock write targets
+
+	pendingRelease []extent // extents superseded since the last commit; freed only after the next durable commit
+	dirty          bool     // logical writes since the last commit
+	readOnly       bool
+
+	// Advisory-lock state, shared by every handle on this container. Guarded by
+	// lmu, independent of mu. Many SHARED holders, one RESERVED..EXCLUSIVE
+	// writer; EXCLUSIVE additionally requires no other connection holds SHARED.
+	//
+	// The Lock/Unlock/CheckReservedLock state machine is a deliberate port of
+	// the reference File in gosqlite.org/vfs/interface_test.go (refMemFile) —
+	// kept byte-identical so the two cannot silently drift. It is duplicated
+	// rather than shared only because the reference lives in a _test.go (not
+	// importable) and this is an isolated module; promoting it to a public vfs
+	// helper both embed is the real fix (tracked separately).
+	lmu     sync.Mutex
+	nShared int
+	writer  *mainFile
+
+	// Registry bookkeeping (guarded by the registry mutex in vfs.go). name is
+	// the canonical path, or "" for an unshared container (tests / anonymous).
+	name string
+	refs int
+}
+
+// mainFile is one connection's handle over a shared container.
+type mainFile struct {
+	c    *container
+	lock vfs.LockLevel
+}
+
+// --- vfs.File: I/O (delegates to the shared container under its RWMutex) ---
+
+func (f *mainFile) Size() (int64, error)                   { return f.c.size() }
+func (f *mainFile) SectorSize() int                        { return int(f.c.blockSize) }
+func (f *mainFile) DeviceCharacteristics() vfs.DeviceFlags { return 0 }
+
+func (f *mainFile) ReadAt(p []byte, off int64) (int, error)  { return f.c.readAt(p, off) }
+func (f *mainFile) WriteAt(p []byte, off int64) (int, error) { return f.c.writeAt(p, off) }
+func (f *mainFile) Truncate(size int64) error                { return f.c.truncate(size) }
+func (f *mainFile) Sync(vfs.SyncFlags) error                 { return f.c.sync() }
+
+// Close drops this connection's advisory lock and releases the container
+// (closing the backing and unregistering it when the last handle goes away).
+// Buffered-but-unsynced writes are intentionally NOT committed: only Sync'd
+// data is durable, and the orphaned slots are reclaimed by the next open.
 //
-// There is deliberately no on-disk free-map: the allocator is rebuilt by
-// scanning the committed directory on open (see [rebuildAllocator]), which
-// makes open self-healing and keeps the free list off the crash-critical
-// commit path. Bytes [52:60] are reserved (zero) for a future format extension
-// without a version bump.
-type superblock struct {
-	blockSize   uint32 // physical block size B
-	pageSize    uint32 // logical SQLite page size
-	pageCount   uint64 // logical page count; logical size = pageSize*pageCount
-	dirOffset   uint64 // physical byte offset of the directory extent (0 ⇒ empty directory)
-	dirBlocks   uint32 // directory length in blocks (0 ⇒ no pages yet)
-	generation  uint64 // monotonic; newest valid superblock wins
-	codec       uint8  // 0 raw / 1 az
-	enc         uint8  // reserved for Phase 2 encryption
-	dirChecksum uint32 // CRC32C of the directory content bytes (0 ⇒ empty directory)
+// Unlock(LockNone) MUST run before release: c.writer is a back-pointer to the
+// handle holding RESERVED+, and only that handle's own Unlock clears it.
+// Unlocking first guarantees the pointer is cleared before the handle can go
+// away, so a surviving connection never dereferences a freed handle.
+func (f *mainFile) Close() error {
+	_ = f.Unlock(vfs.LockNone)
+	return f.c.release()
 }
 
-// marshal encodes s into a fresh superblockSize-byte block, terminating it with
-// a CRC32C over every preceding byte.
-func (s *superblock) marshal() []byte {
-	b := make([]byte, superblockSize)
-	copy(b[0:8], superblockMagic)
-	binary.LittleEndian.PutUint16(b[8:10], containerVersion)
-	binary.LittleEndian.PutUint32(b[10:14], s.blockSize)
-	binary.LittleEndian.PutUint32(b[14:18], s.pageSize)
-	binary.LittleEndian.PutUint64(b[18:26], s.pageCount)
-	binary.LittleEndian.PutUint64(b[26:34], s.dirOffset)
-	binary.LittleEndian.PutUint32(b[34:38], s.dirBlocks)
-	binary.LittleEndian.PutUint64(b[38:46], s.generation)
-	b[46] = s.codec
-	b[47] = s.enc
-	binary.LittleEndian.PutUint32(b[48:52], s.dirChecksum)
-	// b[52:60] reserved (zero)
-	binary.LittleEndian.PutUint32(b[60:64], crc32.Checksum(b[:60], crc32C))
-	return b
+func (c *container) size() (int64, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return int64(c.pageSize * c.pageCount), nil
 }
 
-// parseSuperblock decodes one superblock copy, rejecting a wrong magic, a
-// failed checksum, or an unknown version. A short buffer fails as a checksum
-// error: it cannot carry a valid block.
-func parseSuperblock(b []byte) (*superblock, error) {
-	if len(b) < superblockSize {
-		return nil, errBadChecksum
-	}
-	if string(b[0:8]) != superblockMagic {
-		return nil, errBadMagic
-	}
-	if got := crc32.Checksum(b[:60], crc32C); got != binary.LittleEndian.Uint32(b[60:64]) {
-		return nil, errBadChecksum
-	}
-	if v := binary.LittleEndian.Uint16(b[8:10]); v != containerVersion {
-		return nil, errBadVersion
-	}
-	return &superblock{
-		blockSize:   binary.LittleEndian.Uint32(b[10:14]),
-		pageSize:    binary.LittleEndian.Uint32(b[14:18]),
-		pageCount:   binary.LittleEndian.Uint64(b[18:26]),
-		dirOffset:   binary.LittleEndian.Uint64(b[26:34]),
-		dirBlocks:   binary.LittleEndian.Uint32(b[34:38]),
-		generation:  binary.LittleEndian.Uint64(b[38:46]),
-		codec:       b[46],
-		enc:         b[47],
-		dirChecksum: binary.LittleEndian.Uint32(b[48:52]),
-	}, nil
-}
-
-// pickSuperblockSlot selects the authoritative superblock from the two on-disk
-// copies — the valid-checksum copy with the highest generation — and reports
-// which slot (0 or 1) it came from, so the caller knows the older slot to write
-// next. It errors only when NEITHER copy is valid (a corrupt or non-container
-// file).
-func pickSuperblockSlot(a, b []byte) (sb *superblock, slot int, err error) {
-	sa, ea := parseSuperblock(a)
-	sbB, eb := parseSuperblock(b)
-	switch {
-	case ea == nil && eb == nil:
-		if sa.generation >= sbB.generation {
-			return sa, 0, nil
+// readAt serves a logical, page-aligned read by decompressing the slots it
+// spans. A read at or past the logical end returns io.EOF with a short count,
+// so the dispatcher zero-fills and reports SQLITE_IOERR_SHORT_READ.
+func (c *container) readAt(p []byte, off int64) (int, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	logical := int64(c.pageSize * c.pageCount)
+	read := 0
+	for read < len(p) {
+		cur := off + int64(read)
+		if cur >= logical {
+			return read, io.EOF
 		}
-		return sbB, 1, nil
-	case ea == nil:
-		return sa, 0, nil
-	case eb == nil:
-		return sbB, 1, nil
-	default:
-		return nil, -1, errNoSuperblock
-	}
-}
-
-// pickSuperblock is pickSuperblockSlot without the slot — the authoritative
-// superblock, or an error if neither copy is valid.
-func pickSuperblock(a, b []byte) (*superblock, error) {
-	sb, _, err := pickSuperblockSlot(a, b)
-	return sb, err
-}
-
-// validate rejects a superblock whose fields could overflow allocation or
-// offset math, or that names a directory extent that does not fit the file. The
-// CRC only proves the bytes are self-consistent — an attacker who controls the
-// container recomputes it for any chosen values — so the open path must bound
-// the fields before using them, or a crafted file panics (slice overflow,
-// divide-by-zero) or exhausts memory inside a VFS callback. fileSize is the
-// physical backing length. All arithmetic is overflow-safe in uint64.
-func (s *superblock) validate(fileSize int64) error {
-	if !isPow2InRange(int(s.blockSize)) {
-		return fmt.Errorf("compress: invalid container block size %d (want power of two in [512, 65536])", s.blockSize)
-	}
-	if !isPow2InRange(int(s.pageSize)) {
-		return fmt.Errorf("compress: invalid container page size %d (want power of two in [512, 65536])", s.pageSize)
-	}
-	if s.blockSize > s.pageSize {
-		return fmt.Errorf("compress: container block size %d exceeds page size %d", s.blockSize, s.pageSize)
-	}
-	// Bound pageCount so neither the logical size (pageCount*pageSize) nor the
-	// directory length (pageCount*dirEntrySize) can overflow int64/uint64.
-	if s.pageCount > uint64(math.MaxInt64)/uint64(s.pageSize) {
-		return fmt.Errorf("compress: container page count %d too large for page size %d", s.pageCount, s.pageSize)
-	}
-	bs := uint64(s.blockSize)
-	fsz := uint64(fileSize)
-	dirBytes := uint64(s.dirBlocks) * bs // dirBlocks(u32) * blockSize(<=65536) cannot overflow
-	if s.dirOffset > fsz || dirBytes > fsz-s.dirOffset {
-		return fmt.Errorf("compress: directory extent [%d,+%d) out of bounds (file %d bytes)", s.dirOffset, dirBytes, fsz)
-	}
-	if s.pageCount*dirEntrySize > dirBytes {
-		return fmt.Errorf("compress: directory holds %d bytes, too small for %d pages", dirBytes, s.pageCount)
-	}
-	return nil
-}
-
-// validateDirectory rejects directory entries whose slot extents could overflow
-// or fall outside the file — the per-page counterpart to [superblock.validate],
-// so a crafted entry cannot drive a huge per-page allocation or an out-of-bounds
-// read. It assumes sb already passed validate (blockSize/pageSize sane).
-func validateDirectory(dir []dirEntry, sb *superblock, fileSize int64) error {
-	bs := uint64(sb.blockSize)
-	fsz := uint64(fileSize)
-	for i, e := range dir {
-		if e.physOffset == 0 {
-			continue // sparse: storedLen/blocks are ignored on read
-		}
-		if e.storedLen == 0 || uint64(e.storedLen) > uint64(sb.pageSize) {
-			return fmt.Errorf("compress: page %d slot length %d out of range (page size %d)", i, e.storedLen, sb.pageSize)
-		}
-		if uint64(e.blocks) != blocksFor(uint64(e.storedLen), bs) {
-			return fmt.Errorf("compress: page %d block count %d inconsistent with slot length %d", i, e.blocks, e.storedLen)
-		}
-		if e.physOffset%bs != 0 {
-			return fmt.Errorf("compress: page %d slot offset %d not block-aligned", i, e.physOffset)
-		}
-		span := uint64(e.blocks) * bs // blocks(u32) * blockSize(<=65536) cannot overflow
-		if end := e.physOffset + span; end < e.physOffset || end > fsz {
-			return fmt.Errorf("compress: page %d slot [%d,+%d) out of bounds (file %d bytes)", i, e.physOffset, span, fsz)
-		}
-	}
-	return nil
-}
-
-// dirEntry maps a logical page to its physical slot. A zero entry (physOffset
-// == 0) is a sparse page that was never written; reads of it zero-fill. The
-// data region starts past the superblocks, so offset 0 can never be a real
-// slot and is unambiguous as "sparse".
-type dirEntry struct {
-	physOffset uint64 // physical byte offset of the slot; 0 ⇒ sparse
-	storedLen  uint32 // stored (compressed) slot length in bytes; 0 ⇒ sparse
-	blocks     uint32 // blocks the slot occupies (storedLen rounded up to B)
-	flags      uint16 // bit0: slot stored verbatim (codec bypassed); rest reserved
-	checksum   uint32 // CRC32C of the stored slot bytes
-}
-
-const dirFlagVerbatim uint16 = 1 << 0 // slot bytes are the raw page (did not shrink)
-
-// marshalInto writes e into the first dirEntrySize bytes of b.
-func (e dirEntry) marshalInto(b []byte) {
-	binary.LittleEndian.PutUint64(b[0:8], e.physOffset)
-	binary.LittleEndian.PutUint32(b[8:12], e.storedLen)
-	binary.LittleEndian.PutUint32(b[12:16], e.blocks)
-	binary.LittleEndian.PutUint16(b[16:18], e.flags)
-	// b[18:20] reserved
-	binary.LittleEndian.PutUint32(b[20:24], e.checksum)
-}
-
-// parseDirEntry decodes one entry from the first dirEntrySize bytes of b.
-func parseDirEntry(b []byte) dirEntry {
-	return dirEntry{
-		physOffset: binary.LittleEndian.Uint64(b[0:8]),
-		storedLen:  binary.LittleEndian.Uint32(b[8:12]),
-		blocks:     binary.LittleEndian.Uint32(b[12:16]),
-		flags:      binary.LittleEndian.Uint16(b[16:18]),
-		checksum:   binary.LittleEndian.Uint32(b[20:24]),
-	}
-}
-
-// marshalDirectory encodes the whole directory as a dense array indexed by
-// logical page number.
-func marshalDirectory(entries []dirEntry) []byte {
-	b := make([]byte, len(entries)*dirEntrySize)
-	for i := range entries {
-		entries[i].marshalInto(b[i*dirEntrySize:])
-	}
-	return b
-}
-
-// parseDirectory decodes n entries from b (n is the superblock's pageCount).
-func parseDirectory(b []byte, n int) ([]dirEntry, error) {
-	if len(b) < n*dirEntrySize {
-		return nil, errShortBlock
-	}
-	entries := make([]dirEntry, n)
-	for i := range entries {
-		entries[i] = parseDirEntry(b[i*dirEntrySize:])
-	}
-	return entries, nil
-}
-
-// extent is a run of contiguous physical blocks [start, start+count) measured
-// in block indices, not bytes.
-type extent struct {
-	start uint64
-	count uint64
-}
-
-// blocksFor returns the number of physical blocks needed to hold n bytes.
-func blocksFor(n, blockSize uint64) uint64 {
-	if blockSize == 0 {
-		panic("compress: blocksFor with zero block size")
-	}
-	return (n + blockSize - 1) / blockSize
-}
-
-// allocator hands out block-aligned runs for slots, the directory and the
-// free-map itself. It serves from a sorted, coalesced free list first
-// (first-fit), then grows the backing region at the tail by bumping highWater.
-// The free list is reconstructed from the committed directory on open
-// (rebuildAllocator); highWater comes from the physical file size, so neither
-// is stored separately.
-//
-// alloc/release/coalesce are O(n) in the number of free extents. That stays
-// small because adjacent frees coalesce, so the list only grows under heavy
-// fragmentation (many scattered, non-adjacent freed slots). A size-indexed
-// structure would be worth it only if a fragmentation benchmark showed the list
-// growing unbounded — not the case for the single-writer, large-page workload.
-type allocator struct {
-	free      []extent // sorted by start, non-adjacent (coalesced)
-	highWater uint64   // first block past the allocated region
-}
-
-// newAllocator builds an allocator over a free list and a high-water mark. The
-// free list is copied and normalised (sorted + coalesced) so callers can pass
-// the raw parsed extents.
-func newAllocator(free []extent, highWater uint64) *allocator {
-	a := &allocator{free: append([]extent(nil), free...), highWater: highWater}
-	sort.Slice(a.free, func(i, j int) bool { return a.free[i].start < a.free[j].start })
-	a.coalesce()
-	return a
-}
-
-// alloc reserves a run of blocks, returning the starting block index. It never
-// fails: a free extent is carved first-fit, otherwise the region grows.
-func (a *allocator) alloc(blocks uint64) uint64 {
-	if blocks == 0 {
-		panic("compress: alloc of zero blocks")
-	}
-	for i := range a.free {
-		if a.free[i].count >= blocks {
-			start := a.free[i].start
-			if a.free[i].count == blocks {
-				a.free = append(a.free[:i], a.free[i+1:]...)
-			} else {
-				a.free[i].start += blocks
-				a.free[i].count -= blocks
+		pageNo := uint64(cur) / c.pageSize
+		intra := uint64(cur) % c.pageSize
+		// Fast path: an aligned, full-page read (the overwhelmingly common case)
+		// decodes straight into the caller's buffer — no per-page allocation, no
+		// copy. The logical size is always a whole number of pages, so a full
+		// page here never runs past EOF.
+		if intra == 0 && uint64(len(p)-read) >= c.pageSize {
+			if err := c.loadPageInto(p[read:read+int(c.pageSize)], pageNo); err != nil {
+				return read, err
 			}
-			return start
-		}
-	}
-	start := a.highWater
-	a.highWater += blocks
-	return start
-}
-
-// release returns a run to the free list and coalesces it with neighbours. The
-// commit protocol calls this only for extents superseded by a durable commit,
-// so freed space is never reused before the generation that vacated it is safe.
-func (a *allocator) release(start, count uint64) {
-	if count == 0 {
-		return
-	}
-	i := sort.Search(len(a.free), func(i int) bool { return a.free[i].start >= start })
-	a.free = append(a.free, extent{})
-	copy(a.free[i+1:], a.free[i:])
-	a.free[i] = extent{start: start, count: count}
-	a.coalesce()
-}
-
-// coalesce merges adjacent extents in the (already start-sorted) free list.
-func (a *allocator) coalesce() {
-	out := a.free[:0]
-	for _, e := range a.free {
-		if e.count == 0 {
+			read += int(c.pageSize)
 			continue
 		}
-		if n := len(out); n > 0 && out[n-1].start+out[n-1].count == e.start {
-			out[n-1].count += e.count
+		page, err := c.loadPage(pageNo)
+		if err != nil {
+			return read, err
+		}
+		read += copy(p[read:], page[intra:])
+	}
+	return read, nil
+}
+
+// writeAt stores a logical, page-aligned write. SQLite writes whole pages, but
+// a partial write (e.g. the 100-byte header alone) is handled by
+// read-modify-write so the rest of the page is preserved.
+func (c *container) writeAt(p []byte, off int64) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.readOnly {
+		return 0, errReadOnly
+	}
+	written := 0
+	for written < len(p) {
+		cur := off + int64(written)
+		pageNo := uint64(cur) / c.pageSize
+		intra := uint64(cur) % c.pageSize
+		n := min(int(c.pageSize-intra), len(p)-written)
+
+		var page []byte
+		if intra == 0 && n == int(c.pageSize) {
+			page = make([]byte, c.pageSize)
+			copy(page, p[written:written+n])
 		} else {
-			out = append(out, e)
+			var err error
+			if page, err = c.loadPage(pageNo); err != nil {
+				return written, err
+			}
+			copy(page[intra:], p[written:written+n])
+		}
+		if err := c.storePage(pageNo, page); err != nil {
+			return written, err
+		}
+		if pageNo+1 > c.pageCount {
+			c.pageCount = pageNo + 1
+		}
+		written += n
+	}
+	c.dirty = true
+	return written, nil
+}
+
+// truncate resizes the logical database. Slots above the new page count are
+// scheduled for release at the next commit; the physical file is not shrunk
+// here (reclaimed space is reused by the allocator, and fully reclaimed on the
+// next open's directory scan).
+func (c *container) truncate(size int64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.readOnly {
+		return errReadOnly
+	}
+	newCount := uint64(size) / c.pageSize
+	if uint64(size)%c.pageSize != 0 {
+		newCount++ // defensive: SQLite truncates on page boundaries
+	}
+	for i := newCount; i < uint64(len(c.dir)); i++ {
+		if e := c.dir[i]; e.physOffset != 0 {
+			c.releaseLater(e.physOffset, e.blocks)
 		}
 	}
-	a.free = out
-}
-
-// freeBlocksTotal reports the total number of blocks currently on the free list.
-func (a *allocator) freeBlocksTotal() uint64 {
-	var n uint64
-	for _, e := range a.free {
-		n += e.count
+	if newCount < uint64(len(c.dir)) {
+		c.dir = c.dir[:newCount]
 	}
-	return n
+	c.pageCount = newCount
+	c.dirty = true
+	return nil
 }
 
-// rebuildAllocator reconstructs the block allocator for a just-opened container
-// by scanning the committed directory: every block in [superblockBlocks,
-// highWater) that is neither the directory extent nor a referenced slot is
-// free. highWater is the physical file size in blocks (fileSize is the backing
-// file's current length).
+// sync is the commit point: it makes every write since the last Sync durable
+// and atomic. SQLite calls it once per transaction in rollback-journal mode,
+// after writing all dirty pages and before deleting the journal.
+func (c *container) sync() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.readOnly {
+		return nil
+	}
+	if !c.dirty {
+		return c.back.Sync()
+	}
+	return c.commit()
+}
+
+// loadPage returns a freshly allocated pageSize buffer holding a logical page.
+// Prefer loadPageInto on the hot path to decode straight into the destination.
+func (c *container) loadPage(pageNo uint64) ([]byte, error) {
+	buf := make([]byte, c.pageSize)
+	if err := c.loadPageInto(buf, pageNo); err != nil {
+		return nil, err
+	}
+	return buf, nil
+}
+
+// loadPageInto fills dst (which must be exactly pageSize) with a logical page,
+// zero-filling if the page is sparse (never written). It verifies the slot
+// checksum and bounds decompression to the page size. The caller holds c.mu
+// (R or W).
+func (c *container) loadPageInto(dst []byte, pageNo uint64) error {
+	if pageNo >= uint64(len(c.dir)) {
+		clear(dst)
+		return nil
+	}
+	e := c.dir[pageNo]
+	if e.physOffset == 0 {
+		clear(dst)
+		return nil
+	}
+	stored := make([]byte, e.storedLen)
+	if _, err := c.back.ReadAt(stored, int64(e.physOffset)); err != nil {
+		return fmt.Errorf("compress: read page %d slot: %w", pageNo, err)
+	}
+	if crc32.Checksum(stored, crc32C) != e.checksum {
+		return fmt.Errorf("compress: page %d slot checksum mismatch (corruption)", pageNo)
+	}
+	if e.flags&dirFlagVerbatim != 0 {
+		copy(dst, stored) // verbatim slot is exactly pageSize
+		return nil
+	}
+	if err := decodePage(dst, stored); err != nil {
+		return fmt.Errorf("compress: decode page %d: %w", pageNo, err)
+	}
+	return nil
+}
+
+// storePage compresses a full page, COW-allocates a fresh block run for it, and
+// updates the in-memory directory. The page's previous slot is scheduled for
+// release at the next durable commit — never overwritten in place. The caller
+// holds c.mu for writing.
+func (c *container) storePage(pageNo uint64, page []byte) error {
+	stored, verbatim, err := encodePage(page, c.codec)
+	if err != nil {
+		return err
+	}
+	nb := blocksFor(uint64(len(stored)), c.blockSize)
+	physOffset := c.alloc.alloc(nb) * c.blockSize
+	if err := c.writeBlocks(stored, physOffset, nb); err != nil {
+		return err
+	}
+
+	c.growDir(pageNo)
+	if old := c.dir[pageNo]; old.physOffset != 0 {
+		c.releaseLater(old.physOffset, old.blocks)
+	}
+	var flags uint16
+	if verbatim {
+		flags = dirFlagVerbatim
+	}
+	c.dir[pageNo] = dirEntry{
+		physOffset: physOffset,
+		storedLen:  uint32(len(stored)),
+		blocks:     uint32(nb),
+		flags:      flags,
+		checksum:   crc32.Checksum(stored, crc32C),
+	}
+	return nil
+}
+
+// growDir extends the directory so index pageNo exists, filling gaps with
+// sparse entries.
+func (c *container) growDir(pageNo uint64) {
+	for uint64(len(c.dir)) <= pageNo {
+		c.dir = append(c.dir, dirEntry{})
+	}
+}
+
+// releaseLater schedules a physical extent (a byte offset plus a block count)
+// for return to the allocator at the next durable commit. Centralizing the
+// byte→block conversion keeps the single off-by-blockSize that would corrupt
+// the free list in one place; the deferral is the crash-safety invariant —
+// superseded blocks are reusable only once the commit that vacated them is
+// durable (see commit).
+func (c *container) releaseLater(physOffset uint64, blocks uint32) {
+	c.pendingRelease = append(c.pendingRelease, extent{start: physOffset / c.blockSize, count: uint64(blocks)})
+}
+
+// writeBlocks writes data to a block run, zero-padding the final block so the
+// physical file length stays a whole number of blocks.
+func (c *container) writeBlocks(data []byte, physOffset, blocks uint64) error {
+	buf := make([]byte, blocks*c.blockSize)
+	copy(buf, data)
+	_, err := c.back.WriteAt(buf, int64(physOffset))
+	return err
+}
+
+// commit runs the crash-safe commit protocol synchronously (caller holds c.mu
+// for writing):
 //
-// Rebuilding from the durable directory — rather than persisting a free-map —
-// makes open self-healing: any block a crash orphaned (a superseded slot or
-// directory whose freeing never reached disk) is unreferenced by the committed
-// directory, so it is reclaimed automatically. It also keeps the free list out
-// of the crash-critical commit path entirely.
-func rebuildAllocator(dir []dirEntry, sb *superblock, fileSize int64) *allocator {
-	bs := uint64(sb.blockSize)
-	highWater := uint64(fileSize) / bs
+//  1. (data slots are already written by storePage)
+//  2. write the new directory to fresh blocks (COW — never over the live copy)
+//  3. fsync: slots + directory durable
+//  4. write the ALTERNATE superblock with generation+1, pointing at the new dir
+//  5. fsync: the superblock flip is durable — generation+1 is now authoritative
+//  6. release the superseded extents (prior directory + this txn's old slots),
+//     now safe to reuse since the generation that vacated them is durable
+//
+// A crash before step 5 completes leaves the older generation as the
+// highest-valid superblock, so reopen reconstructs the previous committed
+// state; SQLite's rollback journal then recovers the logical transaction.
+//
+// Tradeoffs (intentional, do not "optimize" away):
+//   - Two fsyncs are the required minimum for this COW + ping-pong protocol —
+//     slots+directory must be durable before the superblock flip is durable.
+//     Collapsing to one fsync would break atomicity.
+//   - The whole directory is re-marshalled and rewritten every commit (its size
+//     is O(pageCount)), even for a one-page change. This is fine up to a few
+//     hundred MB; for large databases with a high small-transaction rate it is
+//     the main scaling cost, and an incremental/segmented directory is a
+//     deliberate future format change.
+//   - commit holds c.mu (write lock) across both fsyncs, so a reader stalls for
+//     the commit window. Correct (no reader overlaps a writer), but the
+//     critical section should be shrunk before optimizing for heavy multi-reader
+//     concurrency.
+func (c *container) commit() error {
+	var dirOffset uint64
+	var dirBlocks uint32
+	var dirChecksum uint32
+	if len(c.dir) > 0 {
+		dirBytes := marshalDirectory(c.dir)
+		dirChecksum = crc32.Checksum(dirBytes, crc32C)
+		nb := blocksFor(uint64(len(dirBytes)), c.blockSize)
+		dirOffset = c.alloc.alloc(nb) * c.blockSize
+		dirBlocks = uint32(nb)
+		if err := c.writeBlocks(dirBytes, dirOffset, nb); err != nil {
+			return err
+		}
+	}
+	if err := c.back.Sync(); err != nil {
+		return err
+	}
 
-	type run struct{ start, count uint64 }
-	var used []run
-	add := func(physOffset uint64, blocks uint32) {
-		if blocks == 0 {
-			return
-		}
-		used = append(used, run{start: physOffset / bs, count: uint64(blocks)})
+	newGen := c.committedGen + 1
+	sb := &superblock{
+		blockSize:   uint32(c.blockSize),
+		pageSize:    uint32(c.pageSize),
+		pageCount:   c.pageCount,
+		dirOffset:   dirOffset,
+		dirBlocks:   dirBlocks,
+		generation:  newGen,
+		codec:       codecAZ,
+		dirChecksum: dirChecksum,
 	}
-	add(sb.dirOffset, sb.dirBlocks)
-	for _, e := range dir {
-		add(e.physOffset, e.blocks)
+	if _, err := c.back.WriteAt(sb.marshal(), c.nextSlot*int64(c.blockSize)); err != nil {
+		return err
 	}
-	sort.Slice(used, func(i, j int) bool { return used[i].start < used[j].start })
+	if err := c.back.Sync(); err != nil {
+		return err
+	}
 
-	var free []extent
-	cursor := uint64(superblockBlocks)
-	for _, u := range used {
-		if u.start > cursor {
-			free = append(free, extent{start: cursor, count: u.start - cursor})
-		}
-		if end := u.start + u.count; end > cursor {
-			cursor = end
-		}
+	if c.committedDirBlocks > 0 {
+		c.releaseLater(c.committedDirOffset, c.committedDirBlocks)
 	}
-	// A used run can extend past a non-block-aligned file length's floor; never
-	// let the high-water mark fall inside a live run.
-	if cursor > highWater {
-		highWater = cursor
+	for _, e := range c.pendingRelease {
+		c.alloc.release(e.start, e.count)
 	}
-	if highWater > cursor {
-		free = append(free, extent{start: cursor, count: highWater - cursor})
-	}
-	return newAllocator(free, highWater)
+	c.pendingRelease = c.pendingRelease[:0]
+	c.committedGen = newGen
+	c.committedDirOffset = dirOffset
+	c.committedDirBlocks = dirBlocks
+	c.nextSlot = 1 - c.nextSlot
+	c.dirty = false
+	return nil
 }
+
+// --- vfs.File: in-process advisory locking (mirrors the reference File) ---
+
+// Lock raises this connection's advisory lock toward level, arbitrating in
+// process against the other connections on the same container. Many holders may
+// share SHARED; only one may hold RESERVED..EXCLUSIVE; EXCLUSIVE additionally
+// requires that no other connection holds SHARED.
+func (f *mainFile) Lock(level vfs.LockLevel) error {
+	if level <= f.lock {
+		return nil
+	}
+	c := f.c
+	c.lmu.Lock()
+	defer c.lmu.Unlock()
+	switch level {
+	case vfs.LockShared:
+		if c.writer != nil && c.writer.lock >= vfs.LockPending {
+			return errLockBusy // a PENDING/EXCLUSIVE writer blocks new readers
+		}
+		c.nShared++
+		f.lock = vfs.LockShared
+	case vfs.LockReserved:
+		if c.writer != nil && c.writer != f {
+			return errLockBusy
+		}
+		c.writer = f
+		f.lock = vfs.LockReserved
+	case vfs.LockPending, vfs.LockExclusive:
+		if c.writer != nil && c.writer != f {
+			return errLockBusy
+		}
+		c.writer = f
+		self := 0
+		if f.lock >= vfs.LockShared {
+			self = 1
+		}
+		if c.nShared > self {
+			f.lock = vfs.LockPending // hold the intent so no new SHARED is granted
+			return errLockBusy
+		}
+		f.lock = level
+	}
+	return nil
+}
+
+// Unlock lowers this connection's advisory lock toward level.
+func (f *mainFile) Unlock(level vfs.LockLevel) error {
+	if level >= f.lock {
+		return nil
+	}
+	c := f.c
+	c.lmu.Lock()
+	defer c.lmu.Unlock()
+	if f.lock >= vfs.LockReserved && level < vfs.LockReserved && c.writer == f {
+		c.writer = nil
+	}
+	if f.lock >= vfs.LockShared && level < vfs.LockShared {
+		c.nShared--
+	}
+	f.lock = level
+	return nil
+}
+
+// CheckReservedLock reports whether some connection holds RESERVED or higher.
+func (f *mainFile) CheckReservedLock() (bool, error) {
+	c := f.c
+	c.lmu.Lock()
+	defer c.lmu.Unlock()
+	return c.writer != nil && c.writer.lock >= vfs.LockReserved, nil
+}
+
+// ShmGroup implements vfs.ShmFile to unlock WAL: it returns the container's
+// canonical path, so the dispatcher hands every connection on the same database
+// one shared WAL index. The shared-memory regions and WAL lock table are the
+// dispatcher's; this is all a File must declare. (An unshared container —
+// tests / anonymous — returns "", a private group it never actually uses, since
+// those handles are driven directly and never enter WAL.)
+func (f *mainFile) ShmGroup() string { return f.c.name }
+
+var _ vfs.ShmFile = (*mainFile)(nil)

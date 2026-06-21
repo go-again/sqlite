@@ -2,7 +2,7 @@ package compress
 
 // Increment-1 unit tests for the on-disk container format and the block
 // allocator. No SQLite, no codec: pure encode/decode and bookkeeping, where
-// the crash-critical correctness lives. See container.go.
+// the crash-critical correctness lives. See format.go.
 
 import (
 	"encoding/binary"

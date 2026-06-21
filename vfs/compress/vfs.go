@@ -1,14 +1,14 @@
 package compress
 
-// live.go is the live compressing VFS: a pure-Go, file-backed implementation of
+// vfs.go is the live compressing VFS: a pure-Go, file-backed implementation of
 // the public vfs.VFS interface whose main-database file is a compressed
-// container (mainfile.go) and whose journal/temp files pass straight through to
-// the OS. Unlike the snapshot OpenSnapshot (compress.go) — which inflates to a
+// container (container.go) and whose journal/temp files pass straight through to
+// the OS. Unlike the snapshot OpenSnapshot (snapshot.go) — which inflates to a
 // plaintext working copy and recompresses at Close — this queries the database
 // while it stays compressed on disk, durable per transaction.
 //
 // Multiple connections that open the same path share one container and
-// coordinate through the in-process advisory locks (mainfile.go). The default
+// coordinate through the in-process advisory locks (container.go). The default
 // journal is rollback; WAL is available via the ShmFile capability (mainFile
 // implements ShmGroup).
 
