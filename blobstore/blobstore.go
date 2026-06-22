@@ -108,52 +108,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			return fmt.Errorf("blobstore: migrate: %w", err)
 		}
 	}
-	// Tables created by an older schema lack codec/level/enc; add them. No-op
-	// for tables this version creates (the columns are already there). A level
-	// of 0 means "no per-object override — use the writing Store's level", so
-	// older objects keep their existing behavior.
-	if err := s.ensureColumn(ctx, s.objs, "codec", "INTEGER NOT NULL DEFAULT 0"); err != nil {
-		return fmt.Errorf("blobstore: migrate: %w", err)
-	}
-	if err := s.ensureColumn(ctx, s.objs, "level", "INTEGER NOT NULL DEFAULT 0"); err != nil {
-		return fmt.Errorf("blobstore: migrate: %w", err)
-	}
-	if err := s.ensureColumn(ctx, s.chunks, "enc", "INTEGER NOT NULL DEFAULT 0"); err != nil {
-		return fmt.Errorf("blobstore: migrate: %w", err)
-	}
 	return nil
-}
-
-// ensureColumn adds col (with declaration decl) to the quoted table if absent,
-// so a database created by an older schema gains the column. Idempotent.
-func (s *Store) ensureColumn(ctx context.Context, quotedTable, col, decl string) error {
-	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(`+quotedTable+`)`)
-	if err != nil {
-		return err
-	}
-	found := false
-	for rows.Next() {
-		var cid, notnull, pk int
-		var name, typ string
-		var dflt sql.NullString
-		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
-			rows.Close()
-			return err
-		}
-		if name == col {
-			found = true
-		}
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return err
-	}
-	rows.Close()
-	if found {
-		return nil
-	}
-	_, err = s.db.ExecContext(ctx, `ALTER TABLE `+quotedTable+` ADD COLUMN `+col+` `+decl)
-	return err
 }
 
 // Create inserts a new, empty object and returns its id. Its storage MODE (raw

@@ -220,9 +220,16 @@ func (s *Store) WriteAtFrom(ctx context.Context, id, off int64, r io.Reader) (in
 	if off < 0 {
 		return 0, errors.New("blobstore: WriteAtFrom: negative offset")
 	}
+	// Stage reads at the object's own chunk size (frozen at Create), not this
+	// handle's configured WithChunkSize, so the writes re-chunk cleanly even when
+	// the two differ.
+	var chunk int64
+	if err := s.db.QueryRowContext(ctx, `SELECT chunk FROM `+s.objs+` WHERE id = ?`, id).Scan(&chunk); err != nil {
+		return 0, fmt.Errorf("blobstore: WriteAtFrom %d: %w", id, err)
+	}
 	var total int64
 	err := s.Batch(ctx, id, func(w io.WriterAt) error {
-		buf := make([]byte, s.chunkSize) // staging buffer for reads
+		buf := make([]byte, chunk) // staging buffer for reads, object chunk-sized
 		pos := off
 		for {
 			n, rerr := r.Read(buf)

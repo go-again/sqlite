@@ -102,6 +102,11 @@ func decodeChunk(data []byte, enc, max int) ([]byte, error) {
 		if len(data) > max {
 			return nil, errors.New("blobstore: verbatim chunk exceeds chunk size (corrupt data)")
 		}
+		// Returns data as-is. Callers (writeChunkCompressed, zeroChunkTail) mutate
+		// the result in place, which is safe only because data came from a Scan
+		// into a plain []byte (database/sql clones the bytes). Do NOT switch those
+		// Scans to sql.RawBytes without copying here first — that would alias the
+		// driver's buffer and the in-place edits would corrupt it.
 		return data, nil
 	}
 	d := decoderPool.Get().(*az.Decoder)
