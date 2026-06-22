@@ -213,6 +213,10 @@ func xShmUnmapTrampoline(tls *libc.TLS, pFile uintptr, deleteFlag int32) int32 {
 // SQLITE_IOERR_SHORT_READ to mirror the default VFS contract — SQLite
 // uses the SHORT_READ signal to decide a database is fresh.
 func readEncrypted(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Tsqlite3_int64, fs *FS) int32 {
+	cipher := fs.cipherFor()
+	if cipher == nil {
+		return sqlite3.SQLITE_IOERR
+	}
 	pst := fs.perFileStateOf(pFile)
 	ps := int64(fs.pageSize)
 	pageStart := (int64(off) / ps) * ps
@@ -226,14 +230,14 @@ func readEncrypted(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Tsq
 	rc := cabi.CallXRead(tls, defaultMethodsFor(pFile).FxRead, pFile, scratchPtr, int32(span), sqlite3.Tsqlite3_int64(pageStart))
 
 	if rc == sqlite3.SQLITE_OK {
-		decryptSpan(fs, scratch, pageStart, ps, pst.fileKind)
+		decryptSpan(cipher, scratch, pageStart, ps, pst.fileKind)
 	} else if rc == sqlite3.SQLITE_IOERR_SHORT_READ {
 		// On a short read, the default zero-filled the tail. Decrypt
 		// whatever full pages we got; leave the trailing partial
 		// page as zeros so SQLite sees the SHORT_READ semantics it
 		// expects for a half-initialized file.
 		fullPages := len(scratch) / int(ps)
-		decryptSpan(fs, scratch[:fullPages*int(ps)], pageStart, ps, pst.fileKind)
+		decryptSpan(cipher, scratch[:fullPages*int(ps)], pageStart, ps, pst.fileKind)
 	} else {
 		return rc
 	}
@@ -258,6 +262,10 @@ func readEncrypted(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Tsq
 // the fast path is the common case; the RMW branch covers vacuum
 // quirks and any other mid-page DML the engine emits.
 func writeEncrypted(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Tsqlite3_int64, fs *FS) int32 {
+	cipher := fs.cipherFor()
+	if cipher == nil {
+		return sqlite3.SQLITE_IOERR
+	}
 	pst := fs.perFileStateOf(pFile)
 	ps := int64(fs.pageSize)
 	pageStart := (int64(off) / ps) * ps
@@ -283,32 +291,43 @@ func writeEncrypted(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Ts
 			return rc
 		}
 		if rc == sqlite3.SQLITE_OK {
-			decryptSpan(fs, scratch, pageStart, ps, pst.fileKind)
+			decryptSpan(cipher, scratch, pageStart, ps, pst.fileKind)
 		} else {
 			// SHORT_READ: only decrypt the full pages we got.
 			fullBytes := (len(scratch) / int(ps)) * int(ps)
-			decryptSpan(fs, scratch[:fullBytes], pageStart, ps, pst.fileKind)
+			decryptSpan(cipher, scratch[:fullBytes], pageStart, ps, pst.fileKind)
 		}
 		copy(scratch[int64(off)-pageStart:], srcSlice)
 	}
 
-	encryptSpan(fs, scratch, pageStart, ps, pst.fileKind)
+	encryptSpan(cipher, scratch, pageStart, ps, pst.fileKind)
 	scratchPtr := uintptr(unsafe.Pointer(&scratch[0]))
 	return cabi.CallXWrite(tls, defaultMethodsFor(pFile).FxWrite, pFile, scratchPtr, int32(span), sqlite3.Tsqlite3_int64(pageStart))
 }
 
-func encryptSpan(fs *FS, span []byte, baseOffset int64, pageSize int64, kind byte) {
+func encryptSpan(c PageCipher, span []byte, baseOffset int64, pageSize int64, kind byte) {
 	for i := int64(0); i < int64(len(span)); i += pageSize {
 		pageNum := uint64((baseOffset + i) / pageSize)
-		fs.cipher.Encrypt(span[i:i+pageSize], pageNum, kind)
+		c.Encrypt(span[i:i+pageSize], pageNum, kind)
 	}
 }
 
-func decryptSpan(fs *FS, span []byte, baseOffset int64, pageSize int64, kind byte) {
+func decryptSpan(c PageCipher, span []byte, baseOffset int64, pageSize int64, kind byte) {
 	for i := int64(0); i < int64(len(span)); i += pageSize {
 		pageNum := uint64((baseOffset + i) / pageSize)
-		fs.cipher.Decrypt(span[i:i+pageSize], pageNum, kind)
+		c.Decrypt(span[i:i+pageSize], pageNum, kind)
 	}
+}
+
+// cipherFor loads the resolved page cipher, or nil if it is not yet available
+// (a recipients database whose lazy resolve has not run or failed — by the open
+// ordering this should never be observed during real I/O, but a nil here returns
+// an error rather than dereferencing across a C frame).
+func (fs *FS) cipherFor() PageCipher {
+	if p := fs.cipher.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 // All consumer-side function-pointer casts go through cabi.CallX*; see

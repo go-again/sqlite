@@ -114,6 +114,15 @@ func xOpenTrampoline(tls *libc.TLS, pVfs, zName, pFile uintptr, flags int32, pOu
 	if fs == nil {
 		return sqlite3.SQLITE_INTERNAL
 	}
+	// Recipients mode resolves the cipher from the keyslot sidecar at the first
+	// main-database open (before opening the file, so a failure cleans up nothing).
+	// SQLite opens the main DB before any journal/WAL/temp, so the cipher is set
+	// before any encrypted I/O.
+	if fs.lazy && fileKindFor(flags) == FileKindMainDB {
+		if err := fs.resolveCipher(libc.GoString(zName)); err != nil {
+			return sqlite3.SQLITE_CANTOPEN
+		}
+	}
 	wrappedVfs := (*sqlite3.Tsqlite3_vfs)(unsafe.Pointer(fs.wrappedVfsPtr))
 	rc := cabi.CallXOpen(tls, wrappedVfs.FxOpen, fs.wrappedVfsPtr, zName, pFile, flags, pOutFlags)
 	if rc != sqlite3.SQLITE_OK {

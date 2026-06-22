@@ -129,7 +129,7 @@ Plain `database/sql` works too: `sql.Open("sqlite", "file:app.db")`. The full se
 | `gosqlite.org/fts` | typed FTS5 `Index[K, V]` + custom Go tokenizers |
 | `gosqlite.org/fusion` | RRF rank-fusion helpers (combine vec + fts results) |
 | `gosqlite.org/vfs` (+ `cksm`, `mvcc`, `memdb`) | `fs.FS`/`io.ReaderAt` adapters, the user-implementable VFS, checksums, in-memory |
-| `gosqlite.org/vfs/crypto` | Adiantum / AES-XTS-256 encryption-at-rest VFS + `crypto.Open` — **separate module** |
+| `gosqlite.org/vfs/crypto` | Adiantum / AES-XTS-256 encryption-at-rest VFS + `crypto.Open`, single-key or multi-recipient (detached keyslot sidecar) — **separate module** |
 | `gosqlite.org/crypto/keyring` | wrap a database's data key for multiple recipients (SSH keys / passphrases / age) so several parties open one encrypted database — **separate module** |
 | `gosqlite.org/pcache` | application-controlled bounded page cache |
 | `gosqlite.org/sqlitex` | ergonomic `database/sql` helpers + `embed.FS` migrations |

@@ -20,6 +20,8 @@ db, _ := sql.Open("sqlite", "file:secret.db?vfs="+name)
 
 Or in one call via `crypto.Open` (registers the VFS, routes the Config through it, and bundles teardown into `db.Close()`): `crypto.Open(sqlite.Config{Path: "secret.db"}, crypto.Options{Key: key})`. Confidentiality only — no SQLCipher format compatibility, no MAC. Cipher: `crypto.Options{Cipher: crypto.AESXTS}` (default Adiantum). `vfs/crypto` is its own module (`gosqlite.org/vfs/crypto`).
 
+For **multiple recipients** (no shared secret), pass `Options.Recipients` instead of `Options.Key` — a random data key wrapped per recipient (SSH/passphrase/age via `crypto/keyring`) into a detached `<path>.keyslot` sidecar that travels with the database; reopen with `Options.Identities`. `Options.Masters` + `SignWith` pin signing admins. Change the set on a closed database with `crypto.Rewrap(path, by, masters, members)` (re-seal, O(1); master-gated). No `Rekey` here — re-encryption revocation can't be crash-safe across the detached DB + sidecar (use `vfs/compress`, or read-only recipients there).
+
 ## Checksums (corruption detection)
 
 ```go

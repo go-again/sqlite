@@ -9,6 +9,7 @@ import (
 	"modernc.org/libc"
 	sqlite3 "modernc.org/sqlite/lib"
 
+	"gosqlite.org/crypto/keyring"
 	"gosqlite.org/internal/cabi"
 )
 
@@ -44,8 +45,29 @@ type Options struct {
 	// Key is the raw cipher key. Length depends on Cipher: 32 bytes
 	// for Adiantum, 64 bytes for AES-XTS-256. New() takes a
 	// defensive copy, so the caller is free to zero or reuse the
-	// slice as soon as New returns.
+	// slice as soon as New returns. Mutually exclusive with Recipients.
 	Key []byte
+
+	// Recipients, if set, encrypts the database to a random data key wrapped for
+	// each recipient (an SSH key, a passphrase, or an age recipient — build them
+	// with gosqlite.org/crypto/keyring) and stored in a detached "<path>.keyslot"
+	// sidecar, so several parties open the database with their own Identities and
+	// no shared secret. Mutually exclusive with Key; set at create time.
+	Recipients []keyring.Recipient
+
+	// Identities unwraps the data key from the keyslot sidecar when opening a
+	// recipients database. The first identity that matches opens it; none matching
+	// is reported when the database is first touched.
+	Identities []keyring.Identity
+
+	// Masters pins ed25519 administrators: the keyslot is signed and a reader that
+	// pins the masters it trusts rejects a keyslot not signed by one. Requires
+	// SignWith at create.
+	Masters []keyring.MasterRecipient
+
+	// SignWith is the master identity that signs the keyslot at create (it must be
+	// one of Masters).
+	SignWith keyring.MasterIdentity
 
 	// Cipher picks the mode. Defaults to Adiantum.
 	Cipher Cipher
@@ -73,15 +95,30 @@ type Options struct {
 // FS is a registered encryption VFS. Each [New] returns a distinct
 // FS; call Close to unregister and release resources.
 type FS struct {
-	name     string
-	cname    uintptr // libc-allocated C-string copy of name
-	cvfs     uintptr // libc-allocated Tsqlite3_vfs we registered
-	tls      *libc.TLS
-	cipher   PageCipher
+	name  string
+	cname uintptr // libc-allocated C-string copy of name
+	cvfs  uintptr // libc-allocated Tsqlite3_vfs we registered
+	tls   *libc.TLS
+	// cipher is an atomic pointer so the io trampolines — which may read it from a
+	// pooled connection's goroutine that never ran the lazy resolve — observe the
+	// stored value with an unconditional happens-before, and a not-yet-resolved
+	// (nil) cipher is caught rather than dereferenced across a C frame.
+	cipher   atomic.Pointer[PageCipher]
 	pageSize int32
 	recorder Recorder // optional; nil = no observability
 	token    uintptr  // registry handle, stored in pVfs->FpAppData
 	closed   atomic.Bool
+
+	// Keyslot sidecar (recipients mode): the data key — and so the cipher — is not
+	// known until the first main-database open, where it is generated into or read
+	// from "<path>.keyslot". cipherOnce guards that one-time resolve; its
+	// happens-before makes the lazily-set cipher safe for the io trampolines to
+	// read (every connection runs the resolve in its main-DB xOpen before any I/O).
+	keyCfg       keyConfig
+	lazy         bool
+	cipherOnce   sync.Once
+	cipherErr    error
+	resolvedPath string // the database path the lazy cipher was resolved for
 
 	// ourIoMethods lives in its own heap allocation rather than
 	// inline on FS. Go's checkptr (-race) is happier when the
@@ -131,9 +168,17 @@ func New(opts Options) (name string, fs *FS, err error) {
 	if !isValidPageSize(pageSize) {
 		return "", nil, fmt.Errorf("crypto: invalid PageSize %d (must be power of two in [512, 65536])", pageSize)
 	}
-	cipher, err := NewCipher(opts.Cipher, opts.Key)
+	kc, err := keyConfigFromOptions(opts)
 	if err != nil {
 		return "", nil, err
+	}
+	// A raw key builds the cipher now; recipients mode defers it to the first
+	// open, when the database (and so the keyslot sidecar) path is known.
+	var cipher PageCipher
+	if !kc.lazy() {
+		if cipher, err = NewCipher(kc.cipher, kc.rawKey); err != nil {
+			return "", nil, err
+		}
 	}
 
 	stateMu.Lock()
@@ -185,11 +230,15 @@ func New(opts Options) (name string, fs *FS, err error) {
 		cname:           cname,
 		cvfs:            cvfs,
 		tls:             tls,
-		cipher:          cipher,
+		keyCfg:          kc,
+		lazy:            kc.lazy(),
 		pageSize:        int32(pageSize),
 		recorder:        opts.Recorder,
 		wrappedVfsPtr:   defaultVfsPtr,
 		wrappedSzOsFile: defaultVfs.FszOsFile,
+	}
+	if cipher != nil { // raw key: published before registration; recipients mode stores it at the lazy resolve
+		fs.cipher.Store(&cipher)
 	}
 	if err := fs.initIoMethods(); err != nil {
 		// initIoMethods allocates an io-methods table via libc.Xmalloc;
