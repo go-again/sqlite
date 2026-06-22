@@ -37,6 +37,35 @@ func TestSuperblockRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSuperblockKeyslot covers the keyslot-offset field: it round-trips through
+// marshal/parse, and validate bounds it (block-aligned, inside the file).
+func TestSuperblockKeyslot(t *testing.T) {
+	const bs = defaultBlockSize
+	got, err := parseSuperblock((&superblock{
+		blockSize: bs, pageSize: 65536, generation: 1, codec: 1,
+		enc: encAdiantum, keyslotOffset: 5 * bs,
+	}).marshal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.enc != encAdiantum || got.keyslotOffset != 5*bs {
+		t.Fatalf("keyslot/enc round-trip = %+v", got)
+	}
+
+	fileSize := int64(8 * bs)
+	if err := got.validate(fileSize); err != nil {
+		t.Fatalf("validate in-bounds keyslot: %v", err)
+	}
+	got.keyslotOffset = 100 * bs // past EOF
+	if err := got.validate(fileSize); err == nil {
+		t.Error("validate out-of-bounds keyslot: want error")
+	}
+	got.keyslotOffset = 5*bs + 1 // not block-aligned
+	if err := got.validate(fileSize); err == nil {
+		t.Error("validate unaligned keyslot: want error")
+	}
+}
+
 func TestSuperblockChecksumRejection(t *testing.T) {
 	b := sampleSuperblock().marshal()
 	b[30] ^= 0xFF // flip a byte inside the checksummed region
@@ -57,7 +86,7 @@ func TestSuperblockBadVersion(t *testing.T) {
 	b := sampleSuperblock().marshal()
 	binary.LittleEndian.PutUint16(b[8:10], containerVersion+1)
 	// rewrite the CRC so the version check, not the checksum, is what fires
-	binary.LittleEndian.PutUint32(b[60:64], crc32Checksum(b[:60]))
+	binary.LittleEndian.PutUint32(b[sbCRCOff:], crc32Checksum(b[:sbCRCOff]))
 	if _, err := parseSuperblock(b); err != errBadVersion {
 		t.Fatalf("bad version: got %v, want errBadVersion", err)
 	}
@@ -126,18 +155,20 @@ func TestDirectoryRoundTrip(t *testing.T) {
 		{physOffset: 2 * defaultBlockSize, storedLen: 4001, blocks: 1, flags: 0, checksum: 0xDEADBEEF},
 		{physOffset: 3 * defaultBlockSize, storedLen: 70000, blocks: 18, flags: dirFlagVerbatim, checksum: 0x12345678},
 	}
-	got, err := parseDirectory(marshalDirectory(want), len(want))
-	if err != nil {
-		t.Fatalf("parseDirectory: %v", err)
-	}
-	if !reflect.DeepEqual(want, got) {
-		t.Fatalf("directory round-trip mismatch:\n want %+v\n got  %+v", want, got)
+	for _, auth := range []bool{false, true} {
+		got, err := parseDirectory(marshalDirectory(want, auth), len(want), auth)
+		if err != nil {
+			t.Fatalf("auth=%v parseDirectory: %v", auth, err)
+		}
+		if !reflect.DeepEqual(want, got) {
+			t.Fatalf("auth=%v directory round-trip mismatch:\n want %+v\n got  %+v", auth, want, got)
+		}
 	}
 }
 
 func TestDirectoryShortBuffer(t *testing.T) {
-	b := marshalDirectory(make([]dirEntry, 3))
-	if _, err := parseDirectory(b[:len(b)-1], 3); err != errShortBlock {
+	b := marshalDirectory(make([]dirEntry, 3), false)
+	if _, err := parseDirectory(b[:len(b)-1], 3, false); err != errShortBlock {
 		t.Fatalf("short directory: got %v, want errShortBlock", err)
 	}
 }
@@ -248,7 +279,7 @@ func TestRebuildAllocatorFromDirectory(t *testing.T) {
 	}
 	// File spans 8 blocks. Used: dir{2,1}, page1{3,1}, page0{5,2}. Block 4 (a
 	// gap) and block 7 (tail) are unreferenced → reclaimed as free.
-	a := rebuildAllocator(dir, sb, 8*bs)
+	a := rebuildAllocator(dir, sb, 8*bs, 0)
 	if !reflect.DeepEqual(a.free, []extent{{4, 1}, {7, 1}}) {
 		t.Fatalf("rebuilt free = %v, want [{4 1}{7 1}]", a.free)
 	}
@@ -259,7 +290,7 @@ func TestRebuildAllocatorFromDirectory(t *testing.T) {
 	// Self-healing: an orphaned block (referenced by no committed entry) is
 	// reclaimed automatically. Drop page 0 so blocks 5,6 are now orphaned.
 	dir[0] = dirEntry{}
-	a = rebuildAllocator(dir, sb, 8*bs)
+	a = rebuildAllocator(dir, sb, 8*bs, 0)
 	if got := a.freeBlocksTotal(); got != 4 { // blocks 4,5,6,7
 		t.Fatalf("after orphaning a slot, free total = %d, want 4", got)
 	}

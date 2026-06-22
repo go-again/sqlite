@@ -16,6 +16,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"gosqlite.org/crypto/keyring"
+	"gosqlite.org/vfs/crypto"
 )
 
 var errSimCrash = errors.New("simulated crash")
@@ -166,6 +169,100 @@ func TestCommitCrashAtEveryStep(t *testing.T) {
 			sawAfter = true
 		default:
 			t.Fatalf("crash at op %d: recovered state is neither the committed before nor after image (TORN)", k)
+		}
+	}
+	if !sawBefore {
+		t.Error("no crash point recovered the previous committed state")
+	}
+	if !sawAfter {
+		t.Error("the clean run did not reach the new committed state")
+	}
+}
+
+// TestAuthCommitCrash repeats the crash-at-every-step proof for an AUTHENTICATED
+// (writer-signed) container: a crash at any commit step must reopen — with the
+// writer signature verifying — to either the previous or the new committed
+// generation, never a torn mix. This exercises the signed superblock + the
+// extension CRC fallback on the crash-critical path.
+func TestAuthCommitCrash(t *testing.T) {
+	master, masterID, err := keyring.GenerateMaster()
+	if err != nil {
+		t.Fatal(err)
+	}
+	createKC := keyConfig{
+		cipher:   crypto.Adiantum,
+		masters:  []keyring.MasterRecipient{master},
+		signWith: masterID,
+		writers:  []keyring.WriterRecipient{master},
+		writeAs:  masterID,
+	}
+	// Reopen always verifies the writer signature against the master-signed keyslot.
+	openKC := keyConfig{
+		cipher:     crypto.Adiantum,
+		masters:    []keyring.MasterRecipient{master},
+		identities: []keyring.Identity{masterID},
+		writeAs:    masterID,
+	}
+	openWith := func(cb *crashBacking, kc keyConfig) (*mainFile, error) {
+		ct, oerr := newContainerOver(cb, false, defaultBlockSize, crashPageSize, CompressionDefault, kc)
+		if oerr != nil {
+			return nil, oerr
+		}
+		ct.refs = 1
+		return &mainFile{c: ct}, nil
+	}
+
+	base := newCrashBacking(nil)
+	f, err := openWith(base, createKC)
+	if err != nil {
+		t.Fatalf("create authenticated: %v", err)
+	}
+	_, _ = f.WriteAt(constPage(0x10, crashPageSize), 0*crashPageSize)
+	_, _ = f.WriteAt(constPage(0x11, crashPageSize), 1*crashPageSize)
+	_, _ = f.WriteAt(constPage(0x12, crashPageSize), 2*crashPageSize)
+	if err := f.Sync(0); err != nil {
+		t.Fatalf("commit before: %v", err)
+	}
+	beforeImg := append([]byte(nil), base.synced...)
+	beforeContent := readAllLogical(t, f)
+
+	clean := newCrashBacking(beforeImg)
+	fc, err := openWith(clean, openKC)
+	if err != nil {
+		t.Fatalf("clean reopen: %v", err)
+	}
+	applyTxn(fc)
+	afterContent := readAllLogical(t, fc)
+	totalOps := clean.ops
+	if bytes.Equal(beforeContent, afterContent) {
+		t.Fatal("before and after content are identical; the transaction did nothing")
+	}
+
+	sawBefore, sawAfter := false, false
+	for k := 1; k <= totalOps+1; k++ {
+		cb := newCrashBacking(beforeImg)
+		fk, err := openWith(cb, openKC)
+		if err != nil {
+			t.Fatalf("crash %d: reopen before-image failed: %v", k, err)
+		}
+		cb.failAt = k
+		applyTxn(fk)
+		_ = fk.Close()
+
+		rec := newCrashBacking(cb.synced)
+		fr, err := openWith(rec, openKC)
+		if err != nil {
+			t.Fatalf("crash at op %d: reopen failed (signature/recovery): %v", k, err)
+		}
+		got := readAllLogical(t, fr)
+		_ = fr.Close()
+		switch {
+		case bytes.Equal(got, beforeContent):
+			sawBefore = true
+		case bytes.Equal(got, afterContent):
+			sawAfter = true
+		default:
+			t.Fatalf("crash at op %d: recovered state is neither committed before nor after (TORN)", k)
 		}
 	}
 	if !sawBefore {

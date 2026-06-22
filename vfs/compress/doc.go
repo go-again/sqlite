@@ -86,10 +86,58 @@
 //	key, _ := crypto.DeriveKey(passphrase, salt, crypto.Adiantum)
 //	db, err := compress.Open(sqlite.Config{Path: "app.db.az"}, compress.Options{Key: key})
 //
-// Reopening without the key fails with [ErrEncrypted], and with the wrong key
-// with [ErrWrongKey]. The guarantee is confidentiality at rest only: like
-// vfs/crypto it adds no integrity tag, so the container checksums catch
-// accidental corruption but not deliberate tampering, and a passive attacker
+// To let several parties open one database, each with their own key and no shared
+// secret, set [Options.Recipients] instead of [Options.Key]: a random data key
+// encrypts the container and is wrapped once per recipient — an SSH key, a
+// passphrase, or an age recipient built with [gosqlite.org/crypto/keyring] — into
+// a keyslot any one of them can open. Reopen with [Options.Identities]; the first
+// identity that matches a keyslot unlocks the database. Key and Recipients are
+// mutually exclusive and set only at create time.
+//
+//	alice, _ := keyring.SSHRecipient(alicePubKey)
+//	bob, _ := keyring.SSHRecipient(bobPubKey)
+//	db, err := compress.Open(sqlite.Config{Path: "app.db.az"}, compress.Options{Recipients: []keyring.Recipient{alice, bob}})
+//
+// The recipient set changes on a closed database without re-encrypting via
+// [Rewrap] (rewrap the data key to a new set — O(1), access-list management) or,
+// for true cryptographic revocation, [Rekey] (re-encrypt under a fresh data key —
+// O(database size)).
+//
+// By default every recipient is an administrator (any of them can [Rewrap]). To
+// restrict that, pin one or more masters with [Options.Masters] (ed25519 keys, plus
+// [Options.SignWith] at create): the keyslot's membership is then signed, and only
+// a master can add or remove recipients and masters. A reader enforces this by
+// pinning the masters it trusts in [Options.Masters] at open — a membership not
+// signed by a trusted master is rejected with [ErrUnauthorized], and a non-master
+// that tries to administer gets [ErrNotMaster]. Removing a master means [Rekey] by
+// another master (a fresh data key, so the removed party — and any rolled-back old
+// keyslot — can read nothing).
+//
+//	master, masterID, _ := keyring.GenerateMaster()
+//	db, _ := compress.Open(cfg, compress.Options{Masters: []keyring.MasterRecipient{master}, SignWith: masterID, Recipients: []keyring.Recipient{alice}})
+//	// later, on the closed database, only a master may change membership:
+//	err := compress.Rewrap(path, masterID, nil, keyring.Membership{Masters: []keyring.MasterRecipient{master}, Members: []keyring.Recipient{alice, bob}})
+//
+// # Read-only recipients (authenticated mode)
+//
+// A symmetric data key means read implies write — anyone who can decrypt can
+// produce valid ciphertext. To make some recipients read-only, pin one or more
+// writers with [Options.Writers] (ed25519 keys; requires Masters): every commit
+// is then signed by a writer and the container carries a crypto hash per slot, so
+// a recipient that is not a writer can read and verify but cannot produce a write
+// others accept. A connection opened with a writer identity ([Options.WriteAs])
+// may write; without one it is read-only and the VFS refuses writes with
+// [ErrReadOnlyRecipient]. A reader pins [Options.Masters] (the trust anchor that
+// authorizes the writer list); a state not signed by an authorized writer, or a
+// tampered slot, is rejected with [ErrUnauthorized]. The writer set is changed by
+// a master via [Rewrap]/[Rekey] (which re-sign the state). This is the one mode
+// that adds integrity; remove a writer or master with [Rekey].
+//
+// Reopening without a key or matching identity fails with [ErrEncrypted], with
+// the wrong raw key with [ErrWrongKey], and with no matching identity with
+// [ErrNoIdentity]. Outside authenticated mode the guarantee is confidentiality at
+// rest only: like vfs/crypto it adds no integrity tag, so the container checksums
+// catch accidental corruption but not deliberate tampering, and a passive attacker
 // still learns the container geometry and per-page compressed sizes. The
 // snapshot [OpenSnapshot] does NOT encrypt — its working copy is plaintext on
 // disk — so use live [Open] with a Key for an encrypted database; for a shipped

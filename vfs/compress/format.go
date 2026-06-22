@@ -40,14 +40,39 @@ const (
 	// block 1 = superblock B. The data region begins at this block index.
 	superblockBlocks = 2
 
-	// superblockSize is the fixed encoded length of a superblock, padded out to
-	// occupy block 0/1 alone. The encoded fields are far smaller; the rest of
-	// the block is unused.
-	superblockSize = 64
+	// superblockSize is the fixed encoded length of a superblock: base fields, a
+	// 1-byte authenticated flag, the authenticated-mode fields (a directory hash +
+	// writer signature, left zero when not authenticated), and a trailing CRC over
+	// everything before it. One fixed layout with one CRC — a torn write anywhere
+	// fails that CRC, so the ping-pong falls back to the prior generation. It is
+	// padded out by the block write to occupy block 0/1 alone.
+	superblockSize = sbCRCOff + 4 // 164
 
-	// dirEntrySize is the fixed encoded length of one page-directory entry.
-	dirEntrySize = 24
+	dirHashLen   = 32 // crypto hash of the on-disk directory (authenticated mode)
+	writerSigLen = 64 // ed25519 signature over the signed prefix (authenticated mode)
+
+	// Superblock byte offsets. marshal and parse must agree byte-for-byte, so the
+	// interior offsets are named once here rather than spelled as literals.
+	sbAuthOff      = 60                            // 1-byte authenticated flag (0/1)
+	sbDirHashOff   = 64                            // dirHash[dirHashLen]
+	sbWriterSigOff = sbDirHashOff + dirHashLen     // 96: writerSig[writerSigLen]
+	sbSignedLen    = sbWriterSigOff                // 96: bytes a writer signs (base ‖ auth flag ‖ dirHash)
+	sbCRCOff       = sbWriterSigOff + writerSigLen // 160: CRC32C over [0:sbCRCOff]
+
+	// dirEntrySize is the encoded length of one page-directory entry;
+	// dirEntrySizeAuth adds a 16-byte per-slot crypto hash in authenticated mode.
+	dirEntrySize     = 24
+	slotHashLen      = 16
+	dirEntrySizeAuth = dirEntrySize + slotHashLen
 )
+
+// dirEntryBytes is the on-disk directory-entry size for the container's mode.
+func dirEntryBytes(authenticated bool) int {
+	if authenticated {
+		return dirEntrySizeAuth
+	}
+	return dirEntrySize
+}
 
 // crc32C is the Castagnoli table shared by the superblock, the directory and
 // every per-slot checksum.
@@ -70,22 +95,30 @@ var (
 // There is deliberately no on-disk free-map: the allocator is rebuilt by
 // scanning the committed directory on open (see [rebuildAllocator]), which
 // makes open self-healing and keeps the free list off the crash-critical
-// commit path. Bytes [52:60] are reserved (zero) for a future format extension
-// without a version bump.
+// commit path.
 type superblock struct {
-	blockSize   uint32 // physical block size B
-	pageSize    uint32 // logical SQLite page size
-	pageCount   uint64 // logical page count; logical size = pageSize*pageCount
-	dirOffset   uint64 // physical byte offset of the directory extent (0 ⇒ empty directory)
-	dirBlocks   uint32 // directory length in blocks (0 ⇒ no pages yet)
-	generation  uint64 // monotonic; newest valid superblock wins
-	codec       uint8  // 0 raw / 1 az
-	enc         uint8  // reserved for Phase 2 encryption
-	dirChecksum uint32 // CRC32C of the directory content bytes (0 ⇒ empty directory)
+	blockSize     uint32 // physical block size B
+	pageSize      uint32 // logical SQLite page size
+	pageCount     uint64 // logical page count; logical size = pageSize*pageCount
+	dirOffset     uint64 // physical byte offset of the directory extent (0 ⇒ empty directory)
+	dirBlocks     uint32 // directory length in blocks (0 ⇒ no pages yet)
+	generation    uint64 // monotonic; newest valid superblock wins
+	codec         uint8  // 0 raw / 1 az
+	enc           uint8  // page-cipher kind (0 = unencrypted); see crypt.go
+	dirChecksum   uint32 // CRC32C of the directory content bytes (0 ⇒ empty directory)
+	keyslotOffset uint64 // physical byte offset of the keyslot block (0 ⇒ none)
+
+	// Authenticated mode (authenticated ⇒ writer-signed container). dirHash is a
+	// crypto hash of the on-disk directory bytes; writerSig is an ed25519 signature
+	// over the signed prefix (base ‖ auth flag ‖ dirHash) by an authorized writer.
+	authenticated bool
+	dirHash       [dirHashLen]byte
+	writerSig     [writerSigLen]byte
 }
 
-// marshal encodes s into a fresh superblockSize-byte block, terminating it with
-// a CRC32C over every preceding byte.
+// marshal encodes s into a fresh superblockSize-byte block, terminating it with a
+// CRC32C over every preceding byte. The authenticated fields are zero when the
+// container is not authenticated; the single CRC covers them either way.
 func (s *superblock) marshal() []byte {
 	b := make([]byte, superblockSize)
 	copy(b[0:8], superblockMagic)
@@ -99,9 +132,23 @@ func (s *superblock) marshal() []byte {
 	b[46] = s.codec
 	b[47] = s.enc
 	binary.LittleEndian.PutUint32(b[48:52], s.dirChecksum)
-	// b[52:60] reserved (zero)
-	binary.LittleEndian.PutUint32(b[60:64], crc32.Checksum(b[:60], crc32C))
+	binary.LittleEndian.PutUint64(b[52:60], s.keyslotOffset)
+	if s.authenticated {
+		b[sbAuthOff] = 1
+		copy(b[sbDirHashOff:], s.dirHash[:])
+		copy(b[sbWriterSigOff:], s.writerSig[:])
+	}
+	binary.LittleEndian.PutUint32(b[sbCRCOff:], crc32.Checksum(b[:sbCRCOff], crc32C))
 	return b
+}
+
+// signedState is the byte string a writer signs (and a reader verifies): the
+// superblock prefix [0:sbSignedLen] — base fields, the authenticated flag, and the
+// directory hash — binding the committed state (generation, page count, directory
+// location + hash, cipher, keyslot) to the writer. It excludes the signature and
+// CRC. Independent of writerSig, so it is valid before the signature is set.
+func (s *superblock) signedState() []byte {
+	return s.marshal()[:sbSignedLen]
 }
 
 // parseSuperblock decodes one superblock copy, rejecting a wrong magic, a
@@ -114,23 +161,30 @@ func parseSuperblock(b []byte) (*superblock, error) {
 	if string(b[0:8]) != superblockMagic {
 		return nil, errBadMagic
 	}
-	if got := crc32.Checksum(b[:60], crc32C); got != binary.LittleEndian.Uint32(b[60:64]) {
+	if got := crc32.Checksum(b[:sbCRCOff], crc32C); got != binary.LittleEndian.Uint32(b[sbCRCOff:]) {
 		return nil, errBadChecksum
 	}
 	if v := binary.LittleEndian.Uint16(b[8:10]); v != containerVersion {
 		return nil, errBadVersion
 	}
-	return &superblock{
-		blockSize:   binary.LittleEndian.Uint32(b[10:14]),
-		pageSize:    binary.LittleEndian.Uint32(b[14:18]),
-		pageCount:   binary.LittleEndian.Uint64(b[18:26]),
-		dirOffset:   binary.LittleEndian.Uint64(b[26:34]),
-		dirBlocks:   binary.LittleEndian.Uint32(b[34:38]),
-		generation:  binary.LittleEndian.Uint64(b[38:46]),
-		codec:       b[46],
-		enc:         b[47],
-		dirChecksum: binary.LittleEndian.Uint32(b[48:52]),
-	}, nil
+	sb := &superblock{
+		blockSize:     binary.LittleEndian.Uint32(b[10:14]),
+		pageSize:      binary.LittleEndian.Uint32(b[14:18]),
+		pageCount:     binary.LittleEndian.Uint64(b[18:26]),
+		dirOffset:     binary.LittleEndian.Uint64(b[26:34]),
+		dirBlocks:     binary.LittleEndian.Uint32(b[34:38]),
+		generation:    binary.LittleEndian.Uint64(b[38:46]),
+		codec:         b[46],
+		enc:           b[47],
+		dirChecksum:   binary.LittleEndian.Uint32(b[48:52]),
+		keyslotOffset: binary.LittleEndian.Uint64(b[52:60]),
+		authenticated: b[sbAuthOff] != 0,
+	}
+	if sb.authenticated {
+		copy(sb.dirHash[:], b[sbDirHashOff:sbDirHashOff+dirHashLen])
+		copy(sb.writerSig[:], b[sbWriterSigOff:sbWriterSigOff+writerSigLen])
+	}
+	return sb, nil
 }
 
 // pickSuperblockSlot selects the authoritative superblock from the two on-disk
@@ -191,8 +245,22 @@ func (s *superblock) validate(fileSize int64) error {
 	if s.dirOffset > fsz || dirBytes > fsz-s.dirOffset {
 		return fmt.Errorf("compress: directory extent [%d,+%d) out of bounds (file %d bytes)", s.dirOffset, dirBytes, fsz)
 	}
-	if s.pageCount*dirEntrySize > dirBytes {
+	if s.pageCount*uint64(dirEntryBytes(s.authenticated)) > dirBytes {
 		return fmt.Errorf("compress: directory holds %d bytes, too small for %d pages", dirBytes, s.pageCount)
+	}
+	// The keyslot block (if present) must be a block-aligned extent inside the
+	// file; its self-described length is bounded when the block is read.
+	if s.keyslotOffset != 0 {
+		if s.keyslotOffset%bs != 0 || s.keyslotOffset >= fsz || bs > fsz-s.keyslotOffset {
+			return fmt.Errorf("compress: keyslot offset %d out of bounds (file %d bytes)", s.keyslotOffset, fsz)
+		}
+		// Defense in depth: the keyslot's first block must not overlap the
+		// directory extent. A legitimate keyslot is allocated disjoint from the
+		// directory; a crafted container that aliases them would otherwise have the
+		// keyslot read interpret directory bytes as a wrapped key.
+		if s.keyslotOffset < s.dirOffset+dirBytes && s.dirOffset < s.keyslotOffset+bs {
+			return fmt.Errorf("compress: keyslot offset %d overlaps the directory extent [%d,+%d)", s.keyslotOffset, s.dirOffset, dirBytes)
+		}
 	}
 	return nil
 }
@@ -234,50 +302,64 @@ type dirEntry struct {
 	storedLen  uint32 // stored (compressed) slot length in bytes; 0 ⇒ sparse
 	blocks     uint32 // blocks the slot occupies (storedLen rounded up to B)
 	flags      uint16 // bit0: slot stored verbatim (codec bypassed); rest reserved
-	checksum   uint32 // CRC32C of the stored slot bytes
+	checksum   uint32 // CRC32C of the on-disk slot bytes (corruption detection)
+	// hash is a crypto hash of the on-disk slot bytes, present in authenticated
+	// mode only. The directory is signed (via the superblock), so this binds each
+	// slot's content cryptographically — a CRC32 alone is collision-prone and a
+	// data-key holder could otherwise swap a slot for colliding bytes.
+	hash [slotHashLen]byte
 }
 
 const dirFlagVerbatim uint16 = 1 << 0 // slot bytes are the raw page (did not shrink)
 
-// marshalInto writes e into the first dirEntrySize bytes of b.
-func (e dirEntry) marshalInto(b []byte) {
+// marshalInto writes e into the first dirEntryBytes(auth) bytes of b.
+func (e dirEntry) marshalInto(b []byte, auth bool) {
 	binary.LittleEndian.PutUint64(b[0:8], e.physOffset)
 	binary.LittleEndian.PutUint32(b[8:12], e.storedLen)
 	binary.LittleEndian.PutUint32(b[12:16], e.blocks)
 	binary.LittleEndian.PutUint16(b[16:18], e.flags)
 	// b[18:20] reserved
 	binary.LittleEndian.PutUint32(b[20:24], e.checksum)
+	if auth {
+		copy(b[24:24+slotHashLen], e.hash[:])
+	}
 }
 
-// parseDirEntry decodes one entry from the first dirEntrySize bytes of b.
-func parseDirEntry(b []byte) dirEntry {
-	return dirEntry{
+// parseDirEntry decodes one entry from the first dirEntryBytes(auth) bytes of b.
+func parseDirEntry(b []byte, auth bool) dirEntry {
+	e := dirEntry{
 		physOffset: binary.LittleEndian.Uint64(b[0:8]),
 		storedLen:  binary.LittleEndian.Uint32(b[8:12]),
 		blocks:     binary.LittleEndian.Uint32(b[12:16]),
 		flags:      binary.LittleEndian.Uint16(b[16:18]),
 		checksum:   binary.LittleEndian.Uint32(b[20:24]),
 	}
+	if auth {
+		copy(e.hash[:], b[24:24+slotHashLen])
+	}
+	return e
 }
 
 // marshalDirectory encodes the whole directory as a dense array indexed by
 // logical page number.
-func marshalDirectory(entries []dirEntry) []byte {
-	b := make([]byte, len(entries)*dirEntrySize)
+func marshalDirectory(entries []dirEntry, auth bool) []byte {
+	sz := dirEntryBytes(auth)
+	b := make([]byte, len(entries)*sz)
 	for i := range entries {
-		entries[i].marshalInto(b[i*dirEntrySize:])
+		entries[i].marshalInto(b[i*sz:], auth)
 	}
 	return b
 }
 
 // parseDirectory decodes n entries from b (n is the superblock's pageCount).
-func parseDirectory(b []byte, n int) ([]dirEntry, error) {
-	if len(b) < n*dirEntrySize {
+func parseDirectory(b []byte, n int, auth bool) ([]dirEntry, error) {
+	sz := dirEntryBytes(auth)
+	if len(b) < n*sz {
 		return nil, errShortBlock
 	}
 	entries := make([]dirEntry, n)
 	for i := range entries {
-		entries[i] = parseDirEntry(b[i*dirEntrySize:])
+		entries[i] = parseDirEntry(b[i*sz:], auth)
 	}
 	return entries, nil
 }
@@ -397,7 +479,7 @@ func (a *allocator) freeBlocksTotal() uint64 {
 // directory whose freeing never reached disk) is unreferenced by the committed
 // directory, so it is reclaimed automatically. It also keeps the free list out
 // of the crash-critical commit path entirely.
-func rebuildAllocator(dir []dirEntry, sb *superblock, fileSize int64) *allocator {
+func rebuildAllocator(dir []dirEntry, sb *superblock, fileSize int64, keyslotBlocks uint32) *allocator {
 	bs := uint64(sb.blockSize)
 	highWater := uint64(fileSize) / bs
 
@@ -410,6 +492,7 @@ func rebuildAllocator(dir []dirEntry, sb *superblock, fileSize int64) *allocator
 		used = append(used, run{start: physOffset / bs, count: uint64(blocks)})
 	}
 	add(sb.dirOffset, sb.dirBlocks)
+	add(sb.keyslotOffset, keyslotBlocks) // referenced by the superblock, not the directory
 	for _, e := range dir {
 		add(e.physOffset, e.blocks)
 	}

@@ -8,6 +8,9 @@ require (
 )
 
 require (
+	filippo.io/age v1.3.1 // indirect
+	filippo.io/edwards25519 v1.1.0 // indirect
+	filippo.io/hpke v0.4.0 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
 	lukechampine.com/adiantum v1.1.1 // indirect
 )
@@ -19,6 +22,7 @@ require (
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	golang.org/x/sys v0.46.0 // indirect
+	gosqlite.org/crypto/keyring v0.0.0
 	gosqlite.org/vfs/crypto v0.10.0
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
@@ -31,3 +35,5 @@ require (
 replace gosqlite.org => ../..
 
 replace gosqlite.org/vfs/crypto => ../crypto
+
+replace gosqlite.org/crypto/keyring => ../../crypto/keyring

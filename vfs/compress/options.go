@@ -3,6 +3,7 @@ package compress
 import (
 	"fmt"
 
+	"gosqlite.org/crypto/keyring"
 	"gosqlite.org/vfs/crypto"
 )
 
@@ -71,9 +72,49 @@ type Options struct {
 	// unencrypted. Ignored by the snapshot [OpenSnapshot].
 	Key []byte
 
-	// Cipher selects the at-rest cipher when Key is set. The zero value is
-	// Adiantum (32-byte key); AES-XTS-256 needs a 64-byte key.
+	// Cipher selects the at-rest cipher when Key (or Recipients) is set. The zero
+	// value is Adiantum (32-byte key); AES-XTS-256 needs a 64-byte key.
 	Cipher crypto.Cipher
+
+	// Recipients, if set, encrypts the database at rest to a random data key that
+	// is wrapped for each recipient (an SSH key, a passphrase, etc.) — so several
+	// parties can each open it with their own [Identities] without a shared
+	// secret, the age model. Set at create only; mutually exclusive with Key.
+	// Build recipients with gosqlite.org/crypto/keyring. Ignored by [OpenSnapshot].
+	Recipients []keyring.Recipient
+
+	// Identities unwraps the data key when opening a database created with
+	// Recipients. The first identity that matches a keyslot opens it; none
+	// matching is reported as ErrNoIdentity.
+	Identities []keyring.Identity
+
+	// Masters pins administrator keys (ed25519, via gosqlite.org/crypto/keyring):
+	// only a master can add or remove recipients and masters (via [Rewrap] /
+	// [Rekey]). At create it is the initial admin set (with SignWith). At open it
+	// is the masters you TRUST to have authorized the membership — a keyslot not
+	// signed by one of them is rejected with ErrUnauthorized; supply none to skip
+	// that check and just read. Empty everywhere is the flat model, where any
+	// recipient can administer. Set at create only.
+	Masters []keyring.MasterRecipient
+
+	// SignWith is the master identity that signs the keyslot at create. Required
+	// when Masters is set, and must be one of them.
+	SignWith keyring.MasterIdentity
+
+	// Writers pins the writer keys (ed25519) allowed to modify the database in
+	// authenticated mode: every commit is signed by a writer and verified against
+	// this set, so a recipient that is NOT a writer is read-only. Setting Writers
+	// turns on authenticated mode and requires Masters (an admin authorizes the
+	// writer list); the writer list is administered thereafter by masters via
+	// [Rewrap]/[Rekey]. At open, Masters is the trust anchor — the authorized
+	// writers are taken from the master-signed keyslot — so a reader only pins
+	// Masters. Set at create only.
+	Writers []keyring.WriterRecipient
+
+	// WriteAs is the writer identity that signs commits on this connection; it
+	// must be one of Writers. Omit it to open an authenticated database read-only:
+	// the VFS refuses writes (ErrReadOnlyRecipient).
+	WriteAs keyring.WriterIdentity
 }
 
 // resolveLive validates and defaults the live-VFS geometry, returning the

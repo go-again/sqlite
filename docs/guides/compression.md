@@ -85,7 +85,51 @@ key, _ := crypto.DeriveKey(passphrase, salt, crypto.Adiantum)
 db, err := compress.Open(sqlite.Config{Path: "app.db.az"}, compress.Options{Key: key})
 ```
 
-Reopening without the key fails with `compress.ErrEncrypted`, and with the wrong key `compress.ErrWrongKey`. Like `vfs/crypto`, the guarantee is **confidentiality at rest only** — no integrity tag, so the container checksums catch accidental corruption but not deliberate tampering, and a passive attacker still learns the container's size, geometry, and per-page compressed sizes. `OpenSnapshot` does **not** encrypt (its working copy is plaintext on disk), so use live `Open` with a `Key` for an encrypted database; for a shipped artifact, pipe [`Pack`](https://pkg.go.dev/gosqlite.org/vfs/compress) output through any encryptor.
+### Multiple recipients
+
+To let several people open one encrypted database, each with their own key and no shared secret, pass `Options.Recipients` instead of `Options.Key`. A random data key encrypts the database and is wrapped once per recipient — an SSH key, a passphrase, or an age recipient built with [`crypto/keyring`](https://pkg.go.dev/gosqlite.org/crypto/keyring) — into a keyslot that any one of them can open. Reopen with `Options.Identities`; the first identity that matches a keyslot unlocks it, and none matching is `compress.ErrNoIdentity`. `Key` and `Recipients` are mutually exclusive and set only at create time.
+
+```go
+alice, _ := keyring.SSHRecipient(alicePubKey)
+bob, _ := keyring.SSHRecipient(bobPubKey)
+db, err := compress.Open(sqlite.Config{Path: "app.db.az"}, compress.Options{Recipients: []keyring.Recipient{alice, bob}})
+```
+
+Change who can open the database, on a closed file, with `compress.Rewrap(path, by, writeAs, membership)` (re-wrap the data key to a new membership — an access-list change) or `compress.Rekey(path, by, writeAs, membership)` (re-encrypt under a fresh data key — O(database), so a removed party is locked out cryptographically even if they kept the old key). `membership` is a `keyring.Membership{Masters, Writers, Members}`; `writeAs` is only needed for authenticated databases (see below).
+
+### Masters (only admins change membership)
+
+By default every recipient can `Rewrap`. To allow only designated administrators to add or remove recipients, pin one or more **masters** — ed25519 keys — with `Options.Masters` (and `Options.SignWith`, the creating master, at create). The keyslot's membership is then signed, and `Rewrap`/`Rekey` require one of the current masters (`compress.ErrNotMaster` otherwise). Readers enforce it by **pinning the masters they trust** in `Options.Masters` at open: a membership not signed by a trusted master is rejected with `compress.ErrUnauthorized` (this is the trust anchor — exactly like SSH `known_hosts`; without pinning you still read, but you get no membership-integrity guarantee). Removing a master means `Rekey` by another master, which rotates the data key so the removed master can read nothing.
+
+```go
+master, masterID, _ := keyring.GenerateMaster()        // or keyring.SSHMaster{Recipient,Identity}
+db, _ := compress.Open(cfg, compress.Options{
+    Masters:    []keyring.MasterRecipient{master},
+    SignWith:   masterID,
+    Recipients: []keyring.Recipient{alice},             // members
+})
+// ... later, on the closed database, only a master may change membership:
+err := compress.Rewrap(path, masterID, nil, keyring.Membership{Masters: []keyring.MasterRecipient{master}, Members: []keyring.Recipient{alice, bob}})
+```
+
+### Read-only recipients (authenticated mode)
+
+A symmetric data key means *read implies write* — anyone who can decrypt can also produce valid ciphertext. To make some recipients **read-only**, pin one or more **writers** (ed25519 keys) with `Options.Writers` (requires `Masters`). Every commit is then signed by a writer and the container carries a crypto hash per slot, so a recipient that is not a writer can read and verify but cannot produce a write others accept. A connection with a writer identity (`Options.WriteAs`) may write; without one it is **read-only** and the VFS refuses writes with `compress.ErrReadOnlyRecipient`. Readers pin `Options.Masters` (the trust anchor that authorizes the writer list); a state not signed by an authorized writer — or a tampered slot — is rejected with `compress.ErrUnauthorized`. The writer set is administered by a master via `Rewrap`/`Rekey` (which re-sign the state). This is the one mode that adds **integrity**; remove a writer or master with `Rekey`.
+
+```go
+master, masterID, _ := keyring.GenerateMaster()
+db, _ := compress.Open(cfg, compress.Options{
+    Masters:    []keyring.MasterRecipient{master},
+    SignWith:   masterID,
+    Writers:    []keyring.WriterRecipient{master}, // master is also the writer here
+    WriteAs:    masterID,
+    Recipients: []keyring.Recipient{alice},        // alice is read-only
+})
+// alice opens read-only (pinning the master) and her writes are refused:
+ro, _ := compress.Open(cfg, compress.Options{Identities: []keyring.Identity{aliceID}, Masters: []keyring.MasterRecipient{master}})
+```
+
+Reopening without the key fails with `compress.ErrEncrypted`, and with the wrong key `compress.ErrWrongKey`. Outside authenticated mode the guarantee is **confidentiality at rest only** — no integrity tag, so the container checksums catch accidental corruption but not deliberate tampering, and a passive attacker still learns the container's size, geometry, and per-page compressed sizes. `OpenSnapshot` does **not** encrypt (its working copy is plaintext on disk), so use live `Open` with a `Key` for an encrypted database; for a shipped artifact, pipe [`Pack`](https://pkg.go.dev/gosqlite.org/vfs/compress) output through any encryptor.
 
 ## Module and reference
 

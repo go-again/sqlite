@@ -5,17 +5,19 @@
 
 set dotenv-load := true
 
-# The repo's sub-modules — each has its own go.mod (a separate dependency graph)
-# joined to the root via a `replace gosqlite.org` directive. DISCOVERED, never
-# hand-listed, so adding or removing a module needs no edit to the recipes below.
-#   submods  — every joined sub-module (gorm, blobstore, vfs/crypto, xorm-compat):
-#              built + tested in its own module context.
+# The repo's sub-modules — each has its own go.mod (a separate dependency graph).
+# Most join the root via a `replace gosqlite.org` directive; a few (e.g.
+# crypto/keyring) are independent but still published under gosqlite.org/.
+# DISCOVERED, never hand-listed, so adding or removing a module needs no edit to
+# the recipes below.
+#   submods  — every sub-module (joined via replace, OR published as
+#              gosqlite.org/<sub>): built + tested + linted in its own context.
 #   pubmods  — only the PUBLISHED ones (module path `gosqlite.org/<sub>`): these
 #              also get cross-built and lockstep-pinned. The xorm-compat harness
 #              (module `xormcompat`) is tested but never shipped, so it's not here.
 # Both exclude the root, the hidden reference clones (.xorm, .liteorm, …), and the
 # examples/* modules (run via `just example`).
-submods := `for f in $(find . -mindepth 2 -name go.mod -not -path './.*/*' -not -path './examples/*'); do grep -q 'replace gosqlite.org ' "$f" && dirname "$f"; done | sed 's|^[.]/||' | sort | tr '\n' ' '`
+submods := `for f in $(find . -mindepth 2 -name go.mod -not -path './.*/*' -not -path './examples/*'); do { grep -q 'replace gosqlite.org ' "$f" || grep -q '^module gosqlite[.]org/' "$f"; } && dirname "$f"; done | sed 's|^[.]/||' | sort | tr '\n' ' '`
 pubmods := `for f in $(find . -mindepth 2 -name go.mod -not -path './.*/*' -not -path './examples/*'); do grep -q '^module gosqlite[.]org/' "$f" && dirname "$f"; done | sed 's|^[.]/||' | sort | tr '\n' ' '`
 
 # Default recipe: a fast pre-commit gate.
@@ -66,6 +68,10 @@ bench-vec:
 # FTS5 hot-path benchmarks (Search, Search+ranking, Insert batch).
 bench-fts:
     go test -run=^$ -bench='^Benchmark' -benchmem -count=5 ./fts/
+
+# Compression × encryption matrix (plain / compress / encrypt / both × cipher × read/write).
+bench-encryption:
+    go test -run=^$ -bench=BenchmarkEncryptionMatrix -benchmem -count=3 ./vfs/compress/
 
 # Lint the root module + every sub-module with fmt-check + vet + staticcheck +
 # golangci-lint + modernize (matches CI). fmt-check runs first because it's the

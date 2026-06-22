@@ -130,10 +130,11 @@ Plain `database/sql` works too: `sql.Open("sqlite", "file:app.db")`. The full se
 | `gosqlite.org/fusion` | RRF rank-fusion helpers (combine vec + fts results) |
 | `gosqlite.org/vfs` (+ `cksm`, `mvcc`, `memdb`) | `fs.FS`/`io.ReaderAt` adapters, the user-implementable VFS, checksums, in-memory |
 | `gosqlite.org/vfs/crypto` | Adiantum / AES-XTS-256 encryption-at-rest VFS + `crypto.Open` — **separate module** |
+| `gosqlite.org/crypto/keyring` | wrap a database's data key for multiple recipients (SSH keys / passphrases / age) so several parties open one encrypted database — **separate module** |
 | `gosqlite.org/pcache` | application-controlled bounded page cache |
 | `gosqlite.org/sqlitex` | ergonomic `database/sql` helpers + `embed.FS` migrations |
 | `gosqlite.org/blobstore` | large, growable byte objects as `io.ReaderAt`/`io.WriterAt` (files, uploads), optional transparent compression — **separate module** |
-| `gosqlite.org/vfs/compress` | a SQLite database compressed at rest — live & queried in place, durable per transaction (`compress.Open`), or a snapshot working copy (`compress.OpenSnapshot`); plus `Pack` / `Unpack` — **separate module** |
+| `gosqlite.org/vfs/compress` | a SQLite database compressed — and optionally encrypted, single-key or multi-recipient — at rest — live & queried in place, durable per transaction (`compress.Open`), or a snapshot working copy (`compress.OpenSnapshot`); plus `Pack` / `Unpack` — **separate module** |
 | `gosqlite.org/ext/<name>` (+ `/auto`) | opt-in loadable Go extensions — see the [catalog](docs/extensions/index.md) |
 
 ## Migrating

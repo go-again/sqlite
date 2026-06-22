@@ -14,6 +14,7 @@ package compress
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"hash/crc32"
@@ -26,6 +27,7 @@ import (
 	"time"
 
 	sqlite "gosqlite.org"
+	"gosqlite.org/crypto/keyring"
 	"gosqlite.org/internal/cabi"
 	"gosqlite.org/vfs"
 	"gosqlite.org/vfs/crypto"
@@ -39,8 +41,8 @@ type VFS struct {
 	blockSize uint64
 	pageSize  uint64
 	codec     Compression
-	cipher    crypto.PageCipher // nil = unencrypted
-	enc       uint8             // superblock enc marker for new containers
+	keyCfg    keyConfig         // encryption inputs from Options (raw key / recipients / identities)
+	cipher    crypto.PageCipher // resolved at the main-DB open; nil = unencrypted. For the aux pass-through files.
 }
 
 // Name is the registered VFS name, for use as sqlite.Config.VFS.
@@ -62,10 +64,14 @@ func (v *VFS) Close() error {
 // nothing and would only complicate recovery.
 func (v *VFS) Open(name string, flags vfs.OpenFlags) (vfs.File, vfs.OpenFlags, error) {
 	if flags.Has(vfs.OpenMainDB) {
-		f, err := openMain(name, flags, v.blockSize, v.pageSize, v.codec, v.cipher, v.enc)
+		f, err := openMain(name, flags, v.blockSize, v.pageSize, v.codec, v.keyCfg)
 		if err != nil {
 			return nil, 0, err
 		}
+		// Cache the resolved data-key cipher so the journal/WAL pass-through files
+		// (opened after the main DB) encrypt with it. SQLite always opens the main
+		// DB first, so this is set in time.
+		v.cipher = f.c.cipher
 		return f, flags, nil
 	}
 	f, err := openPass(name, flags, v.cipher, int64(v.pageSize))
@@ -75,14 +81,25 @@ func (v *VFS) Open(name string, flags vfs.OpenFlags) (vfs.File, vfs.OpenFlags, e
 	return f, flags, nil
 }
 
-// passDomain maps an auxiliary file's open flags to its cipher domain byte, so a
-// ciphertext page can't be replayed across the journal / WAL / temp files.
+// passDomain maps an auxiliary file's open flags to its cipher domain byte. The
+// aux files share the container's cipher and data key, so each file kind needs a
+// distinct domain — otherwise two concurrent temp files (e.g. a temp DB and a
+// sub-journal) would encrypt the same offset to identical ciphertext, the
+// cross-unit replay the (tweak, domain) split exists to prevent. The values are
+// compress's own (disjoint from the persistent domainPageData/domainDirectory),
+// not crypto.FileKind*, which would collide with those.
 func passDomain(flags vfs.OpenFlags) byte {
 	switch {
 	case flags.Has(vfs.OpenMainJournal):
 		return domainJournal
 	case flags.Has(vfs.OpenWAL):
 		return domainWAL
+	case flags.Has(vfs.OpenTempDB):
+		return domainTempDB
+	case flags.Has(vfs.OpenTempJournal):
+		return domainTempJournal
+	case flags.Has(vfs.OpenSubJournal):
+		return domainSubJournal
 	default:
 		return domainTempAux
 	}
@@ -132,11 +149,17 @@ var containers = struct {
 //     directory loaded, and the allocator rebuilt by scanning it.
 //   - existing non-container (e.g. a raw .db someone pointed us at): rejected,
 //     so the file is never clobbered.
-func openMain(path string, flags vfs.OpenFlags, blockSize, pageSize uint64, codec Compression, cipher crypto.PageCipher, enc uint8) (*mainFile, error) {
+func openMain(path string, flags vfs.OpenFlags, blockSize, pageSize uint64, codec Compression, kc keyConfig) (*mainFile, error) {
 	containers.mu.Lock()
 	defer containers.mu.Unlock()
 
 	if ct := containers.m[path]; ct != nil {
+		// A second opener shares the live container, so it must hold the same key
+		// — otherwise a wrong/absent key would silently inherit the first opener's
+		// cipher (or a key would attach to a plaintext database).
+		if err := ct.matchesKeyConfig(kc); err != nil {
+			return nil, err
+		}
 		ct.refs++
 		return &mainFile{c: ct}, nil
 	}
@@ -153,7 +176,7 @@ func openMain(path string, flags vfs.OpenFlags, blockSize, pageSize uint64, code
 	if err != nil {
 		return nil, err // dispatcher maps a not-exist error to SQLITE_CANTOPEN
 	}
-	ct, err := newContainerOver(fileBacking{file}, readOnly, blockSize, pageSize, codec, cipher, enc)
+	ct, err := newContainerOver(fileBacking{file}, readOnly, blockSize, pageSize, codec, kc)
 	if err != nil {
 		return nil, fmt.Errorf("compress: open %q: %w", path, err)
 	}
@@ -188,7 +211,7 @@ func (c *container) release() error {
 // backing — the seam tests use to drive the storage engine over an in-memory,
 // fault-injecting store.
 func openMainOver(back backing, readOnly bool, blockSize, pageSize uint64, codec Compression) (*mainFile, error) {
-	ct, err := newContainerOver(back, readOnly, blockSize, pageSize, codec, nil, encNone)
+	ct, err := newContainerOver(back, readOnly, blockSize, pageSize, codec, keyConfig{})
 	if err != nil {
 		return nil, err
 	}
@@ -198,19 +221,30 @@ func openMainOver(back backing, readOnly bool, blockSize, pageSize uint64, codec
 
 // newContainerOver loads or initialises a container over an already-open
 // backing. It closes back on any error.
-func newContainerOver(back backing, readOnly bool, cfgBlockSize, cfgPageSize uint64, codec Compression, cipher crypto.PageCipher, enc uint8) (*container, error) {
+func newContainerOver(back backing, readOnly bool, cfgBlockSize, cfgPageSize uint64, codec Compression, kc keyConfig) (*container, error) {
 	size, err := back.Size()
 	if err != nil {
 		_ = back.Close()
 		return nil, err
 	}
 
-	c := &container{back: back, blockSize: cfgBlockSize, pageSize: cfgPageSize, codec: codec, readOnly: readOnly, cipher: cipher, enc: enc}
+	c := &container{back: back, blockSize: cfgBlockSize, pageSize: cfgPageSize, codec: codec, readOnly: readOnly}
 
 	if size == 0 {
 		c.alloc = newAllocator(nil, superblockBlocks)
 		if readOnly {
+			if kc.encrypting() {
+				// A key was supplied for an empty, read-only file: there is nothing to
+				// decrypt and we cannot initialise it. Fail loudly rather than hand back
+				// a silent plaintext container that ignored the key.
+				_ = back.Close()
+				return nil, errors.New("compress: cannot open an empty database read-only with a key or identity")
+			}
 			return c, nil // empty read-only database: behaves as empty, never written
+		}
+		if err := c.initCipherForCreate(kc); err != nil { // resolve/generate the data key, write any keyslot
+			_ = back.Close()
+			return nil, fmt.Errorf("compress: init encryption: %w", err)
 		}
 		if err := c.commit(); err != nil { // persist an empty committed container
 			_ = back.Close()
@@ -243,11 +277,6 @@ func newContainerOver(back backing, readOnly bool, cfgBlockSize, cfgPageSize uin
 		_ = back.Close()
 		return nil, err
 	}
-	if err := c.checkEnc(sb.enc); err != nil {
-		_ = back.Close()
-		return nil, err
-	}
-
 	c.blockSize = uint64(sb.blockSize)
 	c.pageSize = uint64(sb.pageSize)
 	c.pageCount = sb.pageCount
@@ -255,6 +284,37 @@ func newContainerOver(back backing, readOnly bool, cfgBlockSize, cfgPageSize uin
 	c.committedDirOffset = sb.dirOffset
 	c.committedDirBlocks = sb.dirBlocks
 	c.nextSlot = int64(1 - slot)
+
+	// Resolve the cipher (a raw key, or unwrap a keyslot) now that the block size
+	// is known; reserve the keyslot block in the allocator below.
+	keyslotBlocks, err := c.resolveCipherForOpen(kc, sb, size)
+	if err != nil {
+		_ = back.Close()
+		return nil, err
+	}
+	// A keyslot that authorizes writers REQUIRES authenticated mode. The on-disk
+	// authenticated flag is otherwise unauthenticated, so a data-key holder (e.g. a
+	// read-only recipient) could clear it — stripping the per-slot hashes and the
+	// commit signature — while keeping the genuine master-signed keyslot, and a
+	// reader pinning the right masters would accept the forged plaintext-integrity
+	// state. c.writers comes from that master-verified keyslot, so binding it to the
+	// flag closes the downgrade (a non-master cannot change the keyslot's writers).
+	if len(c.writers) > 0 && !c.authenticated {
+		_ = back.Close()
+		return nil, ErrUnauthorized
+	}
+	if c.authenticated {
+		// The committed state must be signed by an authorized writer (those the
+		// master-signed keyslot pins); the directory bytes are checked against the
+		// signed hash below. Without a writer identity this handle is read-only.
+		if !keyring.VerifyState(c.writers, sb.signedState(), sb.writerSig[:]) {
+			_ = back.Close()
+			return nil, ErrUnauthorized
+		}
+		if c.writeAs == nil {
+			c.readOnlyRecipient = true
+		}
+	}
 
 	if sb.dirBlocks > 0 {
 		dirBuf := make([]byte, uint64(sb.dirBlocks)*c.blockSize)
@@ -264,31 +324,36 @@ func newContainerOver(back backing, readOnly bool, cfgBlockSize, cfgPageSize uin
 		}
 		var content []byte
 		if c.cipher != nil {
+			// In authenticated mode the on-disk directory must match the writer-signed
+			// hash (checked over the ciphertext, before decryption mutates dirBuf).
+			if c.authenticated && sha256.Sum256(dirBuf) != sb.dirHash {
+				_ = back.Close()
+				return nil, ErrUnauthorized
+			}
 			// Checksum the on-disk ciphertext, decrypt, then verify the canary
 			// (wrong key) before reading the entries past it.
-			if crc32.Checksum(dirBuf, crc32C) != sb.dirChecksum {
+			if !c.readVerifyDecrypt(dirBuf, sb.dirChecksum, dirTweak, domainDirectory) {
 				_ = back.Close()
 				return nil, errors.New("directory checksum mismatch (corruption)")
 			}
-			c.cipher.Decrypt(dirBuf, dirTweak, domainDirectory)
 			if !bytes.Equal(dirBuf[:dirCanaryLen], dirCanary[:]) {
 				_ = back.Close()
 				return nil, ErrWrongKey
 			}
-			need := dirCanaryLen + int(sb.pageCount)*dirEntrySize
+			need := dirCanaryLen + int(sb.pageCount)*dirEntryBytes(sb.authenticated)
 			if need > len(dirBuf) {
 				_ = back.Close()
 				return nil, errors.New("compress: directory too small for its page count (corruption)")
 			}
 			content = dirBuf[dirCanaryLen:need]
 		} else {
-			content = dirBuf[:int(sb.pageCount)*dirEntrySize]
+			content = dirBuf[:int(sb.pageCount)*dirEntryBytes(sb.authenticated)]
 			if crc32.Checksum(content, crc32C) != sb.dirChecksum {
 				_ = back.Close()
 				return nil, errors.New("directory checksum mismatch (corruption)")
 			}
 		}
-		dir, err := parseDirectory(content, int(sb.pageCount))
+		dir, err := parseDirectory(content, int(sb.pageCount), sb.authenticated)
 		if err != nil {
 			_ = back.Close()
 			return nil, fmt.Errorf("parse directory: %w", err)
@@ -299,7 +364,7 @@ func newContainerOver(back backing, readOnly bool, cfgBlockSize, cfgPageSize uin
 		}
 		c.dir = dir
 	}
-	c.alloc = rebuildAllocator(c.dir, sb, size)
+	c.alloc = rebuildAllocator(c.dir, sb, size, keyslotBlocks)
 	return c, nil
 }
 
@@ -343,7 +408,7 @@ func openPass(name string, flags vfs.OpenFlags, cipher crypto.PageCipher, pageSi
 		if err != nil {
 			return nil, err
 		}
-		return &passFile{f: f, temp: true, cipher: cipher, pageSize: pageSize, domain: domainTempAux}, nil
+		return &passFile{f: f, temp: true, cipher: cipher, pageSize: pageSize, domain: passDomain(flags)}, nil
 	}
 	oflag := os.O_RDWR
 	if flags.Has(vfs.OpenReadOnly) {
@@ -458,7 +523,7 @@ func NewVFS(opts Options) (*VFS, error) {
 	if err != nil {
 		return nil, err
 	}
-	cipher, enc, err := cipherFromOptions(opts)
+	kc, err := keyConfigFromOptions(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -467,8 +532,7 @@ func NewVFS(opts Options) (*VFS, error) {
 		blockSize: blockSize,
 		pageSize:  pageSize,
 		codec:     opts.Level,
-		cipher:    cipher,
-		enc:       enc,
+		keyCfg:    kc,
 	}
 	if err := vfs.Register(v.name, v); err != nil {
 		return nil, err

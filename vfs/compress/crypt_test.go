@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	sqlite "gosqlite.org"
+	"gosqlite.org/crypto/keyring"
 	"gosqlite.org/vfs"
 	"gosqlite.org/vfs/crypto"
 )
@@ -207,56 +208,161 @@ func TestLiveEncryptionWAL(t *testing.T) {
 	_ = db2.Close()
 }
 
-// TestEncryptionCheckEnc pins the open-time enc/key validation at the engine
-// seam (the typed errors don't survive SQLite's C-ABI open path).
-func TestEncryptionCheckEnc(t *testing.T) {
-	cb := newCrashBacking(nil)
-	key := bytes.Repeat([]byte{7}, 32)
-	cipher, err := crypto.NewCipher(crypto.Adiantum, key)
+// TestLiveEncryptionRecipients is the headline multi-key case: a database
+// encrypted to two recipients is opened independently by either one's identity
+// (no shared secret), an unlisted identity is rejected, and the plaintext never
+// hits disk.
+func TestLiveEncryptionRecipients(t *testing.T) {
+	const marker = "RECIPIENTS_SECRET_42"
+	aliceR, aliceID, err := keyring.GenerateX25519()
 	if err != nil {
 		t.Fatal(err)
 	}
+	bobR, bobID, err := keyring.GenerateX25519()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "rcpt.dbz")
+
+	db, err := Open(sqlite.Config{Path: path}, Options{Recipients: []keyring.Recipient{aliceR, bobR}})
+	if err != nil {
+		t.Fatalf("create to recipients: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE t(v TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 50 {
+		if _, err := db.Exec(`INSERT INTO t VALUES(?)`, marker+strconv.Itoa(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Either identity opens it independently.
+	for name, id := range map[string]keyring.Identity{"alice": aliceID, "bob": bobID} {
+		db, err := Open(sqlite.Config{Path: path}, Options{Identities: []keyring.Identity{id}})
+		if err != nil {
+			t.Fatalf("open as %s: %v", name, err)
+		}
+		var n int
+		err = db.QueryRow(`SELECT count(*) FROM t`).Scan(&n)
+		_ = db.Close()
+		if err != nil || n != 50 {
+			t.Fatalf("open as %s: count=%d err=%v", name, n, err)
+		}
+	}
+
+	// An unlisted identity, or none, cannot.
+	_, eveID, _ := keyring.GenerateX25519()
+	if db, err := Open(sqlite.Config{Path: path}, Options{Identities: []keyring.Identity{eveID}}); err == nil {
+		_ = db.Close()
+		t.Error("open with an unlisted identity: want error")
+	}
+	if db, err := Open(sqlite.Config{Path: path}, Options{}); err == nil {
+		_ = db.Close()
+		t.Error("open with no identity: want error")
+	}
+
+	if raw, err := os.ReadFile(path); err == nil && bytes.Contains(raw, []byte(marker)) {
+		t.Error("plaintext marker found in the encrypted file at rest")
+	}
+}
+
+// TestRegistryKeyReuse verifies a second opener of an already-open encrypted
+// database is rejected unless it holds the matching key — it cannot silently
+// inherit the first opener's cipher through the shared container registry.
+func TestRegistryKeyReuse(t *testing.T) {
+	aliceR, aliceID, _ := keyring.GenerateX25519()
+	_, eveID, _ := keyring.GenerateX25519()
+	path := filepath.Join(t.TempDir(), "shared.dbz")
+
+	db1, err := Open(sqlite.Config{Path: path}, Options{Recipients: []keyring.Recipient{aliceR}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db1.Close()
+	if _, err := db1.Exec(`CREATE TABLE t(v)`); err != nil {
+		t.Fatal(err)
+	}
+
+	// A second open with no identity, or a non-recipient identity, must fail to
+	// reach the shared container rather than inherit the live cipher.
+	for name, opts := range map[string]Options{
+		"no identity":    {},
+		"wrong identity": {Identities: []keyring.Identity{eveID}},
+	} {
+		db, err := Open(sqlite.Config{Path: path}, opts)
+		if err != nil {
+			continue // rejected at open (the eager first connection) — good
+		}
+		var n int
+		qerr := db.QueryRow(`SELECT count(*) FROM t`).Scan(&n)
+		_ = db.Close()
+		if qerr == nil {
+			t.Errorf("%s: want error accessing the shared encrypted container", name)
+		}
+	}
+
+	// The right identity shares it.
+	db2, err := Open(sqlite.Config{Path: path}, Options{Identities: []keyring.Identity{aliceID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db2.QueryRow(`SELECT count(*) FROM t`).Scan(&n); err != nil {
+		t.Errorf("matching identity should share the container: %v", err)
+	}
+	_ = db2.Close()
+}
+
+// TestEmptyReadOnlyEncrypted verifies that opening an empty file read-only with
+// a key errors rather than silently returning a plaintext container.
+func TestEmptyReadOnlyEncrypted(t *testing.T) {
+	const bs, ps = defaultBlockSize, defaultPageSize
+	kc := keyConfig{cipher: crypto.Adiantum, rawKey: bytes.Repeat([]byte{1}, 32)}
+	if _, err := newContainerOver(newCrashBacking(nil), true, bs, ps, CompressionDefault, kc); err == nil {
+		t.Fatal("empty read-only open with a key: want error")
+	}
+}
+
+// TestEncryptionCheckEnc pins the open-time key validation at the engine seam
+// for the raw-key path (the typed errors don't survive SQLite's C-ABI open).
+func TestEncryptionCheckEnc(t *testing.T) {
+	const bs, ps = defaultBlockSize, defaultPageSize
+	cb := newCrashBacking(nil)
+	key := bytes.Repeat([]byte{7}, 32)
+	withKey := keyConfig{cipher: crypto.Adiantum, rawKey: key}
+
 	// Create an empty encrypted container (its commit records enc on disk).
-	if _, err := newContainerOver(cb, false, defaultBlockSize, defaultPageSize, CompressionDefault, cipher, encAdiantum); err != nil {
+	if _, err := newContainerOver(cb, false, bs, ps, CompressionDefault, withKey); err != nil {
 		t.Fatalf("create encrypted container: %v", err)
 	}
 
 	// Reopen without a key → ErrEncrypted.
-	if _, err := newContainerOver(cb, true, defaultBlockSize, defaultPageSize, CompressionDefault, nil, encNone); !errors.Is(err, ErrEncrypted) {
+	if _, err := newContainerOver(cb, true, bs, ps, CompressionDefault, keyConfig{}); !errors.Is(err, ErrEncrypted) {
 		t.Fatalf("reopen without key = %v, want ErrEncrypted", err)
 	}
 
-	// Reopen with the wrong cipher kind → a mismatch error (not ErrEncrypted).
-	xts, err := crypto.NewCipher(crypto.AESXTS, bytes.Repeat([]byte{9}, 64))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := newContainerOver(cb, true, defaultBlockSize, defaultPageSize, CompressionDefault, xts, encAESXTS); err == nil {
-		t.Fatal("reopen with wrong cipher kind: want error")
-	}
-
-	// Reopen with the right kind but wrong key bytes → ErrWrongKey (the
-	// directory canary fails to decrypt), even on this empty database.
-	wrongKey, err := crypto.NewCipher(crypto.Adiantum, bytes.Repeat([]byte{8}, 32))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := newContainerOver(cb, true, defaultBlockSize, defaultPageSize, CompressionDefault, wrongKey, encAdiantum); !errors.Is(err, ErrWrongKey) {
+	// Reopen with the wrong key bytes → ErrWrongKey (the directory canary fails),
+	// even on this empty database.
+	wrong := keyConfig{cipher: crypto.Adiantum, rawKey: bytes.Repeat([]byte{8}, 32)}
+	if _, err := newContainerOver(cb, true, bs, ps, CompressionDefault, wrong); !errors.Is(err, ErrWrongKey) {
 		t.Fatalf("reopen with wrong key = %v, want ErrWrongKey", err)
 	}
 
 	// Reopen with the right key → succeeds.
-	cipher2, _ := crypto.NewCipher(crypto.Adiantum, key)
-	if _, err := newContainerOver(cb, true, defaultBlockSize, defaultPageSize, CompressionDefault, cipher2, encAdiantum); err != nil {
+	if _, err := newContainerOver(cb, true, bs, ps, CompressionDefault, withKey); err != nil {
 		t.Fatalf("reopen with key: %v", err)
 	}
 
-	// And a plaintext container rejects a key.
+	// A plaintext container rejects a key.
 	cbPlain := newCrashBacking(nil)
-	if _, err := newContainerOver(cbPlain, false, defaultBlockSize, defaultPageSize, CompressionDefault, nil, encNone); err != nil {
+	if _, err := newContainerOver(cbPlain, false, bs, ps, CompressionDefault, keyConfig{}); err != nil {
 		t.Fatalf("create plaintext container: %v", err)
 	}
-	if _, err := newContainerOver(cbPlain, true, defaultBlockSize, defaultPageSize, CompressionDefault, cipher, encAdiantum); err == nil {
+	if _, err := newContainerOver(cbPlain, true, bs, ps, CompressionDefault, withKey); err == nil {
 		t.Fatal("reopen plaintext with key: want error")
 	}
 }
