@@ -77,7 +77,7 @@ type FS struct {
 	cname    uintptr // libc-allocated C-string copy of name
 	cvfs     uintptr // libc-allocated Tsqlite3_vfs we registered
 	tls      *libc.TLS
-	cipher   pageCipher
+	cipher   PageCipher
 	pageSize int32
 	recorder Recorder // optional; nil = no observability
 	token    uintptr  // registry handle, stored in pVfs->FpAppData
@@ -131,7 +131,7 @@ func New(opts Options) (name string, fs *FS, err error) {
 	if !isValidPageSize(pageSize) {
 		return "", nil, fmt.Errorf("crypto: invalid PageSize %d (must be power of two in [512, 65536])", pageSize)
 	}
-	cipher, err := newCipher(opts.Cipher, opts.Key)
+	cipher, err := NewCipher(opts.Cipher, opts.Key)
 	if err != nil {
 		return "", nil, err
 	}

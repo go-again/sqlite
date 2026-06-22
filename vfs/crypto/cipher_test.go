@@ -20,17 +20,17 @@ import (
 func TestCipher_ConcurrentEncrypt_NoCorruption(t *testing.T) {
 	for _, kind := range []string{"Adiantum", "AES-XTS"} {
 		t.Run(kind, func(t *testing.T) {
-			var c pageCipher
+			var c PageCipher
 			var err error
 			switch kind {
 			case "Adiantum":
 				key := make([]byte, 32)
 				io.ReadFull(rand.Reader, key)
-				c, err = newCipher(Adiantum, key)
+				c, err = NewCipher(Adiantum, key)
 			case "AES-XTS":
 				key := make([]byte, 64)
 				io.ReadFull(rand.Reader, key)
-				c, err = newCipher(AESXTS, key)
+				c, err = NewCipher(AESXTS, key)
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -57,8 +57,8 @@ func TestCipher_ConcurrentEncrypt_NoCorruption(t *testing.T) {
 					for it := range iterations {
 						page := uint64(gID*iterations + it)
 						buf := append([]byte(nil), plain...)
-						c.encrypt(buf, page, FileKindMainDB)
-						c.decrypt(buf, page, FileKindMainDB)
+						c.Encrypt(buf, page, FileKindMainDB)
+						c.Decrypt(buf, page, FileKindMainDB)
 						if !bytes.Equal(buf, plain) {
 							errs <- fmt.Sprintf("goroutine %d iter %d page %d: round-trip mismatch", gID, it, page)
 							return
@@ -89,17 +89,17 @@ func TestCipher_FileKindDomainSeparation(t *testing.T) {
 	plaintext := bytes.Repeat([]byte("ABCDEFGH"), 64) // 512 bytes
 	for _, kind := range []string{"Adiantum", "AES-XTS"} {
 		t.Run(kind, func(t *testing.T) {
-			var c pageCipher
+			var c PageCipher
 			var err error
 			switch kind {
 			case "Adiantum":
 				key := make([]byte, 32)
 				io.ReadFull(rand.Reader, key)
-				c, err = newCipher(Adiantum, key)
+				c, err = NewCipher(Adiantum, key)
 			case "AES-XTS":
 				key := make([]byte, 64)
 				io.ReadFull(rand.Reader, key)
-				c, err = newCipher(AESXTS, key)
+				c, err = NewCipher(AESXTS, key)
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -108,8 +108,8 @@ func TestCipher_FileKindDomainSeparation(t *testing.T) {
 			buf1 := append([]byte(nil), plaintext...)
 			buf2 := append([]byte(nil), plaintext...)
 			const samePage uint64 = 5
-			c.encrypt(buf1, samePage, FileKindMainDB)
-			c.encrypt(buf2, samePage, FileKindWAL)
+			c.Encrypt(buf1, samePage, FileKindMainDB)
+			c.Encrypt(buf2, samePage, FileKindWAL)
 
 			if bytes.Equal(buf1, buf2) {
 				t.Fatal("ciphertext identical across file kinds — cross-file substitution attack possible")
@@ -118,14 +118,14 @@ func TestCipher_FileKindDomainSeparation(t *testing.T) {
 			// Also: decrypting with the wrong kind must NOT yield the
 			// original plaintext.
 			misDecrypt := append([]byte(nil), buf1...)
-			c.decrypt(misDecrypt, samePage, FileKindWAL)
+			c.Decrypt(misDecrypt, samePage, FileKindWAL)
 			if bytes.Equal(misDecrypt, plaintext) {
 				t.Error("decrypt with wrong file kind produced original plaintext — domain separation broken")
 			}
 
 			// And: decrypting with the correct kind recovers the original.
 			roundtrip := append([]byte(nil), buf1...)
-			c.decrypt(roundtrip, samePage, FileKindMainDB)
+			c.Decrypt(roundtrip, samePage, FileKindMainDB)
 			if !bytes.Equal(roundtrip, plaintext) {
 				t.Error("decrypt with correct file kind failed to recover plaintext")
 			}

@@ -300,14 +300,14 @@ func writeEncrypted(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Ts
 func encryptSpan(fs *FS, span []byte, baseOffset int64, pageSize int64, kind byte) {
 	for i := int64(0); i < int64(len(span)); i += pageSize {
 		pageNum := uint64((baseOffset + i) / pageSize)
-		fs.cipher.encrypt(span[i:i+pageSize], pageNum, kind)
+		fs.cipher.Encrypt(span[i:i+pageSize], pageNum, kind)
 	}
 }
 
 func decryptSpan(fs *FS, span []byte, baseOffset int64, pageSize int64, kind byte) {
 	for i := int64(0); i < int64(len(span)); i += pageSize {
 		pageNum := uint64((baseOffset + i) / pageSize)
-		fs.cipher.decrypt(span[i:i+pageSize], pageNum, kind)
+		fs.cipher.Decrypt(span[i:i+pageSize], pageNum, kind)
 	}
 }
 

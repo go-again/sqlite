@@ -38,20 +38,23 @@ const (
 	FileKindSubJournal              // 6
 )
 
-// pageCipher abstracts the per-page encrypt/decrypt primitive so the
-// io-method trampolines don't have to branch on cipher kind. Both
-// implementations operate in place: dst and src may share backing
-// memory.
+// PageCipher is a length-preserving, tweakable encrypt/decrypt primitive. This
+// VFS uses it per page; other gosqlite.org storage layers (e.g. vfs/compress)
+// reuse it per block. Both methods operate in place — dst and src may share
+// backing memory — and add no nonce, tag, or length (confidentiality at rest
+// only; no MAC). Build one with [NewCipher].
 //
-// The (pageNum, fileKind) pair domain-separates the tweak so a
-// ciphertext block from one file kind doesn't decrypt cleanly when
-// copied into another at the same offset. Without it, an attacker
-// with disk write access could rearrange pages by swapping bytes
-// between main DB / journal / WAL — and SQLite, having no MAC, would
-// see well-formed page content for the wrong context.
-type pageCipher interface {
-	encrypt(buf []byte, pageNum uint64, fileKind byte)
-	decrypt(buf []byte, pageNum uint64, fileKind byte)
+// The (tweak, domain) pair domain-separates the cipher so the same ciphertext
+// doesn't decrypt cleanly at the same tweak under a different domain — without
+// it, an attacker with disk write access could rearrange units by swapping
+// bytes between, say, a -wal and the main DB, and SQLite, having no MAC, would
+// see well-formed content for the wrong context. Pass a stable per-unit tweak
+// (the page or block number) and a domain byte (the file kind; see FileKind*).
+//
+// A PageCipher returned by NewCipher is safe for concurrent use.
+type PageCipher interface {
+	Encrypt(buf []byte, tweak uint64, domain byte)
+	Decrypt(buf []byte, tweak uint64, domain byte)
 }
 
 // adiantumCipher wraps lukechampine.com/adiantum's HBSH construction.
@@ -74,7 +77,7 @@ type adiantumCipher struct {
 	h  *hbsh.HBSH
 }
 
-func (c *adiantumCipher) encrypt(buf []byte, pageNum uint64, fileKind byte) {
+func (c *adiantumCipher) Encrypt(buf []byte, pageNum uint64, fileKind byte) {
 	var t [9]byte
 	t[0] = fileKind
 	binary.BigEndian.PutUint64(t[1:], pageNum)
@@ -83,7 +86,7 @@ func (c *adiantumCipher) encrypt(buf []byte, pageNum uint64, fileKind byte) {
 	c.mu.Unlock()
 }
 
-func (c *adiantumCipher) decrypt(buf []byte, pageNum uint64, fileKind byte) {
+func (c *adiantumCipher) Decrypt(buf []byte, pageNum uint64, fileKind byte) {
 	var t [9]byte
 	t[0] = fileKind
 	binary.BigEndian.PutUint64(t[1:], pageNum)
@@ -109,18 +112,19 @@ func xtsSector(pageNum uint64, fileKind byte) uint64 {
 	return (uint64(fileKind) << 56) | (pageNum & xtsPageMask)
 }
 
-func (c *xtsCipher) encrypt(buf []byte, pageNum uint64, fileKind byte) {
+func (c *xtsCipher) Encrypt(buf []byte, pageNum uint64, fileKind byte) {
 	c.c.Encrypt(buf, buf, xtsSector(pageNum, fileKind))
 }
 
-func (c *xtsCipher) decrypt(buf []byte, pageNum uint64, fileKind byte) {
+func (c *xtsCipher) Decrypt(buf []byte, pageNum uint64, fileKind byte) {
 	c.c.Decrypt(buf, buf, xtsSector(pageNum, fileKind))
 }
 
-// newCipher constructs a pageCipher from the cipher choice and the
+// NewCipher constructs a [PageCipher] from the cipher choice and the
 // caller-supplied raw key. Validates key length against the chosen
 // cipher's requirement; rejects with a clear error rather than
-// silently truncating or expanding.
+// silently truncating or expanding. Derive a key from a passphrase with
+// [DeriveKey].
 //
 // We defensive-copy the key before handing it to the upstream cipher
 // constructor: at least lukechampine.com/adiantum's chachaStream
@@ -129,7 +133,7 @@ func (c *xtsCipher) decrypt(buf []byte, pageNum uint64, fileKind byte) {
 // Options.Key after New would silently corrupt every subsequent
 // encrypt/decrypt. The copy is small (32 or 64 bytes); the safety
 // is large.
-func newCipher(kind Cipher, key []byte) (pageCipher, error) {
+func NewCipher(kind Cipher, key []byte) (PageCipher, error) {
 	switch kind {
 	case Adiantum:
 		if len(key) != 32 {
