@@ -12,7 +12,7 @@ sidebar:
 - **[Live](#live-compressed-in-place--open) — `compress.Open`:** query the database while it stays compressed on disk, durable per transaction, with a connection pool and optional WAL. Reach for this for a large, compressible database that stays open and must survive a crash mid-session.
 - **[Snapshot](#snapshot-inflate-for-the-session--opensnapshot) — `compress.OpenSnapshot`:** inflate the whole database into a private working copy for the session, recompress it at `Close`. Reach for this for archival, distribution, backups, and open-modify-close tooling.
 
-Both are pure Go, ship as a separate module, and share the same level ladder. Neither encrypts (see [Combining with encryption](#combining-with-encryption)).
+Both are pure Go, ship as a separate module, and share the same level ladder. Live `Open` can also encrypt the database at rest with a key (see [Encryption at rest](#encryption-at-rest)); `OpenSnapshot` does not.
 
 ## Live: compressed in place — `Open`
 
@@ -76,9 +76,16 @@ compress.Unpack("app.db", "app.db.az")                          // inflate it ba
 
 Set the level with `Options.Level`; the zero value uses a balanced default. The ladder runs `CompressionFastest` → `CompressionFast` → `CompressionDefault` → `CompressionBetter` → `CompressionBest` (the lower levels are LZ4, the higher ones zstd). Decoding auto-detects the algorithm, so a file written at one level always reads back regardless of the level configured later. `CompressionNone` is not meaningful here (use a plain `sqlite.Open` for an uncompressed database) and falls back to the default.
 
-## Combining with encryption
+## Encryption at rest
 
-Neither mode encrypts. `OpenSnapshot`'s working copy is plaintext; `Open` writes only compressed bytes but does not yet encrypt them — its block-aligned container is designed so per-block encryption can be added in the read/write path (a planned increment), giving on-disk bytes that are always *both* compressed and encrypted with no VFS chaining. Until then: for a shipped artifact, pipe [`Pack`](https://pkg.go.dev/gosqlite.org/vfs/compress) output through any encryptor; for a live **encrypted** database without compression, use [`vfs/crypto`](encryption.md).
+Live `Open` encrypts the database at rest when you pass `Options.Key` — each compressed block is encrypted (compress **then** encrypt, so the on-disk bytes are *both* compressed and encrypted), along with the page directory and the transient `-journal`/`-wal`. It reuses the length-preserving cipher of [`vfs/crypto`](encryption.md) (Adiantum by default, AES-XTS-256 via `Options.Cipher`); the key is the raw cipher key — 32 bytes for Adiantum, 64 for AES-XTS — and you can derive one from a passphrase with `crypto.DeriveKey`.
+
+```go
+key, _ := crypto.DeriveKey(passphrase, salt, crypto.Adiantum)
+db, err := compress.Open(sqlite.Config{Path: "app.db.az"}, compress.Options{Key: key})
+```
+
+Reopening without the key fails with `compress.ErrEncrypted`, and with the wrong key `compress.ErrWrongKey`. Like `vfs/crypto`, the guarantee is **confidentiality at rest only** — no integrity tag, so the container checksums catch accidental corruption but not deliberate tampering, and a passive attacker still learns the container's size, geometry, and per-page compressed sizes. `OpenSnapshot` does **not** encrypt (its working copy is plaintext on disk), so use live `Open` with a `Key` for an encrypted database; for a shipped artifact, pipe [`Pack`](https://pkg.go.dev/gosqlite.org/vfs/compress) output through any encryptor.
 
 ## Module and reference
 

@@ -27,6 +27,7 @@ import (
 	"sync"
 
 	"gosqlite.org/vfs"
+	"gosqlite.org/vfs/crypto"
 )
 
 // codecAZ is the superblock codec tag for az-compressed slots (the only codec
@@ -61,6 +62,12 @@ type container struct {
 	blockSize uint64      // physical block granularity B
 	pageSize  uint64      // logical SQLite page size
 	codec     Compression // level for NEW page writes
+
+	// cipher encrypts each block-aligned slot extent at rest (nil = plaintext);
+	// enc is the matching superblock marker written on commit. Set once at open
+	// and shared, read-only, by every handle — the cipher is concurrency-safe.
+	cipher crypto.PageCipher
+	enc    uint8
 
 	pageCount uint64     // logical page count (authoritative size source)
 	dir       []dirEntry // page directory, index = logical page number
@@ -272,12 +279,28 @@ func (c *container) loadPageInto(dst []byte, pageNo uint64) error {
 		clear(dst)
 		return nil
 	}
-	stored := make([]byte, e.storedLen)
-	if _, err := c.back.ReadAt(stored, int64(e.physOffset)); err != nil {
-		return fmt.Errorf("compress: read page %d slot: %w", pageNo, err)
-	}
-	if crc32.Checksum(stored, crc32C) != e.checksum {
-		return fmt.Errorf("compress: page %d slot checksum mismatch (corruption)", pageNo)
+	var stored []byte
+	if c.cipher != nil {
+		// The cipher is a wide-block transform over the whole slot extent, so
+		// read, checksum (the on-disk ciphertext), and decrypt the full
+		// block-aligned run, then take the stored (compressed) prefix.
+		extent := make([]byte, uint64(e.blocks)*c.blockSize)
+		if _, err := c.back.ReadAt(extent, int64(e.physOffset)); err != nil {
+			return fmt.Errorf("compress: read page %d slot: %w", pageNo, err)
+		}
+		if crc32.Checksum(extent, crc32C) != e.checksum {
+			return fmt.Errorf("compress: page %d slot checksum mismatch (corruption)", pageNo)
+		}
+		c.cipher.Decrypt(extent, pageNo, domainPageData)
+		stored = extent[:e.storedLen]
+	} else {
+		stored = make([]byte, e.storedLen)
+		if _, err := c.back.ReadAt(stored, int64(e.physOffset)); err != nil {
+			return fmt.Errorf("compress: read page %d slot: %w", pageNo, err)
+		}
+		if crc32.Checksum(stored, crc32C) != e.checksum {
+			return fmt.Errorf("compress: page %d slot checksum mismatch (corruption)", pageNo)
+		}
 	}
 	if e.flags&dirFlagVerbatim != 0 {
 		copy(dst, stored) // verbatim slot is exactly pageSize
@@ -300,7 +323,19 @@ func (c *container) storePage(pageNo uint64, page []byte) error {
 	}
 	nb := blocksFor(uint64(len(stored)), c.blockSize)
 	physOffset := c.alloc.alloc(nb) * c.blockSize
-	if err := c.writeBlocks(stored, physOffset, nb); err != nil {
+
+	// Build the on-disk extent (zero-padded to a whole block run). When
+	// encrypting, the cipher transforms the whole extent in place — always >= one
+	// block, so the wide-block cipher's minimum input is met — and the checksum
+	// covers the ciphertext; plaintext keeps the historical scope (stored prefix).
+	extent := make([]byte, nb*c.blockSize)
+	copy(extent, stored)
+	checksum := crc32.Checksum(stored, crc32C)
+	if c.cipher != nil {
+		c.cipher.Encrypt(extent, pageNo, domainPageData)
+		checksum = crc32.Checksum(extent, crc32C)
+	}
+	if _, err := c.back.WriteAt(extent, int64(physOffset)); err != nil {
 		return err
 	}
 
@@ -317,7 +352,7 @@ func (c *container) storePage(pageNo uint64, page []byte) error {
 		storedLen:  uint32(len(stored)),
 		blocks:     uint32(nb),
 		flags:      flags,
-		checksum:   crc32.Checksum(stored, crc32C),
+		checksum:   checksum,
 	}
 	return nil
 }
@@ -381,14 +416,32 @@ func (c *container) commit() error {
 	var dirOffset uint64
 	var dirBlocks uint32
 	var dirChecksum uint32
-	if len(c.dir) > 0 {
-		dirBytes := marshalDirectory(c.dir)
-		dirChecksum = crc32.Checksum(dirBytes, crc32C)
-		nb := blocksFor(uint64(len(dirBytes)), c.blockSize)
-		dirOffset = c.alloc.alloc(nb) * c.blockSize
-		dirBlocks = uint32(nb)
-		if err := c.writeBlocks(dirBytes, dirOffset, nb); err != nil {
-			return err
+	// An encrypted container always writes a directory (at least the canary) so a
+	// wrong key is caught at open even on an empty database.
+	if len(c.dir) > 0 || c.cipher != nil {
+		entries := marshalDirectory(c.dir)
+		if c.cipher != nil {
+			// [canary || entries], zero-padded to a block run and encrypted in
+			// place; the checksum covers the on-disk ciphertext.
+			nb := blocksFor(uint64(dirCanaryLen+len(entries)), c.blockSize)
+			buf := make([]byte, nb*c.blockSize)
+			copy(buf, dirCanary[:])
+			copy(buf[dirCanaryLen:], entries)
+			c.cipher.Encrypt(buf, dirTweak, domainDirectory)
+			dirOffset = c.alloc.alloc(nb) * c.blockSize
+			dirBlocks = uint32(nb)
+			dirChecksum = crc32.Checksum(buf, crc32C)
+			if _, err := c.back.WriteAt(buf, int64(dirOffset)); err != nil {
+				return err
+			}
+		} else {
+			dirChecksum = crc32.Checksum(entries, crc32C)
+			nb := blocksFor(uint64(len(entries)), c.blockSize)
+			dirOffset = c.alloc.alloc(nb) * c.blockSize
+			dirBlocks = uint32(nb)
+			if err := c.writeBlocks(entries, dirOffset, nb); err != nil {
+				return err
+			}
 		}
 	}
 	if err := c.back.Sync(); err != nil {
@@ -404,6 +457,7 @@ func (c *container) commit() error {
 		dirBlocks:   dirBlocks,
 		generation:  newGen,
 		codec:       codecAZ,
+		enc:         c.enc,
 		dirChecksum: dirChecksum,
 	}
 	if _, err := c.back.WriteAt(sb.marshal(), c.nextSlot*int64(c.blockSize)); err != nil {

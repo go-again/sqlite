@@ -55,14 +55,16 @@ db, _ := sql.Open("sqlite", "file:seed.db?vfs="+name+"&mode=ro")
 // or from a []byte: vfs.NewReader(bytes.NewReader(bs), int64(len(bs))) — file is named "db"
 ```
 
-## Compressed at rest (snapshot, not a `?vfs=` VFS)
+## Compressed (and optionally encrypted) at rest
 
 ```go
 import "gosqlite.org/vfs/compress"
-db, _ := compress.Open(sqlite.Config{Path: "app.db.az"}, compress.Options{})
-defer db.Close() // inflates the compressed file on open, recompresses on close
+db, _ := compress.Open(sqlite.Config{Path: "app.db.az"}, compress.Options{Key: key}) // Key optional
+defer db.Close()
 ```
 
-Stores the database compressed on disk. Unlike the VFSes above, this is **not** a `?vfs=` VFS: it inflates the file into a temp working copy for the session and recompresses on `Close`. So durability is **per-session, not per-transaction** — a crash while open reverts to the last `Close`, and the working copy is **plaintext** (not a substitute for encryption). `compress.Pack(dst, src, level)` / `compress.Unpack(dst, src)` do the same transform on a `.db` without a session. Own module (`gosqlite.org/vfs/compress`). Fits archival / distribution / open-modify-close over compressible data; not a large always-open or crash-critical database.
+Live `compress.Open` keeps the database compressed on disk the whole time and queries it in place — durable **per-transaction**, multiple pooled connections, rollback journal by default (WAL opt-in). Pass `Options.Key` to also **encrypt it at rest** — each compressed block plus the directory and the `-journal`/`-wal` (compress then encrypt), reusing `vfs/crypto`'s cipher (Adiantum or AES-XTS; derive a key with `crypto.DeriveKey`). Wrong key → `compress.ErrWrongKey`, missing key → `compress.ErrEncrypted`; confidentiality at rest only (no integrity tag).
+
+`compress.OpenSnapshot` is the alternative: it inflates the file into a temp working copy for the session and recompresses on `Close` — durability **per-session**, and the working copy is **plaintext** (not encrypted), so prefer live `Open` (with a `Key`) for a long-lived or encrypted database. `compress.Pack(dst, src, level)` / `compress.Unpack(dst, src)` do the same transform on a `.db` without a session. Own module (`gosqlite.org/vfs/compress`). Fits archival / distribution / open-modify-close over compressible data.
 
 To back a WRITABLE database with your own Go storage, see the `custom-vfs` skill. Full reference: [`docs/guides/encryption.md`](../../docs/guides/encryption.md), [`docs/guides/compression.md`](../../docs/guides/compression.md), and siblings.

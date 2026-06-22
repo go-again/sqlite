@@ -72,13 +72,26 @@
 // Decoding auto-detects the algorithm, so a file written at one level always
 // reads back regardless of the level configured later.
 //
-// # Combining with encryption
+// # Encryption at rest
 //
-// Neither mode encrypts. [OpenSnapshot]'s working copy is plaintext; [Open]
-// writes only compressed bytes but does not yet encrypt them — its block-aligned
-// container is designed so per-block encryption can be added in the read/write
-// path (a later increment), giving on-disk bytes that are always BOTH compressed
-// and encrypted without VFS chaining. Until then, for a shipped artifact, [Pack]
-// output can be piped through any encryptor; for a live encrypted database
-// without compression, use [gosqlite.org/vfs/crypto].
+// [Open] encrypts the database at rest when [Options.Key] is set: each
+// compressed block is encrypted (compress THEN encrypt, so the on-disk bytes are
+// both compressed and encrypted), along with the page directory and the
+// transient -journal/-wal, reusing the length-preserving cipher of
+// [gosqlite.org/vfs/crypto] (Adiantum by default; AES-XTS-256 via
+// [Options.Cipher]). The key is the raw cipher key — 32 bytes for Adiantum, 64
+// for AES-XTS-256; derive one from a passphrase with
+// [gosqlite.org/vfs/crypto.DeriveKey]:
+//
+//	key, _ := crypto.DeriveKey(passphrase, salt, crypto.Adiantum)
+//	db, err := compress.Open(sqlite.Config{Path: "app.db.az"}, compress.Options{Key: key})
+//
+// Reopening without the key fails with [ErrEncrypted], and with the wrong key
+// with [ErrWrongKey]. The guarantee is confidentiality at rest only: like
+// vfs/crypto it adds no integrity tag, so the container checksums catch
+// accidental corruption but not deliberate tampering, and a passive attacker
+// still learns the container geometry and per-page compressed sizes. The
+// snapshot [OpenSnapshot] does NOT encrypt — its working copy is plaintext on
+// disk — so use live [Open] with a Key for an encrypted database; for a shipped
+// artifact, [Pack] output can be piped through any encryptor.
 package compress // import "gosqlite.org/vfs/compress"

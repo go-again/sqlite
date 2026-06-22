@@ -1,6 +1,10 @@
 package compress
 
-import "fmt"
+import (
+	"fmt"
+
+	"gosqlite.org/vfs/crypto"
+)
 
 // Compression selects the at-rest compression level. It mirrors the level
 // enum of [gosqlite.org/blobstore]. CompressionNone is not meaningful for a
@@ -57,6 +61,19 @@ type Options struct {
 	// for per-block encryption later. Zero uses a 4 KiB default. It must be a
 	// power of two in [512, 65536] and must not exceed PageSize.
 	BlockSize int
+
+	// Key, if non-empty, encrypts the database at rest in the live compressing
+	// VFS ([Open]/[NewVFS]). It is the raw cipher key — 32 bytes for the default
+	// Adiantum cipher, 64 bytes for AES-XTS-256; derive one from a passphrase
+	// with [gosqlite.org/vfs/crypto.DeriveKey]. Each compressed block is encrypted
+	// (compress then encrypt), confidentiality at rest only (no integrity tag),
+	// reusing the cipher of gosqlite.org/vfs/crypto. Empty leaves the database
+	// unencrypted. Ignored by the snapshot [OpenSnapshot].
+	Key []byte
+
+	// Cipher selects the at-rest cipher when Key is set. The zero value is
+	// Adiantum (32-byte key); AES-XTS-256 needs a 64-byte key.
+	Cipher crypto.Cipher
 }
 
 // resolveLive validates and defaults the live-VFS geometry, returning the

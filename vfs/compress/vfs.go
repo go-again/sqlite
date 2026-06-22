@@ -13,9 +13,11 @@ package compress
 // implements ShmGroup).
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"hash/crc32"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -26,6 +28,7 @@ import (
 	sqlite "gosqlite.org"
 	"gosqlite.org/internal/cabi"
 	"gosqlite.org/vfs"
+	"gosqlite.org/vfs/crypto"
 )
 
 // VFS is a registered live compressing VFS. Its Close unregisters it; wire
@@ -36,6 +39,8 @@ type VFS struct {
 	blockSize uint64
 	pageSize  uint64
 	codec     Compression
+	cipher    crypto.PageCipher // nil = unencrypted
+	enc       uint8             // superblock enc marker for new containers
 }
 
 // Name is the registered VFS name, for use as sqlite.Config.VFS.
@@ -57,17 +62,30 @@ func (v *VFS) Close() error {
 // nothing and would only complicate recovery.
 func (v *VFS) Open(name string, flags vfs.OpenFlags) (vfs.File, vfs.OpenFlags, error) {
 	if flags.Has(vfs.OpenMainDB) {
-		f, err := openMain(name, flags, v.blockSize, v.pageSize, v.codec)
+		f, err := openMain(name, flags, v.blockSize, v.pageSize, v.codec, v.cipher, v.enc)
 		if err != nil {
 			return nil, 0, err
 		}
 		return f, flags, nil
 	}
-	f, err := openPass(name, flags)
+	f, err := openPass(name, flags, v.cipher, int64(v.pageSize))
 	if err != nil {
 		return nil, 0, err
 	}
 	return f, flags, nil
+}
+
+// passDomain maps an auxiliary file's open flags to its cipher domain byte, so a
+// ciphertext page can't be replayed across the journal / WAL / temp files.
+func passDomain(flags vfs.OpenFlags) byte {
+	switch {
+	case flags.Has(vfs.OpenMainJournal):
+		return domainJournal
+	case flags.Has(vfs.OpenWAL):
+		return domainWAL
+	default:
+		return domainTempAux
+	}
 }
 
 // Delete removes a file (a journal, typically). A missing file is not an error.
@@ -114,7 +132,7 @@ var containers = struct {
 //     directory loaded, and the allocator rebuilt by scanning it.
 //   - existing non-container (e.g. a raw .db someone pointed us at): rejected,
 //     so the file is never clobbered.
-func openMain(path string, flags vfs.OpenFlags, blockSize, pageSize uint64, codec Compression) (*mainFile, error) {
+func openMain(path string, flags vfs.OpenFlags, blockSize, pageSize uint64, codec Compression, cipher crypto.PageCipher, enc uint8) (*mainFile, error) {
 	containers.mu.Lock()
 	defer containers.mu.Unlock()
 
@@ -135,7 +153,7 @@ func openMain(path string, flags vfs.OpenFlags, blockSize, pageSize uint64, code
 	if err != nil {
 		return nil, err // dispatcher maps a not-exist error to SQLITE_CANTOPEN
 	}
-	ct, err := newContainerOver(fileBacking{file}, readOnly, blockSize, pageSize, codec)
+	ct, err := newContainerOver(fileBacking{file}, readOnly, blockSize, pageSize, codec, cipher, enc)
 	if err != nil {
 		return nil, fmt.Errorf("compress: open %q: %w", path, err)
 	}
@@ -170,7 +188,7 @@ func (c *container) release() error {
 // backing — the seam tests use to drive the storage engine over an in-memory,
 // fault-injecting store.
 func openMainOver(back backing, readOnly bool, blockSize, pageSize uint64, codec Compression) (*mainFile, error) {
-	ct, err := newContainerOver(back, readOnly, blockSize, pageSize, codec)
+	ct, err := newContainerOver(back, readOnly, blockSize, pageSize, codec, nil, encNone)
 	if err != nil {
 		return nil, err
 	}
@@ -180,14 +198,14 @@ func openMainOver(back backing, readOnly bool, blockSize, pageSize uint64, codec
 
 // newContainerOver loads or initialises a container over an already-open
 // backing. It closes back on any error.
-func newContainerOver(back backing, readOnly bool, cfgBlockSize, cfgPageSize uint64, codec Compression) (*container, error) {
+func newContainerOver(back backing, readOnly bool, cfgBlockSize, cfgPageSize uint64, codec Compression, cipher crypto.PageCipher, enc uint8) (*container, error) {
 	size, err := back.Size()
 	if err != nil {
 		_ = back.Close()
 		return nil, err
 	}
 
-	c := &container{back: back, blockSize: cfgBlockSize, pageSize: cfgPageSize, codec: codec, readOnly: readOnly}
+	c := &container{back: back, blockSize: cfgBlockSize, pageSize: cfgPageSize, codec: codec, readOnly: readOnly, cipher: cipher, enc: enc}
 
 	if size == 0 {
 		c.alloc = newAllocator(nil, superblockBlocks)
@@ -225,6 +243,10 @@ func newContainerOver(back backing, readOnly bool, cfgBlockSize, cfgPageSize uin
 		_ = back.Close()
 		return nil, err
 	}
+	if err := c.checkEnc(sb.enc); err != nil {
+		_ = back.Close()
+		return nil, err
+	}
 
 	c.blockSize = uint64(sb.blockSize)
 	c.pageSize = uint64(sb.pageSize)
@@ -240,10 +262,31 @@ func newContainerOver(back backing, readOnly bool, cfgBlockSize, cfgPageSize uin
 			_ = back.Close()
 			return nil, fmt.Errorf("read directory: %w", err)
 		}
-		content := dirBuf[:int(sb.pageCount)*dirEntrySize]
-		if crc32.Checksum(content, crc32C) != sb.dirChecksum {
-			_ = back.Close()
-			return nil, errors.New("directory checksum mismatch (corruption)")
+		var content []byte
+		if c.cipher != nil {
+			// Checksum the on-disk ciphertext, decrypt, then verify the canary
+			// (wrong key) before reading the entries past it.
+			if crc32.Checksum(dirBuf, crc32C) != sb.dirChecksum {
+				_ = back.Close()
+				return nil, errors.New("directory checksum mismatch (corruption)")
+			}
+			c.cipher.Decrypt(dirBuf, dirTweak, domainDirectory)
+			if !bytes.Equal(dirBuf[:dirCanaryLen], dirCanary[:]) {
+				_ = back.Close()
+				return nil, ErrWrongKey
+			}
+			need := dirCanaryLen + int(sb.pageCount)*dirEntrySize
+			if need > len(dirBuf) {
+				_ = back.Close()
+				return nil, errors.New("compress: directory too small for its page count (corruption)")
+			}
+			content = dirBuf[dirCanaryLen:need]
+		} else {
+			content = dirBuf[:int(sb.pageCount)*dirEntrySize]
+			if crc32.Checksum(content, crc32C) != sb.dirChecksum {
+				_ = back.Close()
+				return nil, errors.New("directory checksum mismatch (corruption)")
+			}
 		}
 		dir, err := parseDirectory(content, int(sb.pageCount))
 		if err != nil {
@@ -281,20 +324,26 @@ func (f fileBacking) Size() (int64, error) {
 }
 
 // passFile is a thin *os.File wrapper for journals and temp files: no
-// translation, no compression. It embeds NoLock (single-connection).
+// compression. It embeds NoLock (single-connection). When the database is
+// encrypted it also encrypts these auxiliaries at rest, page-aligned by absolute
+// offset with read-modify-write for sub-page writes — the same scheme vfs/crypto
+// uses — so a transaction's page images never hit disk in the clear.
 type passFile struct {
 	vfs.NoLock
-	f    *os.File
-	temp bool
+	f        *os.File
+	temp     bool
+	cipher   crypto.PageCipher // nil = plain passthrough
+	pageSize int64
+	domain   byte
 }
 
-func openPass(name string, flags vfs.OpenFlags) (*passFile, error) {
+func openPass(name string, flags vfs.OpenFlags, cipher crypto.PageCipher, pageSize int64) (*passFile, error) {
 	if name == "" { // anonymous temp file: never shared, never reopened
 		f, err := os.CreateTemp("", "gosqlitez-")
 		if err != nil {
 			return nil, err
 		}
-		return &passFile{f: f, temp: true}, nil
+		return &passFile{f: f, temp: true, cipher: cipher, pageSize: pageSize, domain: domainTempAux}, nil
 	}
 	oflag := os.O_RDWR
 	if flags.Has(vfs.OpenReadOnly) {
@@ -310,15 +359,78 @@ func openPass(name string, flags vfs.OpenFlags) (*passFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &passFile{f: f}, nil
+	return &passFile{f: f, cipher: cipher, pageSize: pageSize, domain: passDomain(flags)}, nil
 }
 
-func (p *passFile) ReadAt(b []byte, off int64) (int, error)  { return p.f.ReadAt(b, off) }
-func (p *passFile) WriteAt(b []byte, off int64) (int, error) { return p.f.WriteAt(b, off) }
-func (p *passFile) Truncate(n int64) error                   { return p.f.Truncate(n) }
-func (p *passFile) Sync(vfs.SyncFlags) error                 { return p.f.Sync() }
-func (p *passFile) SectorSize() int                          { return defaultBlockSize }
-func (p *passFile) DeviceCharacteristics() vfs.DeviceFlags   { return 0 }
+// cryptPages encrypts or decrypts each whole page in span (a page-aligned run
+// starting at baseOffset), tweaked by the page number and the file's domain.
+func (p *passFile) cryptPages(span []byte, baseOffset int64, encrypt bool) {
+	ps := p.pageSize
+	for i := int64(0); i+ps <= int64(len(span)); i += ps {
+		pageNum := uint64((baseOffset + i) / ps)
+		if encrypt {
+			p.cipher.Encrypt(span[i:i+ps], pageNum, p.domain)
+		} else {
+			p.cipher.Decrypt(span[i:i+ps], pageNum, p.domain)
+		}
+	}
+}
+
+func (p *passFile) ReadAt(b []byte, off int64) (int, error) {
+	if p.cipher == nil {
+		return p.f.ReadAt(b, off)
+	}
+	ps := p.pageSize
+	pageStart := (off / ps) * ps
+	pageEnd := (off + int64(len(b)) + ps - 1) / ps * ps
+	span := make([]byte, pageEnd-pageStart)
+	rn, rerr := p.f.ReadAt(span, pageStart)
+	if rerr != nil && rerr != io.EOF {
+		return 0, rerr
+	}
+	p.cryptPages(span[:(int64(rn)/ps)*ps], pageStart, false) // decrypt the full pages we read
+	lo := off - pageStart
+	avail := int64(rn) - lo
+	if avail <= 0 {
+		return 0, io.EOF
+	}
+	n := min(int64(len(b)), avail)
+	copy(b[:n], span[lo:lo+n])
+	if n < int64(len(b)) {
+		return int(n), io.EOF // short read; the dispatcher zero-fills the tail
+	}
+	return int(n), nil
+}
+
+func (p *passFile) WriteAt(b []byte, off int64) (int, error) {
+	if p.cipher == nil {
+		return p.f.WriteAt(b, off)
+	}
+	ps := p.pageSize
+	pageStart := (off / ps) * ps
+	pageEnd := (off + int64(len(b)) + ps - 1) / ps * ps
+	span := make([]byte, pageEnd-pageStart)
+	if off == pageStart && int64(len(b)) == int64(len(span)) {
+		copy(span, b) // full page-aligned span: overwrite entirely
+	} else {
+		// Read-modify-write: fetch the enclosing pages, decrypt, splice in b.
+		rn, rerr := p.f.ReadAt(span, pageStart)
+		if rerr != nil && rerr != io.EOF {
+			return 0, rerr
+		}
+		p.cryptPages(span[:(int64(rn)/ps)*ps], pageStart, false)
+		copy(span[off-pageStart:], b)
+	}
+	p.cryptPages(span, pageStart, true)
+	if _, err := p.f.WriteAt(span, pageStart); err != nil {
+		return 0, err
+	}
+	return len(b), nil
+}
+func (p *passFile) Truncate(n int64) error                 { return p.f.Truncate(n) }
+func (p *passFile) Sync(vfs.SyncFlags) error               { return p.f.Sync() }
+func (p *passFile) SectorSize() int                        { return defaultBlockSize }
+func (p *passFile) DeviceCharacteristics() vfs.DeviceFlags { return 0 }
 
 func (p *passFile) Size() (int64, error) {
 	fi, err := p.f.Stat()
@@ -346,11 +458,17 @@ func NewVFS(opts Options) (*VFS, error) {
 	if err != nil {
 		return nil, err
 	}
+	cipher, enc, err := cipherFromOptions(opts)
+	if err != nil {
+		return nil, err
+	}
 	v := &VFS{
 		name:      cabi.UniqueName("compressz"),
 		blockSize: blockSize,
 		pageSize:  pageSize,
 		codec:     opts.Level,
+		cipher:    cipher,
+		enc:       enc,
 	}
 	if err := vfs.Register(v.name, v); err != nil {
 		return nil, err
