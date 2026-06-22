@@ -120,6 +120,18 @@ func (c *xtsCipher) Decrypt(buf []byte, pageNum uint64, fileKind byte) {
 	c.c.Decrypt(buf, buf, xtsSector(pageNum, fileKind))
 }
 
+// KeyLen returns the raw key length in bytes that [NewCipher] requires for the
+// given cipher: 32 for [Adiantum], 64 for [AESXTS] (two 32-byte AES keys). It is
+// the single source of the per-cipher key size that NewCipher, [DeriveKey], and
+// downstream layers (e.g. the vfs/compress data key) size against, so adding a
+// cipher updates one place.
+func KeyLen(kind Cipher) int {
+	if kind == AESXTS {
+		return 64
+	}
+	return 32
+}
+
 // NewCipher constructs a [PageCipher] from the cipher choice and the
 // caller-supplied raw key. Validates key length against the chosen
 // cipher's requirement; rejects with a clear error rather than
@@ -136,7 +148,7 @@ func (c *xtsCipher) Decrypt(buf []byte, pageNum uint64, fileKind byte) {
 func NewCipher(kind Cipher, key []byte) (PageCipher, error) {
 	switch kind {
 	case Adiantum:
-		if len(key) != 32 {
+		if len(key) != KeyLen(Adiantum) {
 			return nil, fmt.Errorf("crypto: Adiantum requires a 32-byte key, got %d", len(key))
 		}
 		ourKey := append([]byte(nil), key...)
@@ -144,7 +156,7 @@ func NewCipher(kind Cipher, key []byte) (PageCipher, error) {
 	case AESXTS:
 		// XTS uses two AES keys of equal length. We support AES-256
 		// only, so the combined key must be 64 bytes.
-		if len(key) != 64 {
+		if len(key) != KeyLen(AESXTS) {
 			return nil, fmt.Errorf("crypto: AES-XTS-256 requires a 64-byte key (two 32-byte AES keys), got %d", len(key))
 		}
 		ourKey := append([]byte(nil), key...)

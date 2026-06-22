@@ -45,12 +45,5 @@ func DeriveKey(passphrase, salt []byte, cipher Cipher) ([]byte, error) {
 		memory  uint32 = 64 * 1024 // KiB
 		threads uint8  = 4
 	)
-	var keyLen uint32
-	switch cipher {
-	case AESXTS:
-		keyLen = 64
-	default:
-		keyLen = 32
-	}
-	return argon2.IDKey(passphrase, salt, time, memory, threads, keyLen), nil
+	return argon2.IDKey(passphrase, salt, time, memory, threads, uint32(KeyLen(cipher))), nil
 }
