@@ -1,7 +1,6 @@
 package vault
 
 import (
-	"crypto/rand"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -17,10 +16,7 @@ import (
 // concurrency tests only force concurrent queries after the pool is warm, which
 // does not exercise overlapping opens.
 func TestConcurrentColdOpensEncrypted(t *testing.T) {
-	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
-		t.Fatal(err)
-	}
+	key := randKey(t)
 	path := filepath.Join(t.TempDir(), "coldopen.db")
 
 	// Seed once, then close so the pool is fully cold.

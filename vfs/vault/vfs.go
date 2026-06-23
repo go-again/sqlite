@@ -147,9 +147,50 @@ func (v *VFS) FullPathname(name string) (string, error) { return filepath.Abs(na
 // by canonical path. Every connection that opens the same path shares one
 // container, so they observe the same committed state with no disk re-read.
 var containers = struct {
-	mu sync.Mutex
-	m  map[string]*container
-}{m: map[string]*container{}}
+	mu     sync.Mutex
+	m      map[string]*container
+	locked map[string]struct{} // canonical paths reserved by an offline op (Compact/Rewrap/Rekey)
+}{m: map[string]*container{}, locked: map[string]struct{}{}}
+
+// reservePath marks a canonical path as exclusively held by an offline operation
+// so a concurrent Open cannot register a live container over it mid-rewrite. It
+// returns false if the path is already open or already reserved. Pair with
+// releasePath. This closes the check-then-open race in Compact/Rewrap/Rekey: the
+// check and the take are atomic under containers.mu.
+func reservePath(abs string) bool {
+	containers.mu.Lock()
+	defer containers.mu.Unlock()
+	if containers.m[abs] != nil {
+		return false
+	}
+	if _, ok := containers.locked[abs]; ok {
+		return false
+	}
+	containers.locked[abs] = struct{}{}
+	return true
+}
+
+func releasePath(abs string) {
+	containers.mu.Lock()
+	delete(containers.locked, abs)
+	containers.mu.Unlock()
+}
+
+// requireOnDiskPath validates the precondition shared by Open, OpenSnapshot, and
+// Compact: a non-empty on-disk path, and no caller-supplied VFS (vault sets its
+// own).
+func requireOnDiskPath(cfg sqlite.Config) error {
+	if cfg.VFS != "" {
+		return errors.New("vault: Config.VFS must be empty (vault sets its own VFS)")
+	}
+	if cfg.Path == sqlite.InMemory || cfg.Mode == sqlite.ModeMemory {
+		return errors.New("vault: an on-disk path is required (refusing :memory: / mode=memory)")
+	}
+	if cfg.Path == "" {
+		return errors.New("vault: Config.Path is required")
+	}
+	return nil
+}
 
 // openMain opens or creates the compressed main-database container at path and
 // returns a connection handle that shares the (possibly already-open) container
@@ -176,6 +217,11 @@ func openMain(path string, flags vfs.OpenFlags, blockSize, pageSize uint64, code
 		}
 		ct.refs++
 		return &mainFile{c: ct}, nil
+	}
+	if _, busy := containers.locked[path]; busy {
+		// An offline operation (Compact/Rewrap/Rekey) is rewriting this file; opening
+		// a live container over it now would race two writers onto the same bytes.
+		return nil, fmt.Errorf("vault: %q is busy (offline maintenance in progress)", path)
 	}
 
 	readOnly := flags.Has(vfs.OpenReadOnly)
@@ -612,14 +658,8 @@ func NewVFS(opts Options) (*VFS, error) {
 // copy, recompressed at Close); Open keeps the on-disk file compressed
 // throughout and never materialises the whole database in the clear.
 func Open(cfg sqlite.Config, opts Options) (*sqlite.DB, error) {
-	if cfg.VFS != "" {
-		return nil, errors.New("vault: Config.VFS must be empty (Open sets it to the live compressing VFS)")
-	}
-	if cfg.Path == sqlite.InMemory || cfg.Mode == sqlite.ModeMemory {
-		return nil, errors.New("vault: a compressed database requires an on-disk path (refusing :memory: / mode=memory)")
-	}
-	if cfg.Path == "" {
-		return nil, errors.New("vault: Config.Path is required")
+	if err := requireOnDiskPath(cfg); err != nil {
+		return nil, err
 	}
 
 	v, err := NewVFS(opts)

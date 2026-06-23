@@ -48,16 +48,16 @@ func (c *container) codecTag() uint8 {
 	return codecAZ
 }
 
-var (
-	errReadOnly = errors.New("vault: write to a read-only database")
-	errLockBusy = vfs.Errno(5) // SQLITE_BUSY
-)
+var errReadOnly = errors.New("vault: write to a read-only database")
 
 // extentPool reuses the block-aligned scratch buffer the encrypted slot path
 // needs — decrypt-in-place on read, encrypt-in-place on write. On the plaintext
 // path the bytes go straight to/from the slot, so only encryption pays this
 // per-page allocation (a page-sized buffer per I/O); pooling keeps it off the
-// GC's hot path, mirroring vfs/crypto's scratchPool. Pooled by capacity, since
+// GC's hot path. It is the same idiom as vfs/crypto's scratchPool, kept as a
+// separate (~15-line) copy rather than a shared public helper because the two are
+// separate modules and the drift risk is benign (a perf regression, not a bug).
+// Pooled by capacity, since
 // most slots are about one page. Callers must zero any padding past the stored
 // prefix before writing — a pooled buffer is not pre-cleared.
 var extentPool = sync.Pool{
@@ -151,24 +151,19 @@ type container struct {
 	dirty          bool     // logical writes since the last commit
 	readOnly       bool
 
-	// Advisory-lock state, shared by every handle on this container. Guarded by
-	// lmu, independent of mu. Many SHARED holders, one RESERVED..EXCLUSIVE
-	// writer; EXCLUSIVE additionally requires no other connection holds SHARED.
-	//
-	// The Lock/Unlock/CheckReservedLock state machine is a deliberate port of
-	// the reference File in gosqlite.org/vfs/interface_test.go (refMemFile) —
-	// kept byte-identical so the two cannot silently drift. It is duplicated
-	// rather than shared only because the reference lives in a _test.go (not
-	// importable) and this is an isolated module; promoting it to a public vfs
-	// helper both embed is the real fix (tracked separately).
-	lmu     sync.Mutex
-	nShared int
-	writer  *mainFile
+	// Advisory-lock state, shared by every handle on this container: SQLite's
+	// in-process file-locking protocol (many SHARED holders, one
+	// RESERVED..EXCLUSIVE writer), arbitrated by the shared vfs.AdvisoryLock helper.
+	alock vfs.AdvisoryLock
 
 	// Registry bookkeeping (guarded by the registry mutex in vfs.go). name is
 	// the canonical path, or "" for an unshared container (tests / anonymous).
 	name string
 	refs int
+
+	// reserved is the canonical path this container holds via reservePath (offline
+	// Compact/Rewrap/Rekey); closeContainer releases it. Empty for live containers.
+	reserved string
 }
 
 // mainFile is one connection's handle over a shared container.
@@ -193,10 +188,10 @@ func (f *mainFile) Sync(vfs.SyncFlags) error                 { return f.c.sync()
 // Buffered-but-unsynced writes are intentionally NOT committed: only Sync'd
 // data is durable, and the orphaned slots are reclaimed by the next open.
 //
-// Unlock(LockNone) MUST run before release: c.writer is a back-pointer to the
-// handle holding RESERVED+, and only that handle's own Unlock clears it.
-// Unlocking first guarantees the pointer is cleared before the handle can go
-// away, so a surviving connection never dereferences a freed handle.
+// Unlock(LockNone) MUST run before release: the shared alock holds a reference to
+// the handle holding RESERVED+, and only that handle's own Unlock clears it.
+// Unlocking first guarantees the reference is cleared before the handle can go
+// away, so a surviving connection never reads a stale handle.
 func (f *mainFile) Close() error {
 	_ = f.Unlock(vfs.LockNone)
 	return f.c.release()
@@ -614,10 +609,15 @@ func (c *container) commit() error {
 	c.committedDirBlocks = dirBlocks
 	c.nextSlot = 1 - c.nextSlot
 	c.dirty = false
-	// Advance the external replay floor now that newGen is durable. A failure here
-	// only leaves the floor lagging the file (safe — open still accepts a generation
-	// at or above the floor), but it is surfaced so the caller knows the anti-replay
-	// guarantee did not advance for this commit.
+	// Advance the external replay floor now that newGen is durable. The store is
+	// surfaced as an error because the caller must know the anti-replay floor did
+	// NOT advance — a lagging floor leaves a window in which a rollback to a
+	// generation between the floor and newGen would still be accepted. The cost is
+	// that this transaction is already durably committed (both fsyncs done) yet the
+	// returned error makes SQLite treat the Sync as failed and roll back its
+	// in-memory transaction; on the next open the file is at newGen >= floor and is
+	// accepted, so there is no corruption, only a spurious failure on a rare anchor
+	// I/O error. Anchors should therefore have reliable, durable storage.
 	if c.anchor != nil {
 		if err := c.anchor.StoreGeneration(newGen); err != nil {
 			return fmt.Errorf("vault: replay anchor store: %w", err)
@@ -626,74 +626,21 @@ func (c *container) commit() error {
 	return nil
 }
 
-// --- vfs.File: in-process advisory locking (mirrors the reference File) ---
+// --- vfs.File: in-process advisory locking via the shared vfs.AdvisoryLock ---
 
-// Lock raises this connection's advisory lock toward level, arbitrating in
-// process against the other connections on the same container. Many holders may
-// share SHARED; only one may hold RESERVED..EXCLUSIVE; EXCLUSIVE additionally
-// requires that no other connection holds SHARED.
+// Lock/Unlock/CheckReservedLock forward to the container's shared
+// [vfs.AdvisoryLock], which arbitrates this connection against the others on the
+// same container (many SHARED holders, one RESERVED..EXCLUSIVE writer).
 func (f *mainFile) Lock(level vfs.LockLevel) error {
-	if level <= f.lock {
-		return nil
-	}
-	c := f.c
-	c.lmu.Lock()
-	defer c.lmu.Unlock()
-	switch level {
-	case vfs.LockShared:
-		if c.writer != nil && c.writer.lock >= vfs.LockPending {
-			return errLockBusy // a PENDING/EXCLUSIVE writer blocks new readers
-		}
-		c.nShared++
-		f.lock = vfs.LockShared
-	case vfs.LockReserved:
-		if c.writer != nil && c.writer != f {
-			return errLockBusy
-		}
-		c.writer = f
-		f.lock = vfs.LockReserved
-	case vfs.LockPending, vfs.LockExclusive:
-		if c.writer != nil && c.writer != f {
-			return errLockBusy
-		}
-		c.writer = f
-		self := 0
-		if f.lock >= vfs.LockShared {
-			self = 1
-		}
-		if c.nShared > self {
-			f.lock = vfs.LockPending // hold the intent so no new SHARED is granted
-			return errLockBusy
-		}
-		f.lock = level
-	}
-	return nil
+	return f.c.alock.Lock(f, &f.lock, level)
 }
 
-// Unlock lowers this connection's advisory lock toward level.
 func (f *mainFile) Unlock(level vfs.LockLevel) error {
-	if level >= f.lock {
-		return nil
-	}
-	c := f.c
-	c.lmu.Lock()
-	defer c.lmu.Unlock()
-	if f.lock >= vfs.LockReserved && level < vfs.LockReserved && c.writer == f {
-		c.writer = nil
-	}
-	if f.lock >= vfs.LockShared && level < vfs.LockShared {
-		c.nShared--
-	}
-	f.lock = level
-	return nil
+	return f.c.alock.Unlock(f, &f.lock, level)
 }
 
-// CheckReservedLock reports whether some connection holds RESERVED or higher.
 func (f *mainFile) CheckReservedLock() (bool, error) {
-	c := f.c
-	c.lmu.Lock()
-	defer c.lmu.Unlock()
-	return c.writer != nil && c.writer.lock >= vfs.LockReserved, nil
+	return f.c.alock.CheckReservedLock()
 }
 
 // ShmGroup implements vfs.ShmFile to unlock WAL: it returns the container's

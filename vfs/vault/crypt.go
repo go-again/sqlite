@@ -211,6 +211,13 @@ func keyConfigFromOptions(opts Options) (keyConfig, error) {
 // block). It sets c.cipher/c.enc/c.keyslotOffset; the caller holds the allocator
 // ready and commits afterward.
 func (c *container) initCipherForCreate(kc keyConfig) error {
+	// Identities alone open an EXISTING encrypted container; they carry no material
+	// to create one with. Without this guard such a create would fall through the
+	// switch and silently produce a plaintext container (a data-exposure footgun,
+	// e.g. via Compact passed only Identities).
+	if len(kc.rawKey) == 0 && len(kc.recipients) == 0 && len(kc.masters) == 0 && len(kc.identities) > 0 {
+		return errors.New("vault: creating an encrypted container needs Options.Key or Options.Recipients (Options.Identities alone only opens an existing one)")
+	}
 	switch {
 	case len(kc.rawKey) > 0:
 		cph, err := crypto.NewCipher(kc.cipher, kc.rawKey)

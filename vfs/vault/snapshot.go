@@ -36,14 +36,8 @@ import (
 // [gosqlite.org.InMemory] or Mode [gosqlite.org.ModeMemory]) is rejected, and
 // cfg.VFS must be empty.
 func OpenSnapshot(cfg sqlite.Config, opts Options) (*sqlite.DB, error) {
-	if cfg.VFS != "" {
-		return nil, errors.New("vault: Config.VFS must be empty")
-	}
-	if cfg.Path == sqlite.InMemory || cfg.Mode == sqlite.ModeMemory {
-		return nil, errors.New("vault: a compressed database requires an on-disk path (refusing :memory: / mode=memory)")
-	}
-	if cfg.Path == "" {
-		return nil, errors.New("vault: Config.Path is required")
+	if err := requireOnDiskPath(cfg); err != nil {
+		return nil, err
 	}
 	// Fail fast if the destination directory is missing: otherwise the session
 	// would open fine (the working copy lives elsewhere) and only fail at Close

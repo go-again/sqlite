@@ -48,15 +48,6 @@ func churn(t *testing.T, db *sqlite.DB) {
 	}
 }
 
-func size(t *testing.T, path string) int64 {
-	t.Helper()
-	fi, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return fi.Size()
-}
-
 func rowCount(t *testing.T, db *sqlite.DB) int {
 	t.Helper()
 	var n int
@@ -78,12 +69,12 @@ func TestCompactShrinks(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	before := size(t, path)
+	before := fileSize(t, path)
 
 	if err := Compact(sqlite.Config{Path: path}, Options{}); err != nil {
 		t.Fatalf("Compact: %v", err)
 	}
-	after := size(t, path)
+	after := fileSize(t, path)
 	if after >= before {
 		t.Fatalf("Compact did not shrink the file: before=%d after=%d", before, after)
 	}
@@ -105,7 +96,7 @@ func TestCompactShrinks(t *testing.T) {
 // TestCompactEncryptedAuthenticated: Compact preserves encryption + authenticated
 // mode (the compacted file reopens, verifies, and holds no plaintext).
 func TestCompactEncryptedAuthenticated(t *testing.T) {
-	key := anchorKey(t)
+	key := randKey(t)
 	path := filepath.Join(t.TempDir(), "enc.db")
 	opts := Options{Key: key, Authenticate: true, Level: CompressionDefault}
 
@@ -210,11 +201,189 @@ func TestCompactRecipients(t *testing.T) {
 	}
 }
 
+// TestReservedPathRefusesOpen: while an offline op holds a path reservation, Open
+// is refused (the registry TOCTOU guard) and is allowed again once released.
+func TestReservedPathRefusesOpen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "res.db")
+	db, err := Open(sqlite.Config{Path: path}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE t(v)`); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reservePath(abs) {
+		t.Fatal("reservePath on a closed database failed")
+	}
+	if d, err := Open(sqlite.Config{Path: path}, Options{}); err == nil {
+		_ = d.Close()
+		releasePath(abs)
+		t.Fatal("Open succeeded while the path was reserved; want a refusal")
+	}
+	releasePath(abs)
+
+	d2, err := Open(sqlite.Config{Path: path}, Options{}) // allowed again
+	if err != nil {
+		t.Fatalf("Open after release: %v", err)
+	}
+	_ = d2.Close()
+}
+
+// TestCompactEncryptedRequiresKey: compacting an encrypted database with only
+// Identities (forgetting Recipients) must be REFUSED, not silently rewritten as
+// plaintext. The original file is left intact.
+func TestCompactEncryptedRequiresKey(t *testing.T) {
+	alice, aliceID, err := keyring.GenerateX25519()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, bobID, err := keyring.GenerateX25519()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "rk.db")
+	marker := []byte("REQUIRES-KEY-marker-must-stay-encrypted")
+
+	db, err := Open(sqlite.Config{Path: path}, Options{Recipients: []keyring.Recipient{alice, bob}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE t(v BLOB)`); err != nil {
+		t.Fatal(err)
+	}
+	for range 20 {
+		if _, err := db.Exec(`INSERT INTO t VALUES(?)`, marker); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = db.Close()
+
+	// Only Identities (no Recipients): must error before touching the file.
+	if err := Compact(sqlite.Config{Path: path}, Options{Identities: []keyring.Identity{aliceID}}); err == nil {
+		t.Fatal("Compact with only Identities on an encrypted database succeeded; want a refusal")
+	}
+
+	// The original is untouched and still encrypted: no plaintext marker on disk,
+	// and a recipient still reads it.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, marker) {
+		t.Fatal("plaintext marker on disk after a refused compact — database was decrypted")
+	}
+	rdb, err := Open(sqlite.Config{Path: path}, Options{Identities: []keyring.Identity{bobID}})
+	if err != nil {
+		t.Fatalf("original database damaged after a refused compact: %v", err)
+	}
+	defer rdb.Close()
+	if n := rowCount(t, rdb); n != 20 {
+		t.Fatalf("row count after refused compact = %d, want 20", n)
+	}
+}
+
+// TestCompactPreservesGeometry: Compact takes the page/block geometry from the
+// source, so compacting a non-default-page-size database with default Options does
+// not corrupt it.
+func TestCompactPreservesGeometry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "geo.db")
+	db, err := Open(sqlite.Config{Path: path}, Options{PageSize: 8192, BlockSize: 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE t(id INTEGER PRIMARY KEY, v TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 200 {
+		if _, err := db.Exec(`INSERT INTO t(id, v) VALUES(?, ?)`, i, "row"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`DELETE FROM t WHERE id >= 20; VACUUM`); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+
+	// Compact with DEFAULT options (no PageSize): geometry must come from the source.
+	if err := Compact(sqlite.Config{Path: path}, Options{}); err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	db2, err := Open(sqlite.Config{Path: path}, Options{PageSize: 8192, BlockSize: 1024})
+	if err != nil {
+		t.Fatalf("reopen compacted non-default-geometry db: %v", err)
+	}
+	defer db2.Close()
+	if n := rowCount(t, db2); n != 20 {
+		t.Fatalf("row count after compact = %d, want 20", n)
+	}
+	var ic string
+	if err := db2.QueryRow(`PRAGMA integrity_check`).Scan(&ic); err != nil || ic != "ok" {
+		t.Fatalf("integrity_check = (%q, %v)", ic, err)
+	}
+}
+
+// TestCompactWriterSigned: a writer-signed database compacts (with the writer
+// identity) and reopens verifiably for a read-only recipient.
+func TestCompactWriterSigned(t *testing.T) {
+	admin, adminID, err := keyring.GenerateMaster()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, readerID, err := keyring.GenerateX25519()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "ws.db")
+	create := Options{
+		Masters:    []keyring.MasterRecipient{admin},
+		SignWith:   adminID,
+		Writers:    []keyring.WriterRecipient{admin},
+		WriteAs:    adminID,
+		Recipients: []keyring.Recipient{reader},
+	}
+	db, err := Open(sqlite.Config{Path: path}, create)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE t(v)`); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 30 {
+		if _, err := db.Exec(`INSERT INTO t VALUES(?)`, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = db.Close()
+
+	// Compacting needs an identity to READ the source plus the full creds to re-seal
+	// and re-sign the copy (the admin is a recipient, so adminID reads it).
+	compactOpts := create
+	compactOpts.Identities = []keyring.Identity{adminID}
+	if err := Compact(sqlite.Config{Path: path}, compactOpts); err != nil {
+		t.Fatalf("Compact writer-signed: %v", err)
+	}
+
+	rdb, err := Open(sqlite.Config{Path: path}, Options{Identities: []keyring.Identity{readerID}, Masters: []keyring.MasterRecipient{admin}})
+	if err != nil {
+		t.Fatalf("reopen compacted writer-signed db as reader: %v", err)
+	}
+	defer rdb.Close()
+	if n := rowCount(t, rdb); n != 30 {
+		t.Fatalf("row count after compact = %d, want 30", n)
+	}
+}
+
 // TestCompactContinuesGenerationForAnchor: Compact advances the replay anchor (it
 // does not reset the generation), so the compacted file opens under the anchor and
 // a pre-compaction image is still rejected as a rollback.
 func TestCompactContinuesGenerationForAnchor(t *testing.T) {
-	key := anchorKey(t)
+	key := randKey(t)
 	anchor := &memAnchor{}
 	path := filepath.Join(t.TempDir(), "anch.db")
 	opts := Options{Key: key, Authenticate: true, Anchor: anchor}

@@ -1,7 +1,6 @@
 package vault
 
 import (
-	"crypto/rand"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -10,21 +9,12 @@ import (
 	sqlite "gosqlite.org"
 )
 
-func symKey(t *testing.T) []byte {
-	t.Helper()
-	k := make([]byte, 32)
-	if _, err := rand.Read(k); err != nil {
-		t.Fatal(err)
-	}
-	return k
-}
-
 // TestSymmetricAuthRoundTrip: Options{Key, Authenticate} authenticates with a
 // symmetric MAC'd root (no ed25519 writers). It round-trips, and a reopen with
 // only the Key (no Authenticate) still verifies — the on-disk authenticated flag
 // drives verification, so a holder cannot silently skip it.
 func TestSymmetricAuthRoundTrip(t *testing.T) {
-	key := symKey(t)
+	key := randKey(t)
 	path := filepath.Join(t.TempDir(), "sa.db")
 
 	db, err := Open(sqlite.Config{Path: path}, Options{Key: key, Authenticate: true})
@@ -73,7 +63,7 @@ func TestSymmetricAuthRequiresKey(t *testing.T) {
 // must not be openable as authenticated — that would let a data-key holder strip
 // the integrity (clear the flag, drop the hashes) and have it accepted.
 func TestSymmetricAuthDowngradeRejected(t *testing.T) {
-	key := symKey(t)
+	key := randKey(t)
 	path := filepath.Join(t.TempDir(), "down.db")
 
 	db, err := Open(sqlite.Config{Path: path}, Options{Key: key}) // encrypted, NOT authenticated
@@ -97,7 +87,7 @@ func TestSymmetricAuthDowngradeRejected(t *testing.T) {
 // symmetric-authenticated container makes reopen fail with ErrTampered (the
 // directory no longer matches the MAC'd dirHash).
 func TestSymmetricAuthDirectoryTamper(t *testing.T) {
-	key := symKey(t)
+	key := randKey(t)
 	path := filepath.Join(t.TempDir(), "tamper.db")
 
 	db, err := Open(sqlite.Config{Path: path}, Options{Key: key, Authenticate: true})

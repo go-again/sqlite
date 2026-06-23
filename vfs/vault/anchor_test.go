@@ -1,7 +1,6 @@
 package vault
 
 import (
-	"crypto/rand"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -33,20 +32,11 @@ func (m *memAnchor) StoreGeneration(g uint64) error {
 	return nil
 }
 
-func anchorKey(t *testing.T) []byte {
-	t.Helper()
-	k := make([]byte, 32)
-	if _, err := rand.Read(k); err != nil {
-		t.Fatal(err)
-	}
-	return k
-}
-
 // TestAnchorRejectsRollback is the core anti-replay scenario: a complete, validly
 // signed EARLIER image is restored over a database that has since advanced, and the
 // anchor (which advanced past it) rejects the stale image.
 func TestAnchorRejectsRollback(t *testing.T) {
-	key := anchorKey(t)
+	key := randKey(t)
 	anchor := &memAnchor{}
 	path := filepath.Join(t.TempDir(), "anchored.db")
 	opts := func() Options { return Options{Key: key, Authenticate: true, Anchor: anchor} }
@@ -111,7 +101,7 @@ func TestAnchorRejectsRollback(t *testing.T) {
 // TestAnchorAdvancesAndReopens: a database that only moves forward reopens cleanly
 // (committed generation stays at or above the floor).
 func TestAnchorAdvancesAndReopens(t *testing.T) {
-	key := anchorKey(t)
+	key := randKey(t)
 	anchor := &memAnchor{}
 	path := filepath.Join(t.TempDir(), "fwd.db")
 	opts := Options{Key: key, Authenticate: true, Anchor: anchor}
@@ -139,7 +129,7 @@ func TestAnchorAdvancesAndReopens(t *testing.T) {
 // TestAnchorRejectsTruncateToEmpty: replacing the database with an empty file is a
 // rollback to before any commit, and the anchor catches it.
 func TestAnchorRejectsTruncateToEmpty(t *testing.T) {
-	key := anchorKey(t)
+	key := randKey(t)
 	anchor := &memAnchor{}
 	path := filepath.Join(t.TempDir(), "trunc.db")
 	opts := Options{Key: key, Authenticate: true, Anchor: anchor}
@@ -168,7 +158,7 @@ func TestAnchorRejectsTruncateToEmpty(t *testing.T) {
 // TestAnchorRequiresAuth: an anchor without authenticated mode is meaningless (the
 // generation would be forgeable) and is rejected at open.
 func TestAnchorRequiresAuth(t *testing.T) {
-	key := anchorKey(t)
+	key := randKey(t)
 	path := filepath.Join(t.TempDir(), "noauth.db")
 	if _, err := Open(sqlite.Config{Path: path}, Options{Key: key, Anchor: &memAnchor{}}); err == nil {
 		t.Fatal("Anchor without authenticated mode: want an error")

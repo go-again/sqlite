@@ -2,7 +2,6 @@ package vault
 
 import (
 	"bytes"
-	"crypto/rand"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,10 +13,7 @@ import (
 // container never leaks the plaintext to disk. This is the capability that makes
 // vault one module instead of two: compress? and encrypt? are orthogonal options.
 func TestMatrix(t *testing.T) {
-	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
-		t.Fatal(err)
-	}
+	key := randKey(t)
 	secret := bytes.Repeat([]byte("matrix-secret "), 400) // compressible and distinctive
 
 	cases := []struct {

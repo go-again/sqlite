@@ -190,38 +190,47 @@ func openAtRest(path string, identity keyring.Identity) (*container, error) {
 	if err != nil {
 		return nil, err
 	}
-	containers.mu.Lock()
-	open := containers.m[abs] != nil
-	containers.mu.Unlock()
-	if open {
-		return nil, fmt.Errorf("vault: %q is open; close it before key management", path)
+	// Reserve the path for the whole operation so a concurrent Open cannot register
+	// a live container over it mid-rewrite; closeContainer releases it.
+	if !reservePath(abs) {
+		return nil, fmt.Errorf("vault: %q is open or busy; close it before key management", path)
 	}
 
 	file, err := os.OpenFile(path, os.O_RDWR, 0o600)
 	if err != nil {
+		releasePath(abs)
 		return nil, err
 	}
 	fi, err := file.Stat()
 	if err != nil {
 		_ = file.Close()
+		releasePath(abs)
 		return nil, err
 	}
 	if fi.Size() == 0 {
 		_ = file.Close()
+		releasePath(abs)
 		return nil, fmt.Errorf("vault: %q is empty, not an encrypted database", path)
 	}
 
 	kc := keyConfig{identities: []keyring.Identity{identity}}
 	c, err := newContainerOver(fileBacking{file}, false, defaultBlockSize, defaultPageSize, CompressionDefault, kc)
 	if err != nil {
+		releasePath(abs)
 		return nil, err // newContainerOver closes the file on error
 	}
+	c.reserved = abs
 	return c, nil
 }
 
-// closeContainer closes the backing, preserving an earlier error over a close
-// error (so a successful operation still surfaces a close failure).
+// closeContainer closes the backing and releases any reserved path, preserving an
+// earlier error over a close error (so a successful operation still surfaces a
+// close failure).
 func closeContainer(c *container, err *error) {
+	if c.reserved != "" {
+		releasePath(c.reserved)
+		c.reserved = ""
+	}
 	if cerr := c.back.Close(); cerr != nil && *err == nil {
 		*err = cerr
 	}

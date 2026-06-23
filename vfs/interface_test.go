@@ -33,10 +33,9 @@ type refMemData struct {
 	// this name. NoLock is fine for a single connection, but multi-connection
 	// WAL needs a real lock: SQLite gates its destructive checkpoint-on-close
 	// (which resets the -wal) on acquiring an EXCLUSIVE db-file lock, so that
-	// EXCLUSIVE must fail while other connections hold SHARED.
-	lmu     sync.Mutex
-	nShared int         // connections holding >= SHARED
-	writer  *refMemFile // the one connection holding RESERVED..EXCLUSIVE (nil if none)
+	// EXCLUSIVE must fail while other connections hold SHARED. The arbitration is
+	// the shared vfs.AdvisoryLock helper (this is also its reference usage).
+	lk vfs.AdvisoryLock
 }
 
 func newRefMemVFS() *refMemVFS { return &refMemVFS{files: map[string]*refMemData{}} }
@@ -85,74 +84,19 @@ type refMemFile struct {
 	lock vfs.LockLevel // this connection's current advisory lock level
 }
 
-var errLockBusy = &vfs.VFSError{Code: sqlite3.SQLITE_BUSY}
-
-// Lock raises this connection's advisory lock toward level, arbitrating in
-// process against the other connections on the same name. Multiple holders may
-// share SHARED; only one may hold RESERVED..EXCLUSIVE; EXCLUSIVE additionally
-// requires that no other connection holds SHARED.
+// Lock/Unlock/CheckReservedLock forward to the shared vfs.AdvisoryLock — the
+// canonical way a multi-connection pure-Go VFS arbitrates the file-locking
+// protocol (many SHARED holders, one RESERVED..EXCLUSIVE writer).
 func (f *refMemFile) Lock(level vfs.LockLevel) error {
-	if level <= f.lock {
-		return nil
-	}
-	d := f.d
-	d.lmu.Lock()
-	defer d.lmu.Unlock()
-	switch level {
-	case vfs.LockShared:
-		if d.writer != nil && d.writer.lock >= vfs.LockPending {
-			return errLockBusy // a PENDING/EXCLUSIVE writer blocks new readers
-		}
-		d.nShared++
-		f.lock = vfs.LockShared
-	case vfs.LockReserved:
-		if d.writer != nil && d.writer != f {
-			return errLockBusy
-		}
-		d.writer = f
-		f.lock = vfs.LockReserved
-	case vfs.LockPending, vfs.LockExclusive:
-		if d.writer != nil && d.writer != f {
-			return errLockBusy
-		}
-		d.writer = f
-		self := 0
-		if f.lock >= vfs.LockShared {
-			self = 1
-		}
-		if d.nShared > self {
-			f.lock = vfs.LockPending // hold the intent so no new SHARED is granted
-			return errLockBusy
-		}
-		f.lock = level
-	}
-	return nil
+	return f.d.lk.Lock(f, &f.lock, level)
 }
 
-// Unlock lowers this connection's advisory lock toward level.
 func (f *refMemFile) Unlock(level vfs.LockLevel) error {
-	if level >= f.lock {
-		return nil
-	}
-	d := f.d
-	d.lmu.Lock()
-	defer d.lmu.Unlock()
-	if f.lock >= vfs.LockReserved && level < vfs.LockReserved && d.writer == f {
-		d.writer = nil
-	}
-	if f.lock >= vfs.LockShared && level < vfs.LockShared {
-		d.nShared--
-	}
-	f.lock = level
-	return nil
+	return f.d.lk.Unlock(f, &f.lock, level)
 }
 
-// CheckReservedLock reports whether some connection holds RESERVED or higher.
 func (f *refMemFile) CheckReservedLock() (bool, error) {
-	d := f.d
-	d.lmu.Lock()
-	defer d.lmu.Unlock()
-	return d.writer != nil && d.writer.lock >= vfs.LockReserved, nil
+	return f.d.lk.CheckReservedLock()
 }
 
 func (f *refMemFile) ReadAt(p []byte, off int64) (int, error) {

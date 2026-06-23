@@ -7,9 +7,11 @@ import (
 	"gosqlite.org/vfs/crypto"
 )
 
-// Compression selects the at-rest compression level. It mirrors the level
-// enum of [gosqlite.org/blobstore]. CompressionNone (the default) stores pages
-// raw — compression is off; any other value compresses at that level. Encryption
+// Compression selects the at-rest compression level. It is an independent enum
+// parallel to (but deliberately not shared with) the one in
+// [gosqlite.org/blobstore] — a separate module. CompressionNone (the default)
+// stores pages raw — compression is off; any other value compresses at that
+// level. Encryption
 // is independent (see Key/Recipients), so a database may be compressed,
 // encrypted, both, or neither.
 type Compression int

@@ -18,7 +18,11 @@ import (
 // Compact rewrites the container at cfg.Path into a fresh, densely-packed file and
 // atomically replaces the original, returning freed space to the filesystem. The
 // database must NOT be open. Pass the same Options used to open it (key/recipients/
-// authenticated mode); Options.Level may differ to recompress at a new level.
+// authenticated mode); Options.Level may differ to recompress at a new level. The
+// page/block geometry is taken from the source — Options.PageSize/BlockSize are
+// ignored — and an encrypted source must be given Options.Key or Options.Recipients
+// (Identities alone open it but cannot re-seal the copy), else Compact errors rather
+// than write a plaintext file.
 //
 // It preserves the exact logical database and its encryption: every live page is
 // re-encoded into a freshly allocated container, so the physical fragmentation that
@@ -37,40 +41,35 @@ import (
 // (and Masters/SignWith for writer-signed mode) to seal the new keyslot. A raw-key
 // database keeps its key.
 func Compact(cfg sqlite.Config, opts Options) error {
-	if cfg.Path == "" || cfg.Path == sqlite.InMemory || cfg.Mode == sqlite.ModeMemory {
-		return errors.New("vault: Compact requires an on-disk Config.Path")
-	}
-	if cfg.VFS != "" {
-		return errors.New("vault: Compact sets the VFS itself; leave Config.VFS empty")
+	if err := requireOnDiskPath(cfg); err != nil {
+		return err
 	}
 	kc, err := keyConfigFromOptions(opts)
 	if err != nil {
 		return err
 	}
-	blockSize, pageSize, err := opts.resolveLive()
+	openBlock, openPage, err := opts.resolveLive() // validates opts geometry; the source superblock overrides it for src
 	if err != nil {
 		return err
 	}
 
-	// Refuse to compact a path that is open in this process: Compact drives the
-	// file through its own unregistered container, so a second live container over
-	// the same file would race two writers onto it.
+	// Refuse to compact a path that is open in this process, and reserve it for the
+	// duration: Compact drives the file through its own unregistered container, so a
+	// concurrent live container over the same file would race two writers onto it.
 	abs, err := filepath.Abs(cfg.Path)
 	if err != nil {
 		return err
 	}
-	containers.mu.Lock()
-	open := containers.m[abs] != nil
-	containers.mu.Unlock()
-	if open {
-		return fmt.Errorf("vault: Compact: database %q is open; close it first", cfg.Path)
+	if !reservePath(abs) {
+		return fmt.Errorf("vault: Compact: database %q is open or busy; close it first", cfg.Path)
 	}
+	defer releasePath(abs)
 
 	srcFile, err := os.Open(cfg.Path)
 	if err != nil {
 		return err
 	}
-	src, err := newContainerOver(fileBacking{srcFile}, true, blockSize, pageSize, opts.Level, kc)
+	src, err := newContainerOver(fileBacking{srcFile}, true, openBlock, openPage, opts.Level, kc)
 	if err != nil {
 		return err // newContainerOver closes srcFile on error
 	}
@@ -82,6 +81,15 @@ func Compact(cfg sqlite.Config, opts Options) error {
 		}
 	}
 	defer closeSrc()
+
+	// Geometry and encryption posture come from the SOURCE container, not from opts
+	// (opts may default the geometry, and Identities-only opts would build a
+	// plaintext destination). Refuse to rewrite an encrypted source unless opts will
+	// re-seal it — otherwise Compact would silently produce a plaintext copy.
+	if src.cipher != nil && len(kc.rawKey) == 0 && len(kc.recipients) == 0 && len(kc.masters) == 0 {
+		return errors.New("vault: Compact of an encrypted database needs Options.Key or Options.Recipients to re-seal the compacted file")
+	}
+	blockSize, pageSize := src.blockSize, src.pageSize
 
 	tmp, err := os.CreateTemp(filepath.Dir(cfg.Path), "."+filepath.Base(cfg.Path)+".compact-*")
 	if err != nil {
