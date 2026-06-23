@@ -74,6 +74,26 @@ func (c Compression) azLevel() (az.Level, bool) {
 	}
 }
 
+// Compress encodes plain for storage at the given Compression level and returns
+// the stored bytes plus an opaque encoding tag to hand back to Decompress. It
+// never returns data larger than plain (incompressible input is stored verbatim),
+// and CompressionNone stores verbatim. Exposed so a caller that keeps tiny objects
+// outside the chunk store — e.g. inlined in its own table row — uses the exact same
+// on-disk compression as the blobstore.
+func Compress(plain []byte, level Compression) (data []byte, enc int, err error) {
+	lvl, ok := level.azLevel()
+	if !ok {
+		return plain, encVerbatim, nil
+	}
+	return encodeChunk(plain, lvl)
+}
+
+// Decompress reverses Compress. maxSize bounds the output (a decompression-bomb
+// guard); pass the known/expected plaintext size.
+func Decompress(data []byte, enc, maxSize int) ([]byte, error) {
+	return decodeChunk(data, enc, maxSize)
+}
+
 // encodeChunk compresses plain at lvl for storage. If compression does not
 // shrink it (incompressible or already-compressed data), it returns the
 // plaintext verbatim with encVerbatim, so a chunk is never stored larger than
