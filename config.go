@@ -70,6 +70,15 @@ type Config struct {
 	MaxOpenConns    int
 	MaxIdleConns    int
 	ConnMaxLifetime time.Duration
+
+	// TxLock selects the locking mode for transactions opened via BeginTx
+	// (the `_txlock` DSN flag): "deferred" (default), "immediate", or
+	// "exclusive". Use "immediate" for a write-heavy concurrent workload in WAL
+	// mode: a DEFERRED transaction that reads then writes can fail to upgrade its
+	// snapshot (SQLITE_BUSY_SNAPSHOT, which busy_timeout does NOT retry);
+	// IMMEDIATE takes the write lock at BEGIN, so writers queue cleanly on
+	// busy_timeout instead. Empty = leave at the driver default (deferred).
+	TxLock string
 }
 
 // AccessMode is the typed enum for SQLite's `mode=` URI parameter.

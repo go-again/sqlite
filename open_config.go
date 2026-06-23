@@ -326,6 +326,9 @@ func buildDSN(cfg Config, vfsName string) string {
 	if vfsName != "" {
 		q.Set("vfs", vfsName)
 	}
+	if cfg.TxLock != "" {
+		q.Set("_txlock", cfg.TxLock)
+	}
 	for _, p := range pragmaURLValues(cfg.Pragmas) {
 		q.Add("_pragma", p)
 	}

@@ -331,6 +331,7 @@ func TestBuildDSN(t *testing.T) {
 		{"with mode", sqlite.Config{Path: "x.db", Mode: sqlite.ModeReadOnly}, "file:x.db?mode=ro"},
 		{"with vfs", sqlite.Config{Path: "x.db", VFS: "myvfs"}, "file:x.db?vfs=myvfs"},
 		{"with mode and vfs", sqlite.Config{Path: "x.db", Mode: sqlite.ModeReadOnly, VFS: "myvfs"}, "file:x.db?mode=ro&vfs=myvfs"},
+		{"with txlock", sqlite.Config{Path: "x.db", TxLock: "immediate"}, "file:x.db?_txlock=immediate"},
 		// `:memory:` ignores Mode (skipping `?mode=memory` to avoid `file::memory:?mode=memory`).
 		{"memory path ignores mode", sqlite.Config{Path: ":memory:", Mode: sqlite.ModeMemory}, "file::memory:"},
 		// ModeMemory on a named DB is a valid SQLite form (private named in-memory).
@@ -352,6 +353,41 @@ func TestBuildDSN(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestConfig_TxLock pins the typed transaction-lock mode: "immediate" is accepted
+// and a transaction round-trips, and an unknown value is rejected by the driver.
+func TestConfig_TxLock(t *testing.T) {
+	dir := t.TempDir()
+
+	db, err := sqlite.Open(sqlite.Config{Path: filepath.Join(dir, "tx.db"), TxLock: "immediate"})
+	if err != nil {
+		t.Fatalf("Open with TxLock=immediate: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(`CREATE TABLE t(v)`); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	if _, err := tx.Exec(`INSERT INTO t VALUES(1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	// An unknown _txlock value is rejected (eagerly at Open, or on first use).
+	bad, err := sqlite.Open(sqlite.Config{Path: filepath.Join(dir, "bad.db"), TxLock: "bogus"})
+	if err == nil {
+		err = bad.Ping()
+		_ = bad.Close()
+	}
+	if err == nil {
+		t.Error("TxLock=\"bogus\": want an error")
 	}
 }
 
