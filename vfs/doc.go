@@ -50,7 +50,10 @@
 //	vfs.Unregister("myvfs")                          // after every db is closed
 //
 // Embed [NoLock] in a File to satisfy the advisory-lock trio with
-// accept-everything semantics — correct for any single-process backend.
+// accept-everything semantics — correct only for single-connection access. A
+// backend that several pooled connections open at once (WAL especially) must
+// arbitrate the locks for real: embed an [AdvisoryLock] and forward Lock/Unlock/
+// CheckReservedLock to it.
 // Return a [VFSError] from any method to surface a specific SQLITE_*
 // result code (e.g. SQLITE_READONLY, SQLITE_BUSY); a plain error becomes
 // SQLITE_IOERR. The generic dispatcher copies every buffer at the C

@@ -80,6 +80,10 @@ func (c Compression) azLevel() (az.Level, bool) {
 // and CompressionNone stores verbatim. Exposed so a caller that keeps tiny objects
 // outside the chunk store — e.g. inlined in its own table row — uses the exact same
 // on-disk compression as the blobstore.
+//
+// On the verbatim paths (CompressionNone or incompressible input) the returned
+// data ALIASES plain; treat the result as read-only and copy it before mutating
+// either slice.
 func Compress(plain []byte, level Compression) (data []byte, enc int, err error) {
 	lvl, ok := level.azLevel()
 	if !ok {
@@ -89,7 +93,8 @@ func Compress(plain []byte, level Compression) (data []byte, enc int, err error)
 }
 
 // Decompress reverses Compress. maxSize bounds the output (a decompression-bomb
-// guard); pass the known/expected plaintext size.
+// guard); pass the known/expected plaintext size. For verbatim-encoded data the
+// returned slice ALIASES data, so treat it as read-only.
 func Decompress(data []byte, enc, maxSize int) ([]byte, error) {
 	return decodeChunk(data, enc, maxSize)
 }

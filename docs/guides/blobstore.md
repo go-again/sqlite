@@ -81,6 +81,8 @@ Override compression for one object with `blobstore.WithObjectCompression(level)
 
 The trade-off: a compressed object can't use in-place incremental BLOB I/O, so every operation works on a full chunk in memory — a read decompresses the whole chunk, and a partial write read-modify-writes it (a write covering a whole chunk skips the read). Compression fits write-once / read-mostly or sequentially-streamed compressible data (files, logs, JSON), not hot random partial updates or already-compressed payloads. Prefer a larger `WithChunkSize` when compressing. It composes with [encryption](encryption.md): chunks are compressed before the VFS encrypts the pages — the correct order.
 
+For a tiny value you'd rather keep *outside* the store — inlined in its own table row — `blobstore.Compress(plain, level)` / `blobstore.Decompress(data, enc, maxSize)` expose the same codec standalone (incompressible input falls back to verbatim; `Decompress`'s `maxSize` bounds the output as a decompression-bomb guard), so an inlined blob uses the exact same on-disk encoding as the store.
+
 ## Clones, snapshots, and versions
 
 Chunk bytes live in reference-counted blocks, so objects can share content with no copy. `store.Clone(ctx, srcID)` makes a new object identical to an existing one in O(metadata) — it duplicates the chunk mapping and bumps refcounts, never the bytes — and the two diverge copy-on-write as either is written, allocating new blocks only for the chunks that change. `store.Stat` reports the split as `UniqueBytes` (blocks this object alone holds, reclaimed if it is deleted) and `SharedBytes` (blocks held in common with a clone or version).

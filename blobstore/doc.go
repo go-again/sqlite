@@ -160,4 +160,9 @@
 // [WithChunkSize] when compressing. Compression composes with page-level
 // encryption (gosqlite.org/vfs/crypto): chunks are compressed before the VFS
 // encrypts the pages, the correct order.
+//
+// [Compress] and [Decompress] expose the store's codec standalone, for a caller
+// that keeps tiny objects OUTSIDE the chunk store (e.g. inlined in its own table
+// row) but wants the exact same on-disk encoding — incompressible input falls back
+// to verbatim, and Decompress bounds its output as a decompression-bomb guard.
 package blobstore // import "gosqlite.org/blobstore"

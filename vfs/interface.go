@@ -81,7 +81,8 @@ type File interface {
 
 	// Lock raises the advisory lock to at least level; Unlock lowers it.
 	// A single-connection backend can accept every transition (see NoLock);
-	// multiple connections in WAL mode require real arbitration here.
+	// multiple connections in WAL mode require real arbitration here — embed an
+	// [AdvisoryLock] for a ready-made in-process implementation.
 	Lock(level LockLevel) error
 	Unlock(level LockLevel) error
 	// CheckReservedLock reports whether some connection (possibly
@@ -215,8 +216,9 @@ const (
 // connections are active, so the reset can corrupt the database under a
 // concurrent writer. A multi-connection backend must implement real
 // Lock/Unlock/CheckReservedLock (many holders may share SHARED; EXCLUSIVE must
-// fail while any other connection holds SHARED) — see the reference File in the
-// vfs package tests.
+// fail while any other connection holds SHARED) — embed an [AdvisoryLock] for a
+// ready-made in-process implementation (the reference File in the vfs package
+// tests does exactly that).
 //
 //	type myFile struct {
 //		vfs.NoLock

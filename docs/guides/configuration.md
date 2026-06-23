@@ -67,6 +67,14 @@ db.AutoMigrate(&MyModel{}) // *gorm.DB methods, unchanged
 
 The legacy DSN entries (`sql.Open("sqlite", "file:...")`, `sqlitegorm.Open(dsn)`, `sqlitegorm.New(Config{DSN: dsn})`) keep working unchanged. Runnable: [`examples/getting-started/config/`](../../examples/getting-started/config/main.go).
 
+### Transaction locking mode
+
+`Config.TxLock` sets the locking mode for transactions opened via `BeginTx` (the `_txlock` DSN flag): `"deferred"` (default), `"immediate"`, or `"exclusive"`. Reach for `"immediate"` on a **write-heavy concurrent WAL** workload: a DEFERRED transaction that reads then writes can fail to upgrade its snapshot with `SQLITE_BUSY_SNAPSHOT` (which `busy_timeout` does *not* retry), whereas IMMEDIATE takes the write lock at `BEGIN`, so writers queue cleanly on `busy_timeout` instead.
+
+```go
+db, _ := sqlite.Open(sqlite.Config{Path: "myapp.db", Pragmas: sqlite.RecommendedPragmas(), TxLock: "immediate"})
+```
+
 ## Typed pragma values
 
 The `Pragmas` string-valued fields (`JournalMode`, `Synchronous`, `TempStore`) and `Config.Cache` accept typed string-derived enums — autocomplete-friendly and typo-proof:

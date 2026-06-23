@@ -43,6 +43,7 @@
 | Compression: change level or mode (`SetCompression`) | ✓ typed | `TestSetCompressionChangesLevel`, `TestSetCompressionConvertsMode`, `TestSetCompressionConvertIncompressible` | A level change on a compressed object rewrites nothing (mixed-level chunks read fine: a head at Best + a tail at Default). A mode change (raw↔compressed, incl. `CompressionNone`) converts every existing chunk in one transaction; raw→compressed and compressed→raw both round-trip, incompressible chunks fall back to verbatim. |
 | Object metadata + at-rest ratio (`Stat`) | ✓ typed | `TestStatRatioAndMetadata`, `TestCloneSharesAndStat` | Returns logical size, stored bytes split into `UniqueBytes` (blocks this object alone references) and `SharedBytes` (shared with a clone/version), the at-rest compression ratio (computed from block sizes — not a maintained column), chunk size, mode, level. |
 | Compression: bounded decode (bomb defense) | ✓ typed | `TestDecodeChunkBoundRejectsBomb` | Decode capped at chunk size + 1; rejects over-large frames. |
+| Exported `Compress`/`Decompress` (standalone codec) | ✓ typed | `TestCompressDecompressExported` | The store's chunk codec for values kept outside the store (inlined in a row): round-trips and shrinks compressible input, verbatim fallback for `CompressionNone`/incompressible (never grown), and a bounded `Decompress` (bomb guard). |
 
 ## Design invariants (asserted by the tests above)
 
