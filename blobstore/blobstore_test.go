@@ -800,7 +800,7 @@ func TestWriteVsConvertConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			for r := 0; r < 8; r++ { // re-write idempotently to widen the race window
+			for range 8 { // re-write idempotently to widen the race window
 				w, err := s.Writer(ctx, id)
 				if err != nil {
 					errs[i] = err
@@ -815,16 +815,14 @@ func TestWriteVsConvertConcurrent(t *testing.T) {
 			}
 		}(i)
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		levels := []Compression{CompressionNone, CompressionBest}
-		for r := 0; r < 16; r++ {
+		for r := range 16 {
 			// A conversion error (e.g. busy) leaves the object consistent in
 			// whatever mode it is in; the content checks below still hold.
 			_ = s.SetCompression(ctx, id, levels[r%2])
 		}
-	}()
+	})
 	wg.Wait()
 
 	for i := range errs {

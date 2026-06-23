@@ -196,7 +196,7 @@ func TestVersioningKeepN(t *testing.T) {
 	ctx := context.Background()
 	a, _ := s.Create(ctx, WithObjectVersioning(Policy{KeepVersions: 2}))
 
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		writeAt(t, s, a, bytes.Repeat([]byte{byte('a' + i)}, 64), 0)
 		if _, err := s.NewVersion(ctx, a); err != nil {
 			t.Fatalf("NewVersion %d: %v", i, err)
