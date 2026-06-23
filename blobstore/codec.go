@@ -29,7 +29,7 @@ const (
 	codecAZ  = 1 // whole compressed BLOB values per chunk
 )
 
-// Per-chunk storage encodings, recorded in the chunks.enc column.
+// Per-block storage encodings, recorded in the blocks.enc column.
 const (
 	encVerbatim = 0 // data stored as-is (the incompressible fallback)
 	encAZ       = 1 // data is an az-compressed frame

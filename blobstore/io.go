@@ -217,6 +217,9 @@ func (b *batchWriter) WriteAt(p []byte, off int64) (int, error) {
 // Batch yourself in segments. Like Batch it is atomic: on error nothing is
 // persisted and it returns 0.
 func (s *Store) WriteAtFrom(ctx context.Context, id, off int64, r io.Reader) (int64, error) {
+	if s.readOnly {
+		return 0, fmt.Errorf("blobstore: WriteAtFrom %d: %w", id, ErrReadOnly)
+	}
 	if off < 0 {
 		return 0, errors.New("blobstore: WriteAtFrom: negative offset")
 	}
@@ -342,23 +345,15 @@ func eachChunkSpan(off, n, chunk int64, fn func(seq, inOff, span, bufOff int64) 
 }
 
 // writeChunkRaw writes src at in-chunk offset inOff into chunk (id, seq) via
-// in-place incremental BLOB I/O, allocating the chunk (zeroblob) on first use.
+// in-place incremental BLOB I/O. It resolves a privately-owned block for the
+// chunk first (allocating a zeroblob on first use, copy-on-write if the block is
+// shared) so the in-place write never disturbs another chunk sharing the block.
 func (s *Store) writeChunkRaw(ctx context.Context, sc *sql.Conn, id, seq, chunk, inOff int64, src []byte) error {
-	rowid, ok, err := s.chunkRowid(ctx, sc, id, seq)
+	block, err := s.privateRawBlock(ctx, sc, id, seq, chunk)
 	if err != nil {
 		return err
 	}
-	if !ok {
-		res, err := sc.ExecContext(ctx,
-			`INSERT INTO `+s.chunks+` (obj, seq, data) VALUES (?, ?, zeroblob(?))`, id, seq, chunk)
-		if err != nil {
-			return err
-		}
-		if rowid, err = res.LastInsertId(); err != nil {
-			return err
-		}
-	}
-	return s.blobWrite(sc, rowid, src, inOff)
+	return s.blobWrite(sc, block, src, inOff)
 }
 
 // writeChunkCompressed writes src at in-chunk offset inOff into chunk (id, seq)
@@ -382,7 +377,7 @@ func (s *Store) writeChunkCompressed(ctx context.Context, sc *sql.Conn, id, seq,
 // readChunkRaw reads into dst at in-chunk offset inOff from chunk (id, seq); a
 // missing chunk is a sparse hole and dst is zero-filled.
 func (s *Store) readChunkRaw(ctx context.Context, sc *sql.Conn, id, seq, inOff int64, dst []byte) error {
-	rowid, ok, err := s.chunkRowid(ctx, sc, id, seq)
+	block, ok, err := s.blockOf(ctx, sc, id, seq)
 	if err != nil {
 		return err
 	}
@@ -390,7 +385,7 @@ func (s *Store) readChunkRaw(ctx context.Context, sc *sql.Conn, id, seq, inOff i
 		clear(dst)
 		return nil
 	}
-	return s.blobRead(sc, rowid, dst, inOff)
+	return s.blobRead(sc, block, dst, inOff)
 }
 
 // readChunkCompressed fills dst from the decompressed plaintext of chunk
@@ -442,6 +437,9 @@ func rollbackIf(sc *sql.Conn, committed *bool) {
 // nothing was persisted. (readAt uses a read-only snapshot with nothing to
 // commit and stays separate.)
 func (s *Store) withTx(ctx context.Context, fn func(sc *sql.Conn) error) error {
+	if s.readOnly {
+		return ErrReadOnly
+	}
 	sc, err := s.db.Conn(ctx)
 	if err != nil {
 		return err

@@ -5,22 +5,26 @@
 // a value cannot grow once allocated, and the usual "grow with
 // `col || zeroblob(delta)`" trick silently truncates (SQLite drops zeroblob
 // operands under `||`). blobstore is the supported answer for an
-// unknown-or-growing size: it manages a chunk table for you and exposes each
-// object as an [io.ReaderAt] / [io.WriterAt], filling the gap that every
-// "put a file in SQLite" app otherwise re-derives by hand.
+// unknown-or-growing size: it manages the block and chunk tables for you and
+// exposes each object as an [io.ReaderAt] / [io.WriterAt], filling the gap that
+// every "put a file in SQLite" app otherwise re-derives by hand.
 //
 // # Model
 //
-// Each object is a sequence of fixed-size chunks. A chunk is allocated full
-// (via zeroblob, the one correct use) the first time any byte in it is
-// written, then written in place with incremental BLOB I/O — so a value never
-// grows and the zeroblob/`||` trap never arises. Growth is just new chunk
-// rows. The object's logical size is authoritative: reads clamp to it, and a
-// chunk that was never written reads back as zeros (sparse holes are free).
+// Each object is a sequence of fixed-size chunks, and each chunk maps to a
+// block — the reference-counted row that actually holds its bytes. A block is
+// allocated full (via zeroblob, the one correct use) the first time any byte in
+// its chunk is written, then written in place with incremental BLOB I/O — so a
+// value never grows and the zeroblob/`||` trap never arises. Growth is just new
+// chunk and block rows. The object's logical size is authoritative: reads clamp
+// to it, and a chunk that was never written reads back as zeros (sparse holes
+// are free). When a block is referenced by more than one chunk it is copied
+// before an in-place write (copy-on-write), so chunks that share a block stay
+// independent — the foundation for cheap whole-object copies.
 //
 // # Usage
 //
-//	store, err := blobstore.Open(db, "files")           // creates files_objects + files_chunks
+//	store, err := blobstore.Open(db, "files")           // creates files_objects, files_blocks, files_chunks
 //	id, err := store.Create(ctx)                         // a new empty object
 //
 //	w, err := store.Writer(ctx, id)                      // io.WriterAt + io.Closer
@@ -32,13 +36,40 @@
 //	r.Close()
 //
 //	store.Truncate(ctx, id, 100)                         // grow (sparse) or shrink
-//	store.Delete(ctx, id)                                // frees every chunk
+//	store.Delete(ctx, id)                                // frees the blocks it alone holds
 //
-// Open creates two tables from the name you pass — "<name>_objects" (one row
-// per object: id, logical size, chunk size) and "<name>_chunks" (the data,
-// one rowid-addressable BLOB per chunk). The name is validated as a SQL
-// identifier. Both tables share whatever database the [gosqlite.org.DB] points
-// at; put other application tables in the same database freely.
+// Open creates four tables from the name you pass — "<name>_objects" (one row
+// per object: id, logical size, chunk size, mode, retention), "<name>_blocks"
+// (the reference-counted block data), "<name>_chunks" (the (object, sequence) ->
+// block mapping), and "<name>_versions" (point-in-time snapshots). The name is
+// validated as a SQL identifier. All of them share whatever database the
+// [gosqlite.org.DB] points at; put other application tables in the same database
+// freely. [OpenReadOnly] reattaches to an already-provisioned store without
+// issuing any DDL, so it works against a read-only database (snapshot browsing,
+// an image on read-only media) and refuses every write with [ErrReadOnly].
+//
+// # Sharing: clone, versions, dedup
+//
+// Because chunk bytes live in reference-counted blocks, several objects can
+// share content with no copy. [Store.Clone] makes a new object identical to an
+// existing one in O(metadata) — it copies the mapping and bumps refcounts, never
+// the bytes — and the two diverge copy-on-write as either is written.
+// [Store.Stat] reports the split as UniqueBytes (blocks this object alone holds,
+// reclaimed if it is deleted) and SharedBytes (blocks held in common with a
+// clone or version).
+//
+// A version is a copy-on-write snapshot of an object's content: [Store.NewVersion]
+// records one (reusing Clone, so it is O(metadata) and shares all blocks with the
+// live object until it diverges), [Store.ListVersions] enumerates them,
+// [Store.OpenVersion] reads one back immutably. A per-object retention [Policy]
+// (set with [WithObjectVersioning] or [Store.SetRetention]) bounds how many or
+// how old versions are kept; [Store.Prune] and the sweep after each NewVersion
+// enforce it, freeing the blocks a dropped version alone held.
+//
+// [WithDedup] turns on content-addressed deduplication: a full-block write whose
+// bytes match an already-stored block references that block instead of writing a
+// copy, deduplicating identical content across objects at the cost of a content
+// hash per write.
 //
 // # Concurrency
 //

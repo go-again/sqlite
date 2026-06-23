@@ -1,5 +1,7 @@
 package blobstore
 
+import "time"
+
 // DefaultChunkSize is the chunk size used for objects created by a Store
 // opened without [WithChunkSize]. 64 KiB balances per-chunk overhead against
 // the wasted tail of the final (partially filled) chunk.
@@ -53,12 +55,42 @@ func WithCompression(c Compression) Option {
 	return func(s *Store) { s.compression = c }
 }
 
+// WithDedup turns on content-addressed deduplication of block bytes: a write
+// whose resulting block is byte-identical to one already stored references that
+// block (bumping its refcount) instead of inserting a copy, giving cross-object
+// dedup of identical content. It costs a content hash per full-block write, so
+// leave it off for write-hot or already-unique data. It applies to compressed
+// objects and full-chunk writes; raw in-place partial writes are not
+// deduplicated (their bytes are mutated in place, not written whole).
+func WithDedup() Option {
+	return func(s *Store) { s.dedup = true }
+}
+
+// Policy is a per-object version-retention policy. The zero value keeps every
+// version forever. A version is PRUNED (by [Store.NewVersion]'s trailing sweep
+// or an explicit [Store.Prune]) if it falls outside KeepVersions OR is older
+// than MaxAge — kept only if it is both among the newest KeepVersions and within
+// the age bound.
+type Policy struct {
+	KeepVersions int           // keep only the N most recent versions (0 = unlimited)
+	MaxAge       time.Duration // delete versions older than this (0 = no age bound)
+}
+
 // CreateOption customizes a single [Store.Create].
 type CreateOption func(*createConfig)
 
 type createConfig struct {
-	compression Compression
-	set         bool
+	compression  Compression
+	set          bool
+	keepVersions int
+	maxAge       time.Duration
+}
+
+// WithObjectVersioning sets the retention [Policy] for the versions of this one
+// object at [Store.Create]. Change it later with [Store.SetRetention]. Without
+// it an object keeps every version it is given until you prune.
+func WithObjectVersioning(p Policy) CreateOption {
+	return func(cc *createConfig) { cc.keepVersions = p.KeepVersions; cc.maxAge = p.MaxAge }
 }
 
 // WithObjectCompression overrides the Store's [WithCompression] default for this

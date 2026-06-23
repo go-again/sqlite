@@ -97,7 +97,7 @@ func main() {
 	size, _ = store.Size(ctx, id)
 	fmt.Printf("after truncate, size=%d\n", size)
 
-	// Delete frees every chunk the object owned.
+	// Delete frees the blocks the object alone held.
 	if err := store.Delete(ctx, id); err != nil {
 		log.Fatalf("Delete: %v", err)
 	}

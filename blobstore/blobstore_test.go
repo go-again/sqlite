@@ -663,8 +663,9 @@ func TestEmptyAndNegativeArgs(t *testing.T) {
 
 // TestInvalidChunkGuard verifies a row with a non-positive chunk size (which
 // only a foreign writer could create — our own CHECK forbids it) yields an
-// error rather than an integer divide-by-zero panic. The tables are
-// pre-created WITHOUT the CHECK so the poison row can be inserted.
+// error rather than an integer divide-by-zero panic. The objects table is
+// pre-created WITHOUT the CHECK so the poison row can be inserted; the guard
+// fires on the chunk size before any chunk/block row is touched.
 func TestInvalidChunkGuard(t *testing.T) {
 	db, err := sqlite.OpenWAL(filepath.Join(t.TempDir(), "poison.db"))
 	if err != nil {
@@ -672,16 +673,11 @@ func TestInvalidChunkGuard(t *testing.T) {
 	}
 	t.Cleanup(func() { db.Close() })
 	ctx := context.Background()
-	for _, ddl := range []string{
-		`CREATE TABLE files_objects(id INTEGER PRIMARY KEY, size INTEGER NOT NULL DEFAULT 0, chunk INTEGER NOT NULL)`,
-		`CREATE TABLE files_chunks(id INTEGER PRIMARY KEY, obj INTEGER NOT NULL, seq INTEGER NOT NULL, data BLOB NOT NULL)`,
-		`CREATE UNIQUE INDEX files_chunks_obj_seq ON files_chunks(obj, seq)`,
-	} {
-		if _, err := db.ExecContext(ctx, ddl); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := db.ExecContext(ctx,
+		`CREATE TABLE files_objects(id INTEGER PRIMARY KEY, size INTEGER NOT NULL DEFAULT 0, chunk INTEGER NOT NULL)`); err != nil {
+		t.Fatal(err)
 	}
-	s, err := Open(db, "files") // reuses the no-CHECK tables (IF NOT EXISTS)
+	s, err := Open(db, "files") // reuses the no-CHECK objects table (IF NOT EXISTS)
 	if err != nil {
 		t.Fatal(err)
 	}

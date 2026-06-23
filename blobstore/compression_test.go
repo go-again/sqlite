@@ -46,7 +46,7 @@ func TestCompressRoundTripAllLevels(t *testing.T) {
 		}
 		var enc int
 		if err := db.QueryRowContext(ctx,
-			`SELECT enc FROM files_chunks WHERE obj=? ORDER BY seq LIMIT 1`, id).Scan(&enc); err != nil {
+			`SELECT b.enc FROM files_chunks c JOIN files_blocks b ON c.block=b.id WHERE c.obj=? ORDER BY c.seq LIMIT 1`, id).Scan(&enc); err != nil {
 			t.Fatal(err)
 		}
 		if enc != encAZ {
@@ -112,7 +112,7 @@ func TestCompressIncompressibleFallback(t *testing.T) {
 	}
 	var enc, dlen int
 	if err := db.QueryRowContext(ctx,
-		`SELECT enc, length(data) FROM files_chunks WHERE obj=? AND seq=0`, id).Scan(&enc, &dlen); err != nil {
+		`SELECT b.enc, length(b.data) FROM files_chunks c JOIN files_blocks b ON c.block=b.id WHERE c.obj=? AND c.seq=0`, id).Scan(&enc, &dlen); err != nil {
 		t.Fatal(err)
 	}
 	if enc != encVerbatim {
@@ -188,7 +188,7 @@ func TestCompressReattachAndMixedModes(t *testing.T) {
 	}
 	var enc int
 	if err := db.QueryRowContext(ctx,
-		`SELECT enc FROM files_chunks WHERE obj=? AND seq=0`, compID).Scan(&enc); err != nil {
+		`SELECT b.enc FROM files_chunks c JOIN files_blocks b ON c.block=b.id WHERE c.obj=? AND c.seq=0`, compID).Scan(&enc); err != nil {
 		t.Fatal(err)
 	}
 	if enc != encAZ {
@@ -226,7 +226,7 @@ func objectCodec(t *testing.T, db *sqlite.DB, id int64) int {
 func chunkEnc(t *testing.T, db *sqlite.DB, id int64) int {
 	t.Helper()
 	var enc int
-	if err := db.QueryRow(`SELECT enc FROM files_chunks WHERE obj=? AND seq=0`, id).Scan(&enc); err != nil {
+	if err := db.QueryRow(`SELECT b.enc FROM files_chunks c JOIN files_blocks b ON c.block=b.id WHERE c.obj=? AND c.seq=0`, id).Scan(&enc); err != nil {
 		t.Fatal(err)
 	}
 	return enc
@@ -299,7 +299,7 @@ func objectLevel(t *testing.T, db *sqlite.DB, id int64) int {
 func chunkData(t *testing.T, db *sqlite.DB, id int64) []byte {
 	t.Helper()
 	var data []byte
-	if err := db.QueryRow(`SELECT data FROM files_chunks WHERE obj=? AND seq=0`, id).Scan(&data); err != nil {
+	if err := db.QueryRow(`SELECT b.data FROM files_chunks c JOIN files_blocks b ON c.block=b.id WHERE c.obj=? AND c.seq=0`, id).Scan(&data); err != nil {
 		t.Fatal(err)
 	}
 	return data
