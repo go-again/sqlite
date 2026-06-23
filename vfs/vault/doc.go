@@ -36,12 +36,12 @@
 //
 // # Snapshot mode — [OpenSnapshot]
 //
-// [OpenSnapshot] is the alternative: it inflates the compressed file into a
-// private working copy, opens that copy, and recompresses it back over the
-// original path at Close — so a single defer db.Close() drains the pool and
-// rewrites the compressed file.
+// [OpenSnapshot] is the alternative: it inflates the file (compressed or raw) into
+// a private working copy, opens that copy, and repacks it back over the original
+// path at Close — so a single defer db.Close() drains the pool and rewrites the
+// file.
 //
-//	db, err := vault.OpenSnapshot(sqlite.Config{Path: "app.db.az"}, vault.Options{})
+//	db, err := vault.OpenSnapshot(sqlite.Config{Path: "app.db"}, vault.Options{Level: vault.CompressionDefault})
 //	defer db.Close()
 //
 // It compresses the database AT REST only; while open it runs from a full,
@@ -99,7 +99,7 @@
 // [gosqlite.org/vfs/crypto.DeriveKey]:
 //
 //	key, _ := crypto.DeriveKey(passphrase, salt, crypto.Adiantum)
-//	db, err := vault.Open(sqlite.Config{Path: "app.db.az"}, vault.Options{Key: key})
+//	db, err := vault.Open(sqlite.Config{Path: "app.db"}, vault.Options{Key: key})
 //
 // To let several parties open one database, each with their own key and no shared
 // secret, set [Options.Recipients] instead of [Options.Key]: a random data key
@@ -111,7 +111,7 @@
 //
 //	alice, _ := keyring.SSHRecipient(alicePubKey)
 //	bob, _ := keyring.SSHRecipient(bobPubKey)
-//	db, err := vault.Open(sqlite.Config{Path: "app.db.az"}, vault.Options{Recipients: []keyring.Recipient{alice, bob}})
+//	db, err := vault.Open(sqlite.Config{Path: "app.db"}, vault.Options{Recipients: []keyring.Recipient{alice, bob}})
 //
 // The recipient set changes on a closed database without re-encrypting via
 // [Rewrap] (rewrap the data key to a new set — O(1), access-list management) or,

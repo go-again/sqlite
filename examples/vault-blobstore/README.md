@@ -2,7 +2,7 @@
 
 A [`blobstore`](../../docs/guides/blobstore.md) is just SQL and incremental BLOB I/O over a `*sqlite.DB`, so whatever VFS protects that database protects the store — no blobstore-specific configuration. This example opens the store's database through [`vfs/vault`](../../docs/guides/encryption.md), the container where compression and encryption are independent options.
 
-It encrypts the container **to two recipients** (Alice and Bob, each opens with their own key — no shared secret), with compression and **authenticated** (tamper-evident, rollback-resistant) mode turned on. It writes an object, confirms the plaintext is absent from the raw file, reads it back as each recipient, and confirms a stranger (not a recipient) is refused.
+It encrypts the container **to two recipients** (Alice and Bob, each opens with their own key — no shared secret), with compression and **authenticated** (tamper-evident) mode turned on. It writes an object, confirms the plaintext is absent from the raw file, reads it back as each recipient, and confirms a stranger (not a recipient) is refused. (For full rollback resistance, add `Options.Anchor`; this example does not.)
 
 For the single-key case, see the sibling [`encrypted-blobstore`](../encrypted-blobstore/) (over `vfs/crypto`).
 

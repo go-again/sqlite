@@ -3,8 +3,8 @@
 // whatever VFS protects that database protects the store — no blobstore-specific
 // configuration. Here the VFS is gosqlite.org/vfs/vault: the container is encrypted
 // to several recipients (each opens with their own key, no shared secret), the data
-// is compressed and then encrypted, and authenticated mode makes tampering or
-// rollback detectable.
+// is compressed and then encrypted, and authenticated mode makes tampering (and a
+// partial rollback) detectable. (Full rollback resistance would add Options.Anchor.)
 //
 // The flow: write an object into a store encrypted to Alice and Bob; confirm the
 // plaintext is absent from the raw file; reopen as Alice and as Bob and read it
