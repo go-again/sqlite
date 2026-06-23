@@ -104,25 +104,12 @@ func (of *openFile) detachShm() {
 // table plus the four xShm* slots. Files whose VFS returns a [ShmFile]
 // point here; everyone else stays on the iVersion-1 table.
 func initShmIoMethods() {
-	ioMethodsShm = sqlite3.Tsqlite3_io_methods{
-		FiVersion:               2,
-		FxClose:                 cabi.FuncPointer(xCloseTrampoline),
-		FxRead:                  cabi.FuncPointer(xReadTrampoline),
-		FxWrite:                 cabi.FuncPointer(xWriteTrampoline),
-		FxTruncate:              cabi.FuncPointer(xTruncateTrampoline),
-		FxSync:                  cabi.FuncPointer(xSyncTrampoline),
-		FxFileSize:              cabi.FuncPointer(xFileSizeTrampoline),
-		FxLock:                  cabi.FuncPointer(xLockTrampoline),
-		FxUnlock:                cabi.FuncPointer(xUnlockTrampoline),
-		FxCheckReservedLock:     cabi.FuncPointer(xCheckReservedLockTrampoline),
-		FxFileControl:           cabi.FuncPointer(xFileControlTrampoline),
-		FxSectorSize:            cabi.FuncPointer(xSectorSizeTrampoline),
-		FxDeviceCharacteristics: cabi.FuncPointer(xDeviceCharacteristicsTrampoline),
-		FxShmMap:                cabi.FuncPointer(xShmMapTrampoline),
-		FxShmLock:               cabi.FuncPointer(xShmLockTrampoline),
-		FxShmBarrier:            cabi.FuncPointer(xShmBarrierTrampoline),
-		FxShmUnmap:              cabi.FuncPointer(xShmUnmapTrampoline),
-	}
+	ioMethodsShm = baseIoMethods() // shares the base trampolines with initIoMethods
+	ioMethodsShm.FiVersion = 2
+	ioMethodsShm.FxShmMap = cabi.FuncPointer(xShmMapTrampoline)
+	ioMethodsShm.FxShmLock = cabi.FuncPointer(xShmLockTrampoline)
+	ioMethodsShm.FxShmBarrier = cabi.FuncPointer(xShmBarrierTrampoline)
+	ioMethodsShm.FxShmUnmap = cabi.FuncPointer(xShmUnmapTrampoline)
 	ioMethodsShmPtr.Store(uintptr(unsafe.Pointer(&ioMethodsShm)))
 }
 

@@ -9,12 +9,13 @@ import (
 	"gosqlite.org/internal/cabi"
 )
 
-// initIoMethods builds the single, shared io-methods table every file
-// opened through any user VFS points at. FiVersion 1 omits the
-// shared-memory (xShm*) slots — WAL is Phase 2 — so SQLite keeps a
-// custom-VFS database in rollback-journal mode.
-func initIoMethods() {
-	ioMethods = sqlite3.Tsqlite3_io_methods{
+// baseIoMethods returns the version-1 io-methods table with every non-shm slot
+// wired. initIoMethods stores it as-is; initShmIoMethods (shm.go) starts from it,
+// bumps FiVersion to 2, and fills the FxShm* slots — so the two tables share one
+// definition of the base trampolines and a rename cannot update one and skip the
+// other.
+func baseIoMethods() sqlite3.Tsqlite3_io_methods {
+	return sqlite3.Tsqlite3_io_methods{
 		FiVersion:               1,
 		FxClose:                 cabi.FuncPointer(xCloseTrampoline),
 		FxRead:                  cabi.FuncPointer(xReadTrampoline),
@@ -29,6 +30,14 @@ func initIoMethods() {
 		FxSectorSize:            cabi.FuncPointer(xSectorSizeTrampoline),
 		FxDeviceCharacteristics: cabi.FuncPointer(xDeviceCharacteristicsTrampoline),
 	}
+}
+
+// initIoMethods builds the single, shared io-methods table every file
+// opened through any user VFS points at. FiVersion 1 omits the
+// shared-memory (xShm*) slots — WAL is Phase 2 — so SQLite keeps a
+// custom-VFS database in rollback-journal mode.
+func initIoMethods() {
+	ioMethods = baseIoMethods()
 	ioMethodsPtr.Store(uintptr(unsafe.Pointer(&ioMethods)))
 }
 
