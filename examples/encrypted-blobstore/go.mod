@@ -8,19 +8,13 @@ replace gosqlite.org/blobstore => ../../blobstore
 
 replace gosqlite.org/vfs/crypto => ../../vfs/crypto
 
-replace gosqlite.org/crypto/keyring => ../../crypto/keyring
-
 require (
 	gosqlite.org v0.10.0
 	gosqlite.org/blobstore v0.0.0-00010101000000-000000000000
-	gosqlite.org/crypto/keyring v0.0.0
 	gosqlite.org/vfs/crypto v0.0.0-00010101000000-000000000000
 )
 
 require (
-	filippo.io/age v1.3.1 // indirect
-	filippo.io/edwards25519 v1.1.0 // indirect
-	filippo.io/hpke v0.4.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-again/az v0.4.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect

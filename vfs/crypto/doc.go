@@ -71,6 +71,14 @@
 //     header / checksum region. Pair AES-XTS with disk-level
 //     integrity (LUKS dm-integrity, ZFS) if active tampering is in
 //     scope.
+//   - Adiantum vs AES-XTS equality granularity: because the cipher is
+//     deterministic per `(kind, offset)` with no nonce, two ciphertexts
+//     at the same offset are equal iff their plaintexts are. Under
+//     AES-XTS an offline attacker comparing two versions of a page (or
+//     successive `-wal` writes to one slot) learns equality at 16-byte-
+//     block granularity — which sub-regions of the page changed — while
+//     Adiantum (wide-block) reveals only whole-page equality. Prefer the
+//     Adiantum default where this finer leak matters.
 //   - Key is the caller's problem. We treat the byte slice as opaque
 //     once you hand it to [New]. To turn a passphrase + salt into a
 //     correctly-sized key, use [DeriveKey] (Argon2id with interactive
@@ -80,43 +88,14 @@
 //     scrambles every read — SQLite reports "file is not a database"
 //     or similar within ~one query.
 //
-// # Multiple recipients
+// # When to use vfs/vault instead
 //
-// Instead of [Options.Key], set [Options.Recipients] to let several parties open
-// one encrypted database with their own identity and no shared secret. A random
-// data key encrypts the pages and is wrapped per recipient — an SSH key, a
-// passphrase, or an age recipient (build them with
-// [gosqlite.org/crypto/keyring]) — into a detached "<path>.keyslot" sidecar
-// written next to the database. Open it with [Options.Identities]; the first
-// matching identity unwraps the data key. The data key is resolved at the first
-// database open (where the path is known), so a wrong or missing identity makes
-// the database fail to open — the underlying [ErrNoIdentity] / [ErrUnauthorized]
-// flatten through SQLite's open path to a generic open error.
-//
-//	alice, _ := keyring.SSHRecipient(alicePubKey)
-//	db, _ := crypto.Open(cfg, crypto.Options{Recipients: []keyring.Recipient{alice, bob}})
-//	// reopen: db, _ := crypto.Open(cfg, crypto.Options{Identities: []keyring.Identity{aliceID}})
-//
-// [Options.Masters] pin ed25519 administrators: the keyslot is signed and a
-// reader that pins the masters it trusts rejects a keyslot not signed by one
-// ([ErrUnauthorized]); [Options.SignWith] is the creating master. Change the
-// recipient/master set on a closed database with [Rewrap], which re-seals the
-// sidecar in place (O(1); a master gate applies — [ErrNotMaster]). The keyslot
-// sidecar must travel with the database (back it up and move it together); losing
-// it makes the database unrecoverable, the detached-header trade.
-//
-// There is no Rekey here. True cryptographic revocation needs a fresh data key
-// and a re-encryption of every page, but re-encrypting the database file and
-// rewriting the detached sidecar are two files with no atomic cross-file update,
-// so a crash mid-operation would leave them describing different keys. Rewrap
-// (access-list management) is offered; for true revocation re-create the file or
-// use [gosqlite.org/vfs/compress], whose keyslot lives inside its container.
-//
-// Read-only recipients (the writer-signed authenticated mode of vfs/compress) do
-// NOT apply here: this VFS is a transparent page cipher over a vanilla SQLite
-// file, with no per-commit boundary or metadata region to carry per-slot hashes
-// or a signed root. Use [gosqlite.org/vfs/compress] when you need read-only
-// recipients.
+// This VFS is confidentiality-only with a single raw [Options.Key]: a headerless,
+// length-preserving page cipher, no extra files. When you need several parties to
+// open one database with their own key and no shared secret (a wrapped data key),
+// crash-safe key rotation, or tamper-evident / rollback-resistant storage
+// (per-page integrity and a signed root), use [gosqlite.org/vfs/vault] — a
+// self-contained container format that carries the keyslot inside the file.
 //
 // # Drift discipline
 //

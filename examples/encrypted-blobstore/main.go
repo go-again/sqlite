@@ -1,19 +1,20 @@
 // Command encrypted-blobstore shows that a blobstore inherits encryption at rest
 // for free: open the store's database through gosqlite.org/vfs/crypto and every
 // object, chunk, and block it writes is encrypted on disk, with no
-// blobstore-specific configuration. The whole "can the encryption model port to
+// blobstore-specific configuration. The whole "does encryption compose with
 // blobstore?" question reduces to composition — the store is just SQL and
 // incremental BLOB I/O over a *sqlite.DB, so whatever VFS encrypts that database
 // encrypts the store.
 //
-// Here the database is encrypted to two recipients (an age-style keyslot), so
-// either can open the store with their own key and no shared secret — the
-// vfs/crypto multi-recipient model applied to a blob store.
+// vfs/crypto here is confidentiality-only with a single raw key. For
+// multi-recipient or tamper-evident encryption under a blobstore, the same
+// composition works with gosqlite.org/vfs/vault.
 package main
 
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"fmt"
 	"io"
 	"log"
@@ -22,7 +23,6 @@ import (
 
 	sqlite "gosqlite.org"
 	"gosqlite.org/blobstore"
-	"gosqlite.org/crypto/keyring"
 	"gosqlite.org/vfs/crypto"
 )
 
@@ -40,40 +40,35 @@ func main() {
 	fmt.Printf("encrypted blobstore OK: %d bytes round-tripped; plaintext absent on disk\n", n)
 }
 
-// roundTrip writes an object into a blobstore whose database is encrypted to two
-// recipients, confirms the payload is not present in the raw file, then reopens
-// as one recipient and reads it back. It returns the number of bytes verified.
+// roundTrip writes an object into a blobstore whose database is encrypted at
+// rest, confirms the payload is not present in the raw file, then reopens with
+// the same key and reads it back. It returns the number of bytes verified.
 func roundTrip(dir string) (int, error) {
 	path := filepath.Join(dir, "vault.db")
 	payload := []byte("the quick brown fox jumps over the lazy dog — secret at rest")
 
-	aliceR, aliceID, err := keyring.GenerateX25519()
-	if err != nil {
-		return 0, err
-	}
-	bobR, _, err := keyring.GenerateX25519()
-	if err != nil {
+	key := make([]byte, crypto.KeyLen(crypto.Adiantum)) // 32-byte Adiantum key
+	if _, err := rand.Read(key); err != nil {
 		return 0, err
 	}
 
-	// Write: encrypt the database to Alice and Bob, then run a blobstore over it.
+	// Write: encrypt the database, then run a blobstore over it.
 	var id int64
-	if err := withStore(path, crypto.Options{Recipients: []keyring.Recipient{aliceR, bobR}},
-		func(store *blobstore.Store) error {
-			oid, err := store.Create(context.Background())
-			if err != nil {
-				return err
-			}
-			id = oid
-			w, err := store.Writer(context.Background(), oid)
-			if err != nil {
-				return err
-			}
-			if _, err := w.WriteAt(payload, 0); err != nil {
-				return err
-			}
-			return w.Close()
-		}); err != nil {
+	if err := withStore(path, key, func(store *blobstore.Store) error {
+		oid, err := store.Create(context.Background())
+		if err != nil {
+			return err
+		}
+		id = oid
+		w, err := store.Writer(context.Background(), oid)
+		if err != nil {
+			return err
+		}
+		if _, err := w.WriteAt(payload, 0); err != nil {
+			return err
+		}
+		return w.Close()
+	}); err != nil {
 		return 0, fmt.Errorf("write: %w", err)
 	}
 
@@ -86,22 +81,21 @@ func roundTrip(dir string) (int, error) {
 		return 0, fmt.Errorf("plaintext found in %s — not encrypted at rest", path)
 	}
 
-	// Reopen as Alice alone (her identity unwraps the data key) and read it back.
+	// Reopen with the same key and read it back.
 	var got []byte
-	if err := withStore(path, crypto.Options{Identities: []keyring.Identity{aliceID}},
-		func(store *blobstore.Store) error {
-			size, err := store.Size(context.Background(), id)
-			if err != nil {
-				return err
-			}
-			r, err := store.Reader(context.Background(), id)
-			if err != nil {
-				return err
-			}
-			defer r.Close()
-			got, err = io.ReadAll(io.NewSectionReader(r, 0, size))
+	if err := withStore(path, key, func(store *blobstore.Store) error {
+		size, err := store.Size(context.Background(), id)
+		if err != nil {
 			return err
-		}); err != nil {
+		}
+		r, err := store.Reader(context.Background(), id)
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		got, err = io.ReadAll(io.NewSectionReader(r, 0, size))
+		return err
+	}); err != nil {
 		return 0, fmt.Errorf("read: %w", err)
 	}
 	if !bytes.Equal(got, payload) {
@@ -110,12 +104,12 @@ func roundTrip(dir string) (int, error) {
 	return len(got), nil
 }
 
-// withStore opens an encrypted database with opts, runs a compressed blobstore
+// withStore opens an encrypted database with key, runs a compressed blobstore
 // over it through fn, and closes both. Compression is incidental — it shows the
 // two composing cleanly: the store compresses each chunk, the VFS then encrypts
 // each page (compress-then-encrypt, the correct order).
-func withStore(path string, opts crypto.Options, fn func(*blobstore.Store) error) error {
-	db, err := crypto.Open(sqlite.Config{Path: path, Pragmas: sqlite.RecommendedPragmas()}, opts)
+func withStore(path string, key []byte, fn func(*blobstore.Store) error) error {
+	db, err := crypto.Open(sqlite.Config{Path: path, Pragmas: sqlite.RecommendedPragmas()}, crypto.Options{Key: key})
 	if err != nil {
 		return err
 	}

@@ -319,15 +319,10 @@ func decryptSpan(c PageCipher, span []byte, baseOffset int64, pageSize int64, ki
 	}
 }
 
-// cipherFor loads the resolved page cipher, or nil if it is not yet available
-// (a recipients database whose lazy resolve has not run or failed — by the open
-// ordering this should never be observed during real I/O, but a nil here returns
-// an error rather than dereferencing across a C frame).
+// cipherFor returns the page cipher, built once in New from the raw key and
+// immutable thereafter (so the io trampolines read it without synchronization).
 func (fs *FS) cipherFor() PageCipher {
-	if p := fs.cipher.Load(); p != nil {
-		return *p
-	}
-	return nil
+	return fs.cipher
 }
 
 // All consumer-side function-pointer casts go through cabi.CallX*; see

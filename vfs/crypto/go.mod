@@ -5,16 +5,12 @@ go 1.25.0
 require (
 	golang.org/x/crypto v0.53.0
 	gosqlite.org v0.10.0
-	gosqlite.org/crypto/keyring v0.0.0
 	lukechampine.com/adiantum v1.1.1
 	modernc.org/libc v1.72.3
 	modernc.org/sqlite v1.52.0
 )
 
 require (
-	filippo.io/age v1.3.1 // indirect
-	filippo.io/edwards25519 v1.1.0 // indirect
-	filippo.io/hpke v0.4.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
@@ -28,5 +24,3 @@ require (
 )
 
 replace gosqlite.org => ../..
-
-replace gosqlite.org/crypto/keyring => ../../crypto/keyring

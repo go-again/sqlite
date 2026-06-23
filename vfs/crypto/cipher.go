@@ -39,7 +39,7 @@ const (
 )
 
 // PageCipher is a length-preserving, tweakable encrypt/decrypt primitive. This
-// VFS uses it per page; other gosqlite.org storage layers (e.g. vfs/compress)
+// VFS uses it per page; other gosqlite.org storage layers (e.g. vfs/vault)
 // reuse it per block. Both methods operate in place — dst and src may share
 // backing memory — and add no nonce, tag, or length (confidentiality at rest
 // only; no MAC). Build one with [NewCipher].
@@ -123,7 +123,7 @@ func (c *xtsCipher) Decrypt(buf []byte, pageNum uint64, fileKind byte) {
 // KeyLen returns the raw key length in bytes that [NewCipher] requires for the
 // given cipher: 32 for [Adiantum], 64 for [AESXTS] (two 32-byte AES keys). It is
 // the single source of the per-cipher key size that NewCipher, [DeriveKey], and
-// downstream layers (e.g. the vfs/compress data key) size against, so adding a
+// downstream layers (e.g. the vfs/vault data key) size against, so adding a
 // cipher updates one place.
 func KeyLen(kind Cipher) int {
 	if kind == AESXTS {
