@@ -48,10 +48,6 @@ func Compact(cfg sqlite.Config, opts Options) error {
 	if err != nil {
 		return err
 	}
-	openBlock, openPage, err := opts.resolveLive() // validates opts geometry; the source superblock overrides it for src
-	if err != nil {
-		return err
-	}
 
 	// Refuse to compact a path that is open in this process, and reserve it for the
 	// duration: Compact drives the file through its own unregistered container, so a
@@ -69,7 +65,10 @@ func Compact(cfg sqlite.Config, opts Options) error {
 	if err != nil {
 		return err
 	}
-	src, err := newContainerOver(fileBacking{srcFile}, true, openBlock, openPage, opts.Level, kc)
+	// Open src with the package defaults: an existing container overrides its
+	// geometry from the superblock, so Options.PageSize/BlockSize are neither
+	// consulted nor validated here (the compacted file keeps the source geometry).
+	src, err := newContainerOver(fileBacking{srcFile}, true, defaultBlockSize, defaultPageSize, opts.Level, kc)
 	if err != nil {
 		return err // newContainerOver closes srcFile on error
 	}
