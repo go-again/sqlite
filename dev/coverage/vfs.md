@@ -38,13 +38,12 @@ produces distinct ciphertext. Encryption-at-rest covers everything that
 hits xRead/xWrite; the WAL `-shm` index file is plaintext because it is
 process-local coordination state, not row data.
 
-Beyond a raw `Options.Key`, `Options.Recipients` (and `Options.Masters` /
-`SignWith`) wrap a random data key per recipient — via `crypto/keyring` — into a
-detached `"<path>.keyslot"` sidecar, resolved at the first open, so several
-parties open one database with their own `Options.Identities` and no shared
-secret (`keyslot_test.go`: `TestRecipientsSidecar`, `TestMasterSidecar`). The
-writer-signed read-only mode of `vfs/compress` is intentionally out of scope here
-(a transparent page cipher has no per-slot integrity home).
+`vfs/crypto` is confidentiality-only with a single raw `Options.Key`.
+Multi-recipient encryption (a wrapped data key, no shared secret), crash-safe key
+rotation, tamper-evident storage (per-page integrity + a signed root), and
+optional rollback resistance via an external anchor live in
+`gosqlite.org/vfs/vault`, a self-contained container that keeps the keyslot inside
+the file and where compression and encryption are independent options.
 
 ### Chaining
 

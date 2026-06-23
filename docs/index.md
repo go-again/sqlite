@@ -7,7 +7,7 @@ sidebar:
 
 # Documentation
 
-`gosqlite.org` is a CGo-free SQLite **driver + ecosystem** for Go — a drop-in replacement for `mattn/go-sqlite3` and `modernc.org/sqlite`, with first-class typed APIs for vector search, full-text search, encryption at rest, in-memory MVCC, hybrid ranking, a user-implementable VFS, a bounded page cache, and a catalog of loadable Go SQL extensions — all in one project, all pure Go. Encryption (`vfs/crypto`), blob storage (`blobstore`), compression (`vfs/compress`), and the `glebarez/sqlite`-compatible gorm dialector (`gosqlite.org/gorm`) are opt-in companion modules in the same repo, released together.
+`gosqlite.org` is a CGo-free SQLite **driver + ecosystem** for Go — a drop-in replacement for `mattn/go-sqlite3` and `modernc.org/sqlite`, with first-class typed APIs for vector search, full-text search, encryption at rest, in-memory MVCC, hybrid ranking, a user-implementable VFS, a bounded page cache, and a catalog of loadable Go SQL extensions — all in one project, all pure Go. Encryption (`vfs/crypto`), a compressed + encrypted container (`vfs/vault`), blob storage (`blobstore`), and the `glebarez/sqlite`-compatible gorm dialector (`gosqlite.org/gorm`) are opt-in companion modules in the same repo, released together.
 
 The [README](../README.md) is the high-level landing page. These docs are the deep reference.
 

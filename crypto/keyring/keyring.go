@@ -1,8 +1,8 @@
 // Package keyring wraps a database's data key for multiple recipients — SSH
 // keys, passphrases, or age recipients — so several parties can each open the
 // same encrypted database with their own identity, without sharing one secret.
-// It is the envelope layer behind multi-key support in gosqlite.org/vfs/compress
-// and gosqlite.org/vfs/crypto: a random data key encrypts the database, and that
+// It is the envelope layer behind multi-recipient support in
+// gosqlite.org/vfs/vault: a random data key encrypts the database, and that
 // data key is [Wrap]ped once per recipient into a small blob any one of them can
 // [Unwrap].
 //
