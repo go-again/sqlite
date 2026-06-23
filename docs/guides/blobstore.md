@@ -7,7 +7,7 @@ sidebar:
 
 # Blob storage
 
-`blobstore` is the supported way to keep a large, growable byte object in SQLite — a file, an upload, streamed content — addressed by offset and read or written in slices, never materialized whole. It manages a chunk table for you and hands back an [`io.ReaderAt`](https://pkg.go.dev/io#ReaderAt) / [`io.WriterAt`](https://pkg.go.dev/io#WriterAt) per object.
+`blobstore` is the supported way to keep a large, growable byte object in SQLite — a file, an upload, streamed content — addressed by offset and read or written in slices, never materialized whole. It manages the chunking and storage for you and hands back an [`io.ReaderAt`](https://pkg.go.dev/io#ReaderAt) / [`io.WriterAt`](https://pkg.go.dev/io#WriterAt) per object.
 
 ## Why not just a BLOB column?
 
@@ -36,7 +36,7 @@ store.Delete(ctx, id)                          // frees the blocks it alone hold
 
 - **O(chunk) memory**, never O(object). Default chunk 64 KiB; set per-Store with `blobstore.WithChunkSize(n)` (frozen per object at `Create`, so changing the default never disturbs existing objects).
 - **Sparse holes read as zero** — writing at a high offset grows the object sparsely.
-- **No growable-value trap** — each chunk is allocated full once with `zeroblob` and written in place; values never grow, so `||` never enters the picture.
+- **No growable-value trap** — chunks are fixed-size and never extended in place (a raw chunk is a `zeroblob` written in place, a compressed chunk a whole value), so the `||`/`zeroblob` truncation trap never enters the picture.
 - **Missing id** → `blobstore.ErrNotFound` (wrapped; use `errors.Is`).
 
 ## Concurrency and the backing database
@@ -95,4 +95,13 @@ A **version** is a copy-on-write snapshot of an object's content at a point in t
 
 `blobstore.OpenReadOnly(db, name)` reattaches to an already-provisioned store without issuing any DDL, so it works against a read-only database — browsing a snapshot, or mounting an image on read-only media. It errors if the store is not already provisioned (open it writable once with `Open` first), and every mutating method returns `blobstore.ErrReadOnly`; reads behave exactly as on a writable handle.
 
-Runnable: [`blobstore/example/`](../../blobstore/example/main.go).
+## Encryption at rest
+
+A blobstore is just SQL and incremental BLOB I/O over a database, so it inherits whatever the underlying VFS provides — including encryption, with no blobstore-specific configuration. Open the store's database through [`vfs/crypto`](encryption.md) and hand the returned `*sqlite.DB` to `blobstore.Open`: every object, chunk, and block is encrypted on disk. The store can be encrypted to a single key or, with `crypto.Options{Recipients: …}`, to several recipients who each open it with their own identity and no shared secret — the multi-recipient encryption model applied to a blob store.
+
+```go
+db, _ := crypto.Open(sqlite.Config{Path: "vault.db"}, crypto.Options{Recipients: recipients})
+store, _ := blobstore.Open(db, "files") // every object the store writes is encrypted on disk
+```
+
+Runnable: [`blobstore/example/`](../../blobstore/example/main.go), and [`examples/encrypted-blobstore`](../../examples/encrypted-blobstore/main.go) (encrypt to two recipients, confirm no plaintext on disk).

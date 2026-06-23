@@ -52,4 +52,6 @@ The keyslot sidecar must travel with the database (back it up and move the two t
 
 Add `Options.Recorder = crypto.NewSlogRecorder(slog.Default())` (or any custom `crypto.Recorder`) for per-IO observability. Stack `vfs/cksm` underneath via `Options.WrapVFS` for checksum-then-encrypt protection (see [Checksums](checksums.md)).
 
+Anything built on a `*sqlite.DB` inherits the encryption transparently — including [`blobstore`](blobstore.md): open the store's database through this VFS and every object, chunk, and block it writes is encrypted on disk, single-key or to several recipients (runnable: [`examples/encrypted-blobstore`](../../examples/encrypted-blobstore/main.go)).
+
 `vfs/crypto` is its own module (`gosqlite.org/vfs/crypto`) so its cipher dependencies stay out of the root graph. Runnable: [`vfs/crypto/example/`](../../vfs/crypto/example/main.go) (`crypto.Open` + a slog recorder). For an encrypted database with an ORM, use [LiteORM](https://liteorm.org), built on this driver — the gorm dialector has no encryption path. Package docs: [`vfs/crypto/doc.go`](../../vfs/crypto/doc.go). On-disk format + threat model: `vfs/crypto/doc.go`; coverage: [`dev/coverage/vfs.md`](../../dev/coverage/vfs.md).

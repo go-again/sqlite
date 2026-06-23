@@ -68,3 +68,4 @@ When you're ready to modernize, move connection setup from a DSN string to [`sql
   - [`extensions/`](features/extensions/) — the loadable `ext/` catalog (scalars, aggregates, vtabs, stores)
   - [`advanced/`](features/advanced/) — hooks, sessions/changesets, backup, page cache, window functions, and more
 - **[`liteorm/`](liteorm/)** — [LiteORM](https://liteorm.org), an ORM with native vector / full-text / hybrid search built on this driver. *(Separate module — see its README.)*
+- **[`encrypted-blobstore/`](encrypted-blobstore/)** — a `blobstore` whose database is encrypted at rest by opening it through `vfs/crypto` (encrypted to two recipients; confirms no plaintext on disk). *(Separate module — composes `blobstore` + `vfs/crypto`.)*
