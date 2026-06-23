@@ -69,9 +69,9 @@ bench-vec:
 bench-fts:
     go test -run=^$ -bench='^Benchmark' -benchmem -count=5 ./fts/
 
-# Compression × encryption matrix (plain / compress / encrypt / both × cipher × read/write).
-bench-encryption:
-    go test -run=^$ -bench=BenchmarkEncryptionMatrix -benchmem -count=3 ./vfs/compress/
+# vfs/vault option matrix: compress? × encrypt? × auth?, plus raw + vfs/crypto baselines, read/write.
+bench-vault:
+    go test -run=^$ -bench=BenchmarkMatrix -benchmem -count=3 ./vfs/vault/
 
 # Lint the root module + every sub-module with fmt-check + vet + staticcheck +
 # golangci-lint + modernize (matches CI). fmt-check runs first because it's the
