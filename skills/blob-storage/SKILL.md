@@ -18,7 +18,7 @@ Three layers, pick by need:
 ```go
 import "gosqlite.org/blobstore"
 
-store, err := blobstore.Open(db, "files")          // creates files_objects + files_chunks
+store, err := blobstore.Open(db, "files")          // creates files_objects, files_blocks, files_chunks
 id, err := store.Create(ctx)                        // new empty object → int64 id
 
 w, _ := store.Writer(ctx, id)                       // io.WriterAt + io.Closer
@@ -31,7 +31,7 @@ io.Copy(dst, io.NewSectionReader(r, 0, size))       // stream out; or r.ReadAt(s
 r.Close()
 
 store.Truncate(ctx, id, n)                          // grow (sparse) or shrink (zeroes tail)
-store.Delete(ctx, id)                               // frees every chunk; ErrNotFound if gone
+store.Delete(ctx, id)                               // frees the blocks it alone holds; ErrNotFound if gone
 ```
 
 - **O(chunk) memory**, never O(object). Default chunk 64 KiB; override with `blobstore.WithChunkSize(n)` (frozen per object at Create — changing it later doesn't touch existing objects).
@@ -42,6 +42,9 @@ store.Delete(ctx, id)                               // frees every chunk; ErrNot
 - **Bulk / atomic writes:** `store.Batch(ctx, id, func(w io.WriterAt) error)` runs many writes in one transaction — atomic (rolls back entirely on error/panic) and one commit/fsync for the batch. `store.WriteAtFrom(ctx, id, off, r)` streams an `io.Reader` into an object in one `Batch`. Keep the callback tight — it holds the write lock — so buffer a slow source first.
 - **Reclaim space:** `blobstore.WithVacuumOnDelete()` issues `PRAGMA incremental_vacuum` after frees — effective only if the DB is in incremental auto_vacuum mode (open with `Config.Pragmas.AutoVacuum = sqlite.AutoVacuumIncremental`, or convert an existing DB with `db.SetAutoVacuum`).
 - **Compression:** `blobstore.Open(db, name, blobstore.WithCompression(blobstore.CompressionDefault))` stores objects compressed (levels `CompressionFastest`…`CompressionBest`; default `CompressionNone`). Same `Writer`/`Reader` API. Choose the mode per object with `WithObjectCompression` at `Create`, convert an existing object raw↔compressed or change its level later with `SetCompression` (a mode change rewrites the chunks), and read at-rest size/ratio with `Stat`; raw and compressed objects coexist; incompressible chunks fall back to verbatim. Cost: a compressed object works a whole chunk in memory (partial writes read-modify-write), so it fits write-once / sequential / compressible data, not hot random partial updates. Prefer a larger `WithChunkSize` when compressing.
+- **Clone & versions (copy-on-write):** chunk bytes live in reference-counted blocks, so `store.Clone(ctx, srcID)` makes an identical object in O(metadata) — no bytes copied — and the two diverge copy-on-write. `store.NewVersion(ctx, id)` snapshots an object the same way; `ListVersions`/`OpenVersion` read versions back immutably; a per-object retention `Policy` (`WithObjectVersioning` at Create, or `SetRetention`) plus `Prune` bound how many/old versions are kept. `Stat` splits stored bytes into `UniqueBytes` and `SharedBytes`.
+- **Dedup:** `blobstore.WithDedup()` stores byte-identical full blocks once across objects (a content hash per full-block write; not applied to raw in-place partial writes).
+- **Read-only:** `blobstore.OpenReadOnly(db, name)` reattaches to a provisioned store with no DDL (snapshot browsing / read-only media); every mutator returns `blobstore.ErrReadOnly`.
 
 ### The one footgun
 

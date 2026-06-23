@@ -18,7 +18,7 @@ SQLite's incremental BLOB I/O (`(*sqlite.Conn).OpenBlob`) is **fixed-size**: a v
 ```go
 import "gosqlite.org/blobstore"
 
-store, _ := blobstore.Open(db, "files")     // creates files_objects + files_chunks
+store, _ := blobstore.Open(db, "files")     // creates files_objects, files_blocks, files_chunks
 id, _ := store.Create(ctx)                    // a new empty object → int64 id
 
 w, _ := store.Writer(ctx, id)                 // io.WriterAt + io.Closer
@@ -31,7 +31,7 @@ io.Copy(dst, io.NewSectionReader(r, 0, size)) // stream out; or r.ReadAt(slice, 
 r.Close()
 
 store.Truncate(ctx, id, n)                    // grow (sparse) or shrink (zeroes the tail)
-store.Delete(ctx, id)                          // frees every chunk; blobstore.ErrNotFound if gone
+store.Delete(ctx, id)                          // frees the blocks it alone holds; blobstore.ErrNotFound if gone
 ```
 
 - **O(chunk) memory**, never O(object). Default chunk 64 KiB; set per-Store with `blobstore.WithChunkSize(n)` (frozen per object at `Create`, so changing the default never disturbs existing objects).
@@ -77,8 +77,22 @@ Levels run `CompressionFastest` → `CompressionFast` → `CompressionDefault` �
 
 Override compression for one object with `blobstore.WithObjectCompression(level)` at `Create` — `CompressionNone` stores it raw, any level stores it compressed *at that level*, regardless of the Store default (e.g. `store.Create(ctx, blobstore.WithObjectCompression(blobstore.CompressionBest))`). Objects of different modes and levels coexist in one store, so you can compress small or cold objects hard while keeping large or hot ones raw or lightly compressed for speed.
 
-`store.SetCompression(ctx, id, level)` changes an existing object. Changing only the *level* of a compressed object rewrites nothing — reads are level-agnostic, so an object can hold chunks at different levels (write a head at `CompressionBest`, lower the level, append a large tail). Changing the *mode* — raw↔compressed, including `CompressionNone` to go raw — converts every existing chunk in one transaction (an O(object size) pass), so you can compress an object you first stored raw, or decompress one for fast in-place random I/O. `store.Stat(ctx, id)` returns an object's metadata — logical size, stored bytes, the actual at-rest compression **ratio** (computed from the chunk sizes, not a maintained column), chunk size, mode, and current level.
+`store.SetCompression(ctx, id, level)` changes an existing object. Changing only the *level* of a compressed object rewrites nothing — reads are level-agnostic, so an object can hold chunks at different levels (write a head at `CompressionBest`, lower the level, append a large tail). Changing the *mode* — raw↔compressed, including `CompressionNone` to go raw — converts every existing chunk in one transaction (an O(object size) pass), so you can compress an object you first stored raw, or decompress one for fast in-place random I/O. `store.Stat(ctx, id)` returns an object's metadata — logical size, stored bytes (split into `UniqueBytes` held by this object alone and `SharedBytes` held in common with a clone or version), the actual at-rest compression **ratio** (computed from the block sizes, not a maintained column), chunk size, mode, and current level.
 
 The trade-off: a compressed object can't use in-place incremental BLOB I/O, so every operation works on a full chunk in memory — a read decompresses the whole chunk, and a partial write read-modify-writes it (a write covering a whole chunk skips the read). Compression fits write-once / read-mostly or sequentially-streamed compressible data (files, logs, JSON), not hot random partial updates or already-compressed payloads. Prefer a larger `WithChunkSize` when compressing. It composes with [encryption](encryption.md): chunks are compressed before the VFS encrypts the pages — the correct order.
+
+## Clones, snapshots, and versions
+
+Chunk bytes live in reference-counted blocks, so objects can share content with no copy. `store.Clone(ctx, srcID)` makes a new object identical to an existing one in O(metadata) — it duplicates the chunk mapping and bumps refcounts, never the bytes — and the two diverge copy-on-write as either is written, allocating new blocks only for the chunks that change. `store.Stat` reports the split as `UniqueBytes` (blocks this object alone holds, reclaimed if it is deleted) and `SharedBytes` (blocks held in common with a clone or version).
+
+A **version** is a copy-on-write snapshot of an object's content at a point in time, built on the same machinery: `store.NewVersion(ctx, id)` records one (O(metadata), sharing every block with the live object until it diverges) and returns its version number; `store.ListVersions(ctx, id)` enumerates them; `store.OpenVersion(ctx, id, versionNo)` returns an immutable `io.ReaderAt` over that snapshot. A per-object retention **policy** bounds how many or how old versions are kept — set it at `Create` with `blobstore.WithObjectVersioning(blobstore.Policy{KeepVersions: 10, MaxAge: 30 * 24 * time.Hour})` or later with `store.SetRetention`; `store.Prune` (and the sweep after each `NewVersion`) enforces it, freeing the blocks a dropped version alone held. Deleting an object removes its versions and their snapshots too.
+
+## Deduplication
+
+`blobstore.WithDedup()` turns on content-addressed deduplication: a full-block write whose bytes are byte-identical to an already-stored block references that block (bumping its refcount) instead of writing a copy, so identical content is stored once across objects. It costs a content hash per full-block write — leave it off for write-hot or already-unique data. It applies to compressed objects and full-chunk writes; raw in-place partial writes mutate their block directly and are not deduplicated.
+
+## Read-only and snapshot browsing
+
+`blobstore.OpenReadOnly(db, name)` reattaches to an already-provisioned store without issuing any DDL, so it works against a read-only database — browsing a snapshot, or mounting an image on read-only media. It errors if the store is not already provisioned (open it writable once with `Open` first), and every mutating method returns `blobstore.ErrReadOnly`; reads behave exactly as on a writable handle.
 
 Runnable: [`blobstore/example/`](../../blobstore/example/main.go).
