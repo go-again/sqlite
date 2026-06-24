@@ -1,13 +1,13 @@
 ---
-title: Compressed databases
-description: Store a SQLite database in a vfs/vault container — vault.Open queries it compressed in place (durable per transaction, multi-connection, optional WAL); vault.OpenSnapshot inflates a working copy; plus Pack / Unpack for shipping, and Compact to reclaim space. Compression and encryption are independent options.
+title: Compressed databases (vfs/vault)
+description: Store a SQLite database in a vfs/vault container — vault.Open queries it compressed in place (durable per transaction, multi-connection, optional WAL); vault.OpenSnapshot inflates a working copy; plus Pack / Unpack for shipping, and Compact / Trim to reclaim space. Compression and encryption are independent options.
 sidebar:
   order: 19
 ---
 
-# Compressed databases
+# Compressed databases (`vfs/vault`)
 
-`vfs/vault` stores a SQLite database in a block-structured **container** where **compression and encryption are independent options** — plain, compressed, encrypted, or both. This page covers the storage modes and compression; for encryption, multiple recipients, tamper-evidence, and rollback resistance see [Encryption at rest](encryption.md), which is the same container with `Options.Key`/`Recipients` set.
+This is the [`vfs/vault`](vault.md) container in its compression role: it stores a SQLite database in a block-structured **container** where **compression and encryption are independent options** — plain, compressed, encrypted, or both. This page covers the storage modes and the compression level ladder; for the full container story — encryption, multiple recipients, masters and signing writers (with read-only members), tamper-evidence, and rollback resistance — see the [vault container guide](vault.md), the same container with `Options.Key`/`Recipients` set.
 
 Two modes, picked by how the database is used:
 
@@ -77,17 +77,19 @@ vault.Unpack("app.db", "app.db.az")                       // inflate it back
 
 Set the level with `Options.Level`. The zero value, `CompressionNone`, is **off** — pages are stored raw (a plain container). Set a level to compress: the ladder runs `CompressionFastest` → `CompressionFast` → `CompressionDefault` → `CompressionBetter` → `CompressionBest` (the lower levels are LZ4, the higher ones zstd). Decoding auto-detects the algorithm, so a file written at one level (or raw) always reads back regardless of the level configured later.
 
-## Reclaiming space — `Compact`
+## Reclaiming space — `Compact` and `Trim`
 
-Under churn the container reuses freed blocks, so the at-rest file plateaus rather than growing — but it does not shrink mid-session. `vault.Compact(cfg, opts)` is the offline reclaim: on a closed database it rewrites the live pages into a fresh, densely-packed file and atomically replaces the original, returning the freed blocks to the filesystem. It preserves the encryption and authenticated mode (pass the same `Options`) and continues the commit generation, so an [`Options.Anchor`](encryption.md) stays valid across compaction.
+Under churn the container reuses freed blocks, so the at-rest file plateaus rather than growing — but it does not shrink mid-session by design. `vault.Compact(cfg, opts)` is the offline, densest reclaim: on a **closed** database it rewrites the live pages into a fresh, densely-packed file and atomically replaces the original, returning the freed blocks to the filesystem. It preserves the encryption and authenticated mode (pass the same `Options`) and continues the commit generation, so an [`Options.Anchor`](vault.md) stays valid across compaction.
 
 ```go
 err := vault.Compact(sqlite.Config{Path: "app.db"}, vault.Options{Level: vault.CompressionDefault, Key: key})
 ```
 
+`vault.Trim(path, maxBytes)` is the online counterpart: it returns **trailing** free blocks to the OS while the database stays open (a cheap truncate, no page relocation), so a mounted container can shrink mid-session when free blocks have collected at the tail. `Compact` remains the densest, layout-independent reclaim. To hand someone an encrypted, compressed point-in-time backup at a new path, use `vault.Snapshot` (see the [vault guide](vault.md)).
+
 ## Encryption
 
-The same container encrypts at rest when you set `Options.Key` (a raw key) or `Options.Recipients` (a wrapped data key, several parties each with their own key) — compress **then** encrypt, so the on-disk bytes are both. Add `Options.Authenticate` (or `Options.Writers`) for tamper-evidence, and `Options.Anchor` for rollback resistance. The full crypto story — recipients, masters, read-only writers, authenticated mode, and the external replay anchor — is in [Encryption at rest](encryption.md).
+The same container encrypts at rest when you set `Options.Key` (a raw key) or `Options.Recipients` (a wrapped data key, several parties each with their own key) — compress **then** encrypt, so the on-disk bytes are both. Add `Options.Authenticate` (or `Options.Writers`) for tamper-evidence, and `Options.Anchor` for rollback resistance. The full crypto story — recipients, masters, signing writers (with read-only members), authenticated mode, the external replay anchor, and membership enumeration — is in the [vault container guide](vault.md).
 
 ## Module and reference
 

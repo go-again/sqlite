@@ -99,7 +99,7 @@ A **version** is a copy-on-write snapshot of an object's content at a point in t
 
 ## Encryption at rest
 
-A blobstore is just SQL and incremental BLOB I/O over a database, so it inherits whatever the underlying VFS provides — including encryption, with no blobstore-specific configuration. Open the store's database through [`vfs/crypto`](encryption.md) and hand the returned `*sqlite.DB` to `blobstore.Open`: every object, chunk, and block is encrypted on disk (runnable: [`examples/encrypted-blobstore`](../../examples/encrypted-blobstore/main.go)). For multi-recipient or tamper-evident encryption under a store, the same composition works with [`vfs/vault`](encryption.md) (runnable: [`examples/vault-blobstore`](../../examples/vault-blobstore/main.go)).
+A blobstore is just SQL and incremental BLOB I/O over a database, so it inherits whatever the underlying VFS provides — including encryption, with no blobstore-specific configuration. Open the store's database through [`vfs/crypto`](encryption.md) and hand the returned `*sqlite.DB` to `blobstore.Open`: every object, chunk, and block is encrypted on disk (runnable: [`examples/encrypted-blobstore`](../../examples/encrypted-blobstore/main.go)). For multi-recipient or tamper-evident encryption (and compression) under a store, the same composition works with the [`vfs/vault`](vault.md) container (runnable: [`examples/vault-blobstore`](../../examples/vault-blobstore/main.go)).
 
 ```go
 db, _ := crypto.Open(sqlite.Config{Path: "store.db"}, crypto.Options{Key: key})
