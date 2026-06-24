@@ -30,6 +30,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"strings"
 
 	"filippo.io/age/agessh"
 	"golang.org/x/crypto/ssh"
@@ -115,7 +116,7 @@ func SSHMasterRecipient(authorizedKeyLine []byte) (MasterRecipient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("keyring: master recipient: %w", err)
 	}
-	sshPub, _, _, _, err := ssh.ParseAuthorizedKey(line)
+	sshPub, comment, _, _, err := ssh.ParseAuthorizedKey(line)
 	if err != nil {
 		return nil, fmt.Errorf("keyring: master recipient: %w", err)
 	}
@@ -127,7 +128,8 @@ func SSHMasterRecipient(authorizedKeyLine []byte) (MasterRecipient, error) {
 	if !ok {
 		return nil, errors.New("keyring: a master or writer must be an ssh-ed25519 key")
 	}
-	return masterRecipient{recipient{r}, edpub}, nil
+	pub := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub)))
+	return masterRecipient{recipient{r: r, pub: pub, label: comment}, edpub}, nil
 }
 
 // SSHMasterIdentity builds a master (or writer) identity from an ed25519 SSH
@@ -210,13 +212,14 @@ func VerifyState(writers []ed25519.PublicKey, msg, sig []byte) bool {
 
 // keyslotVersion tags the sealed-keyslot wire format (see SealKeyslot); it also
 // rejects a malformed blob whose first byte is not the current format.
-const keyslotVersion byte = 1
+const keyslotVersion byte = 2
 
 // SealKeyslot wraps dek to every party in m (masters, writers, members) and, when
-// masters are pinned, signs the membership — the master set, the writer set, and
-// the wrapped data key — with signWith, which must be one of the masters. With no
-// masters it is the flat model: the data key wrapped to the members, no signature.
-// Open it with [OpenKeyslot].
+// masters are pinned, signs the membership — the master set, the writer set, the
+// wrapped data key, and the sealed member list — with signWith, which must be one
+// of the masters. With no masters it is the flat model: the data key wrapped to
+// the members, no signature, no member list. Open it with [OpenKeyslot]; an admin
+// lists its membership with [Members].
 func SealKeyslot(dek []byte, m Membership, signWith MasterIdentity) ([]byte, error) {
 	if len(m.Masters) > 255 || len(m.Writers) > 255 {
 		return nil, errors.New("keyring: too many masters or writers (max 255 each)")
@@ -226,7 +229,27 @@ func SealKeyslot(dek []byte, m Membership, signWith MasterIdentity) ([]byte, err
 		return nil, err
 	}
 
-	buf := make([]byte, 0, 3+(len(m.Masters)+len(m.Writers))*ed25519.PublicKeySize+4+len(wrapped)+ed25519.SignatureSize)
+	// The membership record: the parties' public forms, sealed to the masters only
+	// (a fresh envelope independent of the data key — wrapped to the masters as
+	// recipients), so an admin can later enumerate the set ([Members]) while writers
+	// and members cannot. Built only when masters are pinned; a flat keyslot has no
+	// admin tier and carries none.
+	var memberBlob []byte
+	if len(m.Masters) > 0 {
+		masterRecips := make([]Recipient, len(m.Masters))
+		for i, r := range m.Masters {
+			masterRecips[i] = r
+		}
+		list, merr := marshalMembers(m)
+		if merr != nil {
+			return nil, merr
+		}
+		if memberBlob, err = Wrap(list, masterRecips...); err != nil {
+			return nil, err
+		}
+	}
+
+	buf := make([]byte, 0, 3+(len(m.Masters)+len(m.Writers))*ed25519.PublicKeySize+8+len(wrapped)+len(memberBlob)+ed25519.SignatureSize)
 	buf = append(buf, keyslotVersion, byte(len(m.Masters)))
 	for _, r := range m.Masters {
 		buf = append(buf, r.masterPub()...)
@@ -235,10 +258,8 @@ func SealKeyslot(dek []byte, m Membership, signWith MasterIdentity) ([]byte, err
 	for _, r := range m.Writers {
 		buf = append(buf, r.masterPub()...)
 	}
-	var lenb [4]byte
-	binary.LittleEndian.PutUint32(lenb[:], uint32(len(wrapped)))
-	buf = append(buf, lenb[:]...)
-	buf = append(buf, wrapped...)
+	buf = appendLenPrefixed(buf, wrapped)
+	buf = appendLenPrefixed(buf, memberBlob)
 
 	if len(m.Masters) > 0 {
 		if signWith == nil {
@@ -252,6 +273,14 @@ func SealKeyslot(dek []byte, m Membership, signWith MasterIdentity) ([]byte, err
 	return buf, nil
 }
 
+// appendLenPrefixed appends b to buf with a little-endian uint32 length prefix.
+func appendLenPrefixed(buf, b []byte) []byte {
+	var lenb [4]byte
+	binary.LittleEndian.PutUint32(lenb[:], uint32(len(b)))
+	buf = append(buf, lenb[:]...)
+	return append(buf, b...)
+}
+
 // OpenKeyslot recovers the data key from a sealed keyslot and returns the
 // authorized writer public keys (for verifying committed states). When trusted
 // masters are supplied the membership MUST carry a signature that verifies against
@@ -262,7 +291,7 @@ func SealKeyslot(dek []byte, m Membership, signWith MasterIdentity) ([]byte, err
 // signature is not checked. The data key is unwrapped with the first matching
 // identity ([ErrNoMatch] if none).
 func OpenKeyslot(blob []byte, trusted []MasterRecipient, with ...Identity) (dek []byte, writers []ed25519.PublicKey, err error) {
-	_, writerPubs, wrapped, signed, sig, perr := parseKeyslot(blob)
+	_, writerPubs, wrapped, _, signed, sig, perr := parseKeyslot(blob)
 	if perr != nil {
 		return nil, nil, perr
 	}
@@ -283,11 +312,12 @@ func OpenKeyslot(blob []byte, trusted []MasterRecipient, with ...Identity) (dek 
 }
 
 // parseKeyslot decodes the sealed-keyslot wire format, bounding every length
-// against the blob. signed is the byte range the signature covers; sig is nil
-// when no masters are pinned.
-func parseKeyslot(blob []byte) (masters, writers []ed25519.PublicKey, wrapped, signed, sig []byte, err error) {
+// against the blob. wrapped is the data-key envelope; memberBlob is the
+// master-sealed member list (empty for a flat keyslot); signed is the byte range
+// the signature covers; sig is nil when no masters are pinned.
+func parseKeyslot(blob []byte) (masters, writers []ed25519.PublicKey, wrapped, memberBlob, signed, sig []byte, err error) {
 	if len(blob) < 2 || blob[0] != keyslotVersion {
-		return nil, nil, nil, nil, nil, errors.New("keyring: unrecognized keyslot format")
+		return nil, nil, nil, nil, nil, nil, errors.New("keyring: unrecognized keyslot format")
 	}
 	off := 1
 	readPubs := func() ([]ed25519.PublicKey, error) {
@@ -306,30 +336,40 @@ func parseKeyslot(blob []byte) (masters, writers []ed25519.PublicKey, wrapped, s
 		}
 		return out, nil
 	}
+	readSection := func() ([]byte, error) {
+		if uint64(off)+4 > uint64(len(blob)) {
+			return nil, errors.New("keyring: keyslot truncated (length)")
+		}
+		n := binary.LittleEndian.Uint32(blob[off : off+4])
+		off += 4
+		if uint64(off)+uint64(n) > uint64(len(blob)) {
+			return nil, errors.New("keyring: keyslot section out of range")
+		}
+		b := blob[off : off+int(n)]
+		off += int(n)
+		return b, nil
+	}
 	if masters, err = readPubs(); err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	if writers, err = readPubs(); err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
-	if uint64(off)+4 > uint64(len(blob)) {
-		return nil, nil, nil, nil, nil, errors.New("keyring: keyslot truncated (length)")
+	if wrapped, err = readSection(); err != nil {
+		return nil, nil, nil, nil, nil, nil, err
 	}
-	rlen := binary.LittleEndian.Uint32(blob[off : off+4])
-	off += 4
-	if uint64(off)+uint64(rlen) > uint64(len(blob)) {
-		return nil, nil, nil, nil, nil, errors.New("keyring: keyslot recipients out of range")
+	if memberBlob, err = readSection(); err != nil {
+		return nil, nil, nil, nil, nil, nil, err
 	}
-	wrapped = blob[off : off+int(rlen)]
-	sigStart := off + int(rlen)
+	sigStart := off
 	if len(masters) > 0 {
 		if sigStart+ed25519.SignatureSize > len(blob) {
-			return nil, nil, nil, nil, nil, errors.New("keyring: keyslot missing signature")
+			return nil, nil, nil, nil, nil, nil, errors.New("keyring: keyslot missing signature")
 		}
 		signed = blob[:sigStart]
 		sig = blob[sigStart : sigStart+ed25519.SignatureSize]
 	}
-	return masters, writers, wrapped, signed, sig, nil
+	return masters, writers, wrapped, memberBlob, signed, sig, nil
 }
 
 // ResealKeyslot rewrites a keyslot's membership for the data key dek (already
@@ -344,7 +384,7 @@ func parseKeyslot(blob []byte) (masters, writers []ed25519.PublicKey, wrapped, s
 // This is the single choke point that makes "only a master can add or remove
 // recipients, writers, and masters" hold.
 func ResealKeyslot(old []byte, by Identity, dek []byte, m Membership) ([]byte, error) {
-	current, _, _, _, _, err := parseKeyslot(old)
+	current, _, _, _, _, _, err := parseKeyslot(old)
 	if err != nil {
 		return nil, err
 	}
@@ -385,4 +425,156 @@ func pubIn(pub ed25519.PublicKey, set []ed25519.PublicKey) bool {
 		}
 	}
 	return false
+}
+
+// Member is one entry of a container's membership, for enumeration or display by
+// an admin (see [Members]): the Role, the public Key form (an authorized_keys
+// line or an age1… recipient), and an optional human Label (e.g. the SSH key
+// comment).
+type Member struct {
+	Role  string // "master" | "writer" | "member"
+	Key   string
+	Label string
+}
+
+const (
+	roleMaster byte = 0
+	roleWriter byte = 1
+	roleMember byte = 2
+)
+
+func roleName(b byte) string {
+	switch b {
+	case roleMaster:
+		return "master"
+	case roleWriter:
+		return "writer"
+	default:
+		return "member"
+	}
+}
+
+// Members lists the membership recorded in a master-protected keyslot for an
+// admin. by MUST be one of the keyslot's current masters — the membership record
+// is sealed to the masters only — else [ErrNotMaster]. A flat (master-less)
+// keyslot has no admin tier and no membership record, so Members returns
+// ErrNotMaster for it too. The set returned is the masters, writers, and members
+// last written by create or [ResealKeyslot]; passphrase recipients, which have no
+// enumerable public key, are not listed.
+func Members(blob []byte, by MasterIdentity) ([]Member, error) {
+	masters, _, _, memberBlob, signed, sig, err := parseKeyslot(blob)
+	if err != nil {
+		return nil, err
+	}
+	if len(masters) == 0 {
+		return nil, ErrNotMaster // flat keyslot: no admin tier, no membership record
+	}
+	if by == nil || !pubIn(by.masterPub(), masters) {
+		return nil, ErrNotMaster
+	}
+	// Defense in depth: the record is signed by a master and sealed to the masters,
+	// so reject a keyslot whose master signature does not verify before trusting the
+	// parsed master set. The seal (Unwrap below) is the real gate — only a genuine
+	// master can decrypt it — but a bad signature means a corrupt or forged keyslot.
+	if sig == nil || !VerifyState(masters, signed, sig) {
+		return nil, ErrUnauthorizedKeyslot
+	}
+	if len(memberBlob) == 0 {
+		return nil, errors.New("keyring: keyslot carries no membership record")
+	}
+	plain, err := Unwrap(memberBlob, by)
+	if err != nil {
+		return nil, err
+	}
+	return unmarshalMembers(plain)
+}
+
+// marshalMembers serialises the public forms of m's parties — the plaintext
+// [SealKeyslot] seals to the masters. Recipients with no enumerable public form
+// (passphrase) are skipped. Layout: uint16 count, then per entry a role byte and
+// two uint16-length-prefixed strings (key, label). It errors rather than silently
+// truncate when the count or any field would overflow its uint16 length — so the
+// wire format can never misframe itself (an over-long SSH key comment, say).
+func marshalMembers(m Membership) ([]byte, error) {
+	type ent struct {
+		role       byte
+		key, label string
+	}
+	var ents []ent
+	add := func(role byte, r Recipient) {
+		if k, l := r.publicForm(); k != "" {
+			ents = append(ents, ent{role, k, l})
+		}
+	}
+	for _, r := range m.Masters {
+		add(roleMaster, r)
+	}
+	for _, r := range m.Writers {
+		add(roleWriter, r)
+	}
+	for _, r := range m.Members {
+		add(roleMember, r)
+	}
+	if len(ents) > 65535 {
+		return nil, errors.New("keyring: too many members to record (max 65535)")
+	}
+	buf := make([]byte, 2)
+	binary.LittleEndian.PutUint16(buf, uint16(len(ents)))
+	for _, e := range ents {
+		if len(e.key) > 65535 || len(e.label) > 65535 {
+			return nil, errors.New("keyring: member key or label exceeds 65535 bytes")
+		}
+		buf = append(buf, e.role)
+		buf = appendString16(buf, e.key)
+		buf = appendString16(buf, e.label)
+	}
+	return buf, nil
+}
+
+func appendString16(buf []byte, s string) []byte {
+	var l [2]byte
+	binary.LittleEndian.PutUint16(l[:], uint16(len(s)))
+	buf = append(buf, l[:]...)
+	return append(buf, s...)
+}
+
+// unmarshalMembers decodes the plaintext produced by [marshalMembers], bounding
+// every length against the buffer.
+func unmarshalMembers(b []byte) ([]Member, error) {
+	if len(b) < 2 {
+		return nil, errors.New("keyring: member list truncated")
+	}
+	n := int(binary.LittleEndian.Uint16(b[:2]))
+	off := 2
+	readStr := func() (string, error) {
+		if off+2 > len(b) {
+			return "", errors.New("keyring: member list truncated")
+		}
+		l := int(binary.LittleEndian.Uint16(b[off : off+2]))
+		off += 2
+		if off+l > len(b) {
+			return "", errors.New("keyring: member list truncated")
+		}
+		s := string(b[off : off+l])
+		off += l
+		return s, nil
+	}
+	out := make([]Member, 0, n)
+	for range n {
+		if off >= len(b) {
+			return nil, errors.New("keyring: member list truncated")
+		}
+		role := b[off]
+		off++
+		key, err := readStr()
+		if err != nil {
+			return nil, err
+		}
+		label, err := readStr()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, Member{Role: roleName(role), Key: key, Label: label})
+	}
+	return out, nil
 }

@@ -165,6 +165,40 @@ func Rekey(path string, by keyring.Identity, writeAs keyring.WriterIdentity, m k
 	return c.commit()
 }
 
+// Member is one entry of a container's membership, for enumeration or display by
+// an admin (see [Members]). It re-exports [keyring.Member].
+type Member = keyring.Member
+
+// Members lists the full membership — masters, writers, and read-only members,
+// each with its public key and optional label — of a recipients-encrypted
+// database. by MUST be one of the database's current masters: the membership
+// record is sealed to the masters, so writers and read-only members cannot
+// enumerate it and get [keyring.ErrNotMaster], as does a flat database with no
+// admin tier. It answers "who has access?", which the underlying age envelope
+// cannot (a read-only recipient is otherwise unrecoverable from the keyslot), so
+// an admin can recompute the set before [Rewrap] / [Rekey].
+//
+// The database must be closed (not open in this process), like [Rewrap] and
+// [Rekey], and encrypted to recipients with masters pinned; a raw-key or flat
+// database has no membership record. Passphrase recipients, which have no
+// enumerable public key, are not listed.
+func Members(path string, by keyring.Identity) (members []Member, err error) {
+	master, ok := by.(keyring.MasterIdentity)
+	if !ok {
+		return nil, keyring.ErrNotMaster // only a master may enumerate the membership
+	}
+	c, err := openAtRest(path, by)
+	if err != nil {
+		return nil, err
+	}
+	defer closeContainer(c, &err)
+	if c.keyslotOffset == 0 {
+		return nil, errors.New("vault: not a recipients-encrypted database (no membership)")
+	}
+	members, err = keyring.Members(c.keyslotBlob, master)
+	return members, err
+}
+
 // installKeyslot writes a freshly sealed keyslot to a new block and repoints the
 // container at it. The previous keyslot block is left unreferenced and reclaimed
 // by the next open's allocator rebuild (the same copy-on-write discipline the

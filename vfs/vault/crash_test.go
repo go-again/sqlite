@@ -77,6 +77,13 @@ func (c *crashBacking) Sync() error {
 func (c *crashBacking) Size() (int64, error) { return int64(len(c.data)), nil }
 func (c *crashBacking) Close() error         { return nil }
 
+func (c *crashBacking) Truncate(size int64) error {
+	if size < int64(len(c.data)) {
+		c.data = c.data[:size]
+	}
+	return nil
+}
+
 // constPage returns a page-sized buffer filled with b.
 func constPage(b byte, pageSize int) []byte {
 	p := make([]byte, pageSize)

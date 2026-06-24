@@ -67,6 +67,12 @@
 // freed blocks (the at-rest file plateaus rather than growing), and Compact rewrites
 // it into a fresh, densely-packed file — returning the freed blocks to the OS —
 // while continuing the commit generation so an [Options.Anchor] stays valid.
+// [Trim] is the online counterpart: it returns TRAILING free blocks to the OS while
+// the database stays open (a cheap truncate, no page relocation), reclaiming space
+// when free blocks have collected at the tail; Compact remains the densest reclaim.
+// [Snapshot] writes a consistent, encrypted, compressed copy to a NEW path
+// (optionally re-sealed to a different recipient set) without plaintext on disk —
+// the at-rest analogue of [Pack] for an encrypted database.
 //
 // # Untrusted input
 //
@@ -132,6 +138,13 @@
 //	db, _ := vault.Open(cfg, vault.Options{Masters: []keyring.MasterRecipient{master}, SignWith: masterID, Recipients: []keyring.Recipient{alice}})
 //	// later, on the closed database, only a master may change membership:
 //	err := vault.Rewrap(path, masterID, nil, keyring.Membership{Masters: []keyring.MasterRecipient{master}, Members: []keyring.Recipient{alice, bob}})
+//
+// A master lists the full current membership — masters, writers, and read-only
+// members, each with its public key and optional label — with [Members]. It is
+// master-only (the member list is sealed to the masters inside the keyslot, so
+// writers and members cannot enumerate it), answering "who has access?" — which the
+// age envelope alone cannot for read-only members — so an admin can recompute a set
+// before [Rewrap] or [Rekey].
 //
 // # Tamper-evidence (authenticated mode)
 //

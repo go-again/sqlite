@@ -485,6 +485,8 @@ func (f fileBacking) Size() (int64, error) {
 	return fi.Size(), nil
 }
 
+func (f fileBacking) Truncate(size int64) error { return f.File.Truncate(size) }
+
 // passFile is a thin *os.File wrapper for journals and temp files: no
 // compression. It embeds NoLock (single-connection). When the database is
 // encrypted it also encrypts these auxiliaries at rest, page-aligned by absolute

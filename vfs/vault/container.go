@@ -87,12 +87,13 @@ func putExtent(bp *[]byte) {
 // satisfies it via fileBacking (vfs.go); tests substitute an in-memory,
 // fault-injecting backing to prove the commit protocol survives a crash at any
 // step. The interface is exactly what the storage engine needs — block I/O,
-// fsync, size, close — and nothing more.
+// fsync, size, truncate, close — and nothing more.
 type backing interface {
 	io.ReaderAt
 	io.WriterAt
 	Sync() error
 	Size() (int64, error)
+	Truncate(size int64) error // shrink the file to size (online tail-trim)
 	Close() error
 }
 

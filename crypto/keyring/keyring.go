@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"filippo.io/age"
 	"filippo.io/age/agessh"
@@ -31,15 +32,26 @@ var ErrNoMatch = errors.New("keyring: no supplied identity could unwrap the data
 // Recipient is a party granted access to a database (encrypt-to). The interface
 // is sealed: build one with [SSHRecipient], [PassphraseRecipient], or another
 // loader in this package.
-type Recipient interface{ ageRecipient() age.Recipient }
+type Recipient interface {
+	ageRecipient() age.Recipient
+	// publicForm returns the recipient's public string — an authorized_keys line
+	// (SSH) or an age1… recipient — and an optional human label (an SSH key
+	// comment). It is what [Members] enumerates. A passphrase recipient has no
+	// enumerable public form and returns "", "".
+	publicForm() (key, label string)
+}
 
 // Identity recovers access to a database (decrypt-with). Build one with
 // [SSHIdentity], [PassphraseIdentity], or another loader.
 type Identity interface{ ageIdentity() age.Identity }
 
-type recipient struct{ r age.Recipient }
+type recipient struct {
+	r          age.Recipient
+	pub, label string // public form + optional label, captured at construction (see publicForm)
+}
 
-func (r recipient) ageRecipient() age.Recipient { return r.r }
+func (r recipient) ageRecipient() age.Recipient  { return r.r }
+func (r recipient) publicForm() (string, string) { return r.pub, r.label }
 
 type identity struct{ i age.Identity }
 
@@ -48,11 +60,24 @@ func (i identity) ageIdentity() age.Identity { return i.i }
 // SSHRecipient builds a recipient from one authorized_keys line (ssh-ed25519 or
 // ssh-rsa) — e.g. the contents of a colleague's id_ed25519.pub.
 func SSHRecipient(authorizedKeyLine []byte) (Recipient, error) {
-	r, err := agessh.ParseRecipient(string(bytes.TrimSpace(authorizedKeyLine)))
+	line := bytes.TrimSpace(authorizedKeyLine)
+	r, err := agessh.ParseRecipient(string(line))
 	if err != nil {
 		return nil, fmt.Errorf("keyring: SSH recipient: %w", err)
 	}
-	return recipient{r}, nil
+	pub, label := sshPublicForm(line)
+	return recipient{r: r, pub: pub, label: label}, nil
+}
+
+// sshPublicForm canonicalises an authorized_keys line to its comment-free key
+// string (type + base64, the stable identifier) and its trailing comment as a
+// label. On a parse failure it falls back to the trimmed line with no label.
+func sshPublicForm(line []byte) (key, label string) {
+	pub, comment, _, _, err := ssh.ParseAuthorizedKey(line)
+	if err != nil {
+		return string(bytes.TrimSpace(line)), ""
+	}
+	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(pub))), comment
 }
 
 // SSHIdentity builds an identity from an SSH private key in PEM form (ed25519 or
@@ -95,7 +120,8 @@ func GenerateX25519() (Recipient, Identity, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("keyring: generate X25519: %w", err)
 	}
-	return recipient{id.Recipient()}, identity{id}, nil
+	rec := id.Recipient()
+	return recipient{r: rec, pub: rec.String()}, identity{id}, nil
 }
 
 // PassphraseRecipient builds a recipient from a shared passphrase (scrypt) — a
@@ -107,7 +133,7 @@ func PassphraseRecipient(passphrase []byte) (Recipient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("keyring: passphrase recipient: %w", err)
 	}
-	return recipient{r}, nil
+	return recipient{r: r}, nil // no enumerable public form (see publicForm)
 }
 
 // PassphraseIdentity builds the identity matching [PassphraseRecipient].
@@ -117,6 +143,66 @@ func PassphraseIdentity(passphrase []byte) (Identity, error) {
 		return nil, fmt.Errorf("keyring: passphrase identity: %w", err)
 	}
 	return identity{i}, nil
+}
+
+// ParseAuthorizedKeys parses an authorized_keys-style file — one key per line,
+// with blank lines and # comments skipped — into recipients, saving every caller
+// the line loop. An unparseable key line fails the whole file (with its line
+// number); an empty file is an error. Use [ParseAuthorizedMasterKeys] for masters
+// or writers, which must be ed25519.
+func ParseAuthorizedKeys(b []byte) ([]Recipient, error) {
+	var out []Recipient
+	err := eachAuthorizedKeyLine(b, func(line []byte) error {
+		r, err := SSHRecipient(line)
+		if err != nil {
+			return err
+		}
+		out = append(out, r)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, errors.New("keyring: no keys in authorized_keys input")
+	}
+	return out, nil
+}
+
+// ParseAuthorizedMasterKeys is [ParseAuthorizedKeys] for masters or writers: it
+// parses each line with [SSHMasterRecipient], so every key must be ssh-ed25519.
+func ParseAuthorizedMasterKeys(b []byte) ([]MasterRecipient, error) {
+	var out []MasterRecipient
+	err := eachAuthorizedKeyLine(b, func(line []byte) error {
+		r, err := SSHMasterRecipient(line)
+		if err != nil {
+			return err
+		}
+		out = append(out, r)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, errors.New("keyring: no keys in authorized_keys input")
+	}
+	return out, nil
+}
+
+// eachAuthorizedKeyLine invokes fn for every non-blank, non-comment line of an
+// authorized_keys file, reporting the 1-based line number on a parse error.
+func eachAuthorizedKeyLine(b []byte, fn func(line []byte) error) error {
+	for i, raw := range bytes.Split(b, []byte("\n")) {
+		line := bytes.TrimSpace(raw)
+		if len(line) == 0 || line[0] == '#' {
+			continue
+		}
+		if err := fn(line); err != nil {
+			return fmt.Errorf("keyring: authorized_keys line %d: %w", i+1, err)
+		}
+	}
+	return nil
 }
 
 // Wrap encrypts dataKey to each recipient and returns a compact binary blob that
