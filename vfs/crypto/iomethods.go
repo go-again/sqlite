@@ -218,7 +218,7 @@ func readEncrypted(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Tsq
 		return sqlite3.SQLITE_IOERR
 	}
 	pst := fs.perFileStateOf(pFile)
-	ps := int64(fs.pageSize)
+	ps := cryptUnitFor(pst.fileKind, fs.pageSize)
 	pageStart := (int64(off) / ps) * ps
 	pageEnd := (int64(off) + int64(amt) + ps - 1) / ps * ps
 	span := pageEnd - pageStart
@@ -267,7 +267,7 @@ func writeEncrypted(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Ts
 		return sqlite3.SQLITE_IOERR
 	}
 	pst := fs.perFileStateOf(pFile)
-	ps := int64(fs.pageSize)
+	ps := cryptUnitFor(pst.fileKind, fs.pageSize)
 	pageStart := (int64(off) / ps) * ps
 	pageEnd := (int64(off) + int64(amt) + ps - 1) / ps * ps
 	span := pageEnd - pageStart
@@ -305,18 +305,68 @@ func writeEncrypted(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Ts
 	return cabi.CallXWrite(tls, defaultMethodsFor(pFile).FxWrite, pFile, scratchPtr, int32(span), sqlite3.Tsqlite3_int64(pageStart))
 }
 
-func encryptSpan(c PageCipher, span []byte, baseOffset int64, pageSize int64, kind byte) {
-	for i := int64(0); i < int64(len(span)); i += pageSize {
-		pageNum := uint64((baseOffset + i) / pageSize)
-		c.Encrypt(span[i:i+pageSize], pageNum, kind)
+// auxCryptUnit is the cipher alignment unit for the TRANSIENT, sequentially-written
+// auxiliary files (rollback / WAL / sub journals). SQLite writes those as records
+// and frames whose headers (8 bytes for a rollback record, 24 for a WAL frame) never
+// land on a page boundary, so aligning the cipher to the page size turned every such
+// write into a full-page read-modify-write — measured ~3–7× slower than plaintext on
+// a large sequential write. A small 512-byte unit (Adiantum's design sector size)
+// bounds each RMW to a sector and leaves the bulk on whole-unit boundaries. The
+// databases (main + temp) keep the page-size unit: their writes are page-aligned (no
+// RMW), and the main DB's page-by-page, tweaked-by-page-number format is on-disk
+// stable. Aux files are recreated each session (and crash-recovered by the same
+// build), so the unit is a code constant, never stored — no format compatibility
+// concern.
+const auxCryptUnit = 512
+
+// cryptUnitFor returns the cipher alignment unit for a file kind: the page size for
+// the databases (page-aligned writes, stable format), the small auxCryptUnit for the
+// misaligned transient journals and WAL (when the page size is larger than it).
+func cryptUnitFor(kind byte, pageSize int32) int64 {
+	switch kind {
+	case FileKindMainDB, FileKindTempDB:
+		return int64(pageSize)
+	default: // rollback / WAL / temp / sub journals: misaligned record & frame writes
+		if auxCryptUnit < pageSize {
+			return int64(auxCryptUnit)
+		}
+		return int64(pageSize)
 	}
 }
 
-func decryptSpan(c PageCipher, span []byte, baseOffset int64, pageSize int64, kind byte) {
-	for i := int64(0); i < int64(len(span)); i += pageSize {
-		pageNum := uint64((baseOffset + i) / pageSize)
-		c.Decrypt(span[i:i+pageSize], pageNum, kind)
+func encryptSpan(c PageCipher, span []byte, baseOffset int64, unit int64, kind byte) {
+	for i := int64(0); i < int64(len(span)); i += unit {
+		unitNum := uint64((baseOffset + i) / unit)
+		c.Encrypt(span[i:i+unit], unitNum, kind)
 	}
+}
+
+// decryptSpan decrypts each whole unit of span. It skips a unit whose on-disk bytes
+// are all zero: that is a sparse hole (a never-written region below EOF — possible
+// between misaligned aux writes, or an unwritten interior page), which must read back
+// as zeros; decrypting it would yield garbage. Real ciphertext is pseudo-random, so
+// an all-zero unit is never genuine encrypted data (a coincidental all-zero block is
+// ~2^-4096), which is also why this is safe for the unchanged main-DB format.
+func decryptSpan(c PageCipher, span []byte, baseOffset int64, unit int64, kind byte) {
+	for i := int64(0); i < int64(len(span)); i += unit {
+		u := span[i : i+unit]
+		if allZero(u) {
+			continue // sparse hole: leave it zero rather than decrypt to garbage
+		}
+		unitNum := uint64((baseOffset + i) / unit)
+		c.Decrypt(u, unitNum, kind)
+	}
+}
+
+// allZero reports whether b is entirely zero, early-exiting on the first non-zero
+// byte (so a real ciphertext unit costs ~one byte to reject).
+func allZero(b []byte) bool {
+	for _, x := range b {
+		if x != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // cipherFor returns the page cipher, built once in New from the raw key and

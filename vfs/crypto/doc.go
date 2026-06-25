@@ -3,10 +3,15 @@
 // Wrap the default OS VFS with [New], pass the returned name into the
 // DSN via `?vfs=<name>`, and SQLite transparently encrypts the main
 // database file, rollback journal, WAL frames, temp DB, and sub/temp
-// journals at the page boundary. The WAL `-shm` index stays plaintext
-// — it's an in-process memory-mapped region (not user data), and the
-// WAL path consults it via xShmMap rather than xRead/xWrite. Match
-// PageSize to the database's `PRAGMA page_size` (default 4096).
+// journals. The databases (main + temp) are encrypted at the page
+// boundary; the transient journals and WAL — whose record and frame
+// writes never land on a page boundary — at a small fixed unit, so
+// their misaligned writes don't force a read-modify-write of a whole
+// page (a several-fold speedup on large sequential writes in WAL mode).
+// The WAL `-shm` index stays plaintext — it's an in-process
+// memory-mapped region (not user data), and the WAL path consults it
+// via xShmMap rather than xRead/xWrite. Match PageSize to the
+// database's `PRAGMA page_size` (default 4096).
 //
 // Cipher choice: Adiantum (default, 32-byte key, length-preserving
 // wide-block construction from lukechampine.com/adiantum) or
