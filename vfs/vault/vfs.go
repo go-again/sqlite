@@ -818,15 +818,25 @@ func openThroughVault(cfg sqlite.Config, opts Options, preserveNewFiles bool) (*
 
 	cfg.VFS = v.name
 	cfg.VFSCloser = v
-	// Multiple connections are allowed and coordinate through the VFS's
-	// in-process advisory locks; default a busy timeout so writer contention
-	// retries rather than failing immediately. Rollback journal is the default
-	// (no uncompressed working set on disk); the caller may request WAL — the
-	// main DB stays compressed and only the transient -wal frames are
-	// uncompressed, folded into compressed slots on checkpoint.
-	if cfg.Pragmas.JournalMode == "" {
-		cfg.Pragmas.JournalMode = sqlite.JournalDelete
+	// The container serves whole logical pages of v.pageSize, so SQLite MUST use that
+	// page_size — otherwise every SQLite write is a sub-page read-modify-write of a
+	// container slot, and the page-number addressing the cipher and the freelist reader
+	// rely on no longer lines up. page_size only takes hold before the database's first
+	// write, but the OTHER creation-time pragmas — auto_vacuum and journal_mode = WAL —
+	// write the header, and the driver applies the _pragma flags SORTED, so either would
+	// run before page_size and lock the page size at SQLite's default. So keep only
+	// page_size (and the harmless per-connection pragmas) in the DSN, and apply
+	// auto_vacuum then journal_mode AFTER open — page_size pending, then auto_vacuum
+	// (writes the header at that size), then the journal — so the container's page size
+	// is the one that sticks.
+	journal := cfg.Pragmas.JournalMode
+	if journal == "" {
+		journal = sqlite.JournalDelete // no uncompressed working set on disk by default
 	}
+	autoVacuum := cfg.Pragmas.AutoVacuum
+	cfg.Pragmas.JournalMode = ""
+	cfg.Pragmas.AutoVacuum = ""
+
 	if cfg.Pragmas.BusyTimeout == 0 {
 		cfg.Pragmas.BusyTimeout = 5 * time.Second
 	}
@@ -842,6 +852,19 @@ func openThroughVault(cfg sqlite.Config, opts Options, preserveNewFiles bool) (*
 		// defensively (idempotent) in case it didn't.
 		_ = v.Close()
 		return nil, err
+	}
+	// page_size is pending; set the header-writing pragmas in order — auto_vacuum
+	// before the journal, both before the database gets any content.
+	setup := make([]string, 0, 2)
+	if autoVacuum != "" {
+		setup = append(setup, "PRAGMA auto_vacuum = "+string(autoVacuum))
+	}
+	setup = append(setup, "PRAGMA journal_mode = "+string(journal))
+	for _, p := range setup {
+		if _, err := db.Exec(p); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("vault: %s: %w", p, err)
+		}
 	}
 	return db, nil
 }
