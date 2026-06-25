@@ -44,6 +44,7 @@
 | Object metadata + at-rest ratio (`Stat`) | ✓ typed | `TestStatRatioAndMetadata`, `TestCloneSharesAndStat` | Returns logical size, stored bytes split into `UniqueBytes` (blocks this object alone references) and `SharedBytes` (shared with a clone/version), the at-rest compression ratio (computed from block sizes — not a maintained column), chunk size, mode, level. |
 | Compression: bounded decode (bomb defense) | ✓ typed | `TestDecodeChunkBoundRejectsBomb` | Decode capped at chunk size + 1; rejects over-large frames. |
 | Exported `Compress`/`Decompress` (standalone codec) | ✓ typed | `TestCompressDecompressExported` | The store's chunk codec for values kept outside the store (inlined in a row): round-trips and shrinks compressible input, verbatim fallback for `CompressionNone`/incompressible (never grown), and a bounded `Decompress` (bomb guard). |
+| Caller-transaction writes (`OnConn`) | ✓ typed | `TestOnConnJoinsTx`, `TestOnConnRollback`, `TestOnConnMultiChunkOneTx` | `Store.OnConn(*sql.Conn)` runs `Create`/`WriteAt`/`Batch`/`WriteAtFrom`/`Truncate`/`Delete`/`ReadAt`/`Size` on a caller-held connection, joining its open transaction (per-connection): content is invisible to other connections until commit, commits atomically with the caller's own rows, rolls back with them, multi-chunk content shares one transaction, and an in-tx read sees uncommitted writes. The `*OnConn` transaction bodies are shared with the pooled methods. |
 
 ## Design invariants (asserted by the tests above)
 

@@ -65,6 +65,23 @@ err := store.Batch(ctx, id, func(w io.WriterAt) error {
 
 Every write in the callback commits together when it returns `nil`, or rolls back entirely if it returns an error (or panics) — so a half-written batch never persists. The `io.WriterAt` is bound to one transaction (drive it sequentially), and `Batch` holds the write lock for the whole callback, so keep it tight: buffer a slow source first rather than reading it inside. `store.WriteAtFrom(ctx, id, off, r)` is the convenience form — it streams an `io.Reader` into an object in one `Batch`.
 
+## Joining a caller's transaction
+
+`Batch` opens its own transaction. To instead fold object writes into a **larger application transaction** — so content commits atomically with your own rows and shares a single writer — use `store.OnConn(conn)`, which runs on a connection you already hold. A SQLite transaction is per-connection, so writes on that connection join whatever transaction is open on it:
+
+```go
+conn, _ := db.Conn(ctx)          // a connection you own
+defer conn.Close()
+conn.ExecContext(ctx, "BEGIN IMMEDIATE")
+cs := store.OnConn(conn)
+id, _ := cs.Create(ctx)                                          // joins your transaction
+cs.WriteAt(ctx, id, content, 0)                                  // ...as does the content
+conn.ExecContext(ctx, "INSERT INTO inode(ino, blob) VALUES(1, ?)", id) // and your own row
+conn.ExecContext(ctx, "COMMIT")                                  // all commit together
+```
+
+You own `BEGIN`/`COMMIT`/`ROLLBACK`; the `ConnStore` opens no transaction of its own, and a read through it (`cs.ReadAt`, `cs.Size`) sees the transaction's own not-yet-committed writes. This removes the flush-before-blobstore seam when an application (e.g. a filesystem holding one long-lived writer) wants file content and its metadata to commit as one unit, with no second writer contending for the write lock. The post-delete/`Truncate` incremental vacuum is yours to run after you commit (it cannot run inside an open transaction).
+
 ## Compression
 
 Open a Store with `blobstore.WithCompression(level)` to store its objects compressed — the same `Writer`/`Reader` API, transparently:

@@ -121,6 +121,30 @@
 // source first rather than reading it inside. [Store.WriteAtFrom] is the
 // convenience form — it copies an [io.Reader] into an object in one Batch.
 //
+// # Joining a caller's transaction
+//
+// [Store.Batch] opens its own transaction. To instead fold object writes into a
+// LARGER application transaction — so content commits atomically with the caller's
+// own rows and shares one writer — use [Store.OnConn], which runs on a connection
+// the caller already holds: because a SQLite transaction is per-connection, writes
+// on that connection join whatever transaction is open on it.
+//
+//	conn, _ := db.Conn(ctx)          // one connection the caller owns
+//	defer conn.Close()
+//	conn.ExecContext(ctx, "BEGIN IMMEDIATE")
+//	cs := store.OnConn(conn)
+//	id, _ := cs.Create(ctx)                       // joins the caller's transaction
+//	cs.WriteAt(ctx, id, content, 0)               // ...as does the content
+//	conn.ExecContext(ctx, "INSERT INTO inode(...) VALUES(...)", id) // and the caller's row
+//	conn.ExecContext(ctx, "COMMIT")               // all commit together
+//
+// The caller owns BEGIN/COMMIT/ROLLBACK; [ConnStore] opens no transaction of its
+// own, and a read through it sees the transaction's own not-yet-committed writes.
+// It is the way for, e.g., a filesystem holding one long-lived writer to store
+// file content without a flush-around-blobstore seam or a second writer contending
+// for the write lock. The post-delete / post-truncate incremental vacuum is the
+// caller's to run after commit (it cannot run inside an open transaction).
+//
 // # Compression
 //
 // Open a Store with [WithCompression] to store new objects compressed:

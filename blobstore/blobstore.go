@@ -208,6 +208,13 @@ func (s *Store) Create(ctx context.Context, opts ...CreateOption) (int64, error)
 	if s.readOnly {
 		return 0, fmt.Errorf("blobstore: create: %w", ErrReadOnly)
 	}
+	return s.createOn(ctx, s.db, opts...)
+}
+
+// createOn inserts a new empty object via ex — the pool, or a caller-pinned
+// connection (via [Store.OnConn]) so the create joins the caller's transaction —
+// and returns its id. A single INSERT needs no transaction of its own.
+func (s *Store) createOn(ctx context.Context, ex execer, opts ...CreateOption) (int64, error) {
 	var cc createConfig
 	for _, o := range opts {
 		o(&cc)
@@ -224,7 +231,7 @@ func (s *Store) Create(ctx context.Context, opts ...CreateOption) (int64, error)
 	if _, ok := comp.azLevel(); ok {
 		codec = codecAZ
 	}
-	res, err := s.db.ExecContext(ctx,
+	res, err := ex.ExecContext(ctx,
 		`INSERT INTO `+s.objs+` (size, chunk, codec, level, keep_versions, max_age) VALUES (0, ?, ?, ?, ?, ?)`,
 		s.chunkSize, codec, level, cc.keepVersions, int64(cc.maxAge))
 	if err != nil {
@@ -411,8 +418,15 @@ func (s *Store) Stat(ctx context.Context, id int64) (ObjectInfo, error) {
 
 // Size reports the logical length in bytes of object id.
 func (s *Store) Size(ctx context.Context, id int64) (int64, error) {
+	return s.sizeOn(ctx, s.db, id)
+}
+
+// sizeOn reads object id's logical size from q — the pool, or a caller-pinned
+// connection (via [Store.OnConn]) so it observes that transaction's own
+// uncommitted writes.
+func (s *Store) sizeOn(ctx context.Context, q queryRower, id int64) (int64, error) {
 	var size int64
-	err := s.db.QueryRowContext(ctx,
+	err := q.QueryRowContext(ctx,
 		`SELECT size FROM `+s.objs+` WHERE id = ?`, id).Scan(&size)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, fmt.Errorf("blobstore: size %d: %w", id, ErrNotFound)
@@ -429,25 +443,32 @@ func (s *Store) Size(ctx context.Context, id int64) (int64, error) {
 // ErrNotFound. If the Store was opened with [WithVacuumOnDelete] and the database
 // is in incremental auto_vacuum mode, the freed pages are returned to the OS.
 func (s *Store) Delete(ctx context.Context, id int64) error {
-	err := s.withTx(ctx, func(sc *sql.Conn) error {
-		existed, err := s.deleteObjectTx(ctx, sc, id)
-		if err != nil {
-			return fmt.Errorf("blobstore: delete %d: %w", id, err)
-		}
-		if !existed {
-			return fmt.Errorf("blobstore: delete %d: %w", id, ErrNotFound)
-		}
-		// Cascade to the object's versions so deleting it never orphans the
-		// hidden snapshot clones (which would hold block references forever).
-		if err := s.deleteVersionsTx(ctx, sc, id); err != nil {
-			return fmt.Errorf("blobstore: delete %d: %w", id, err)
-		}
-		return nil
-	})
-	if err != nil {
+	if err := s.withTx(ctx, func(sc *sql.Conn) error {
+		return s.deleteOnConn(ctx, sc, id)
+	}); err != nil {
 		return err
 	}
 	s.maybeVacuum(ctx)
+	return nil
+}
+
+// deleteOnConn removes object id and its versions on the in-transaction conn sc.
+// The caller owns the transaction; the post-delete vacuum (pool path) is the
+// caller's concern under [Store.OnConn] (incremental_vacuum cannot run inside the
+// caller's open transaction).
+func (s *Store) deleteOnConn(ctx context.Context, sc *sql.Conn, id int64) error {
+	existed, err := s.deleteObjectTx(ctx, sc, id)
+	if err != nil {
+		return fmt.Errorf("blobstore: delete %d: %w", id, err)
+	}
+	if !existed {
+		return fmt.Errorf("blobstore: delete %d: %w", id, ErrNotFound)
+	}
+	// Cascade to the object's versions so deleting it never orphans the hidden
+	// snapshot clones (which would hold block references forever).
+	if err := s.deleteVersionsTx(ctx, sc, id); err != nil {
+		return fmt.Errorf("blobstore: delete %d: %w", id, err)
+	}
 	return nil
 }
 
@@ -487,48 +508,54 @@ func (s *Store) Truncate(ctx context.Context, id, size int64) error {
 		return errors.New("blobstore: truncate: negative size")
 	}
 	var cur int64 // old size, captured for the post-commit vacuum decision
-	err := s.withTx(ctx, func(sc *sql.Conn) error {
-		var chunk, codec, level int64
-		err := sc.QueryRowContext(ctx,
-			`SELECT size, chunk, codec, level FROM `+s.objs+` WHERE id = ?`, id).Scan(&cur, &chunk, &codec, &level)
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("blobstore: truncate %d: %w", id, ErrNotFound)
-		}
-		if err != nil {
-			return fmt.Errorf("blobstore: truncate %d: %w", id, err)
-		}
-		if err := checkChunk(id, chunk); err != nil {
-			return err
-		}
-
-		if size < cur {
-			// Chunks whose first byte is at or past the new size are gone.
-			firstDead := (size + chunk - 1) / chunk // ceil(size/chunk)
-			if err := s.releaseChunks(ctx, sc, id, firstDead, true); err != nil {
-				return fmt.Errorf("blobstore: truncate %d: %w", id, err)
-			}
-			// Zero the live tail of the boundary chunk so a later re-grow reads
-			// zeros there rather than resurrecting old bytes.
-			if rem := size % chunk; rem != 0 {
-				if err := s.zeroChunkTail(ctx, sc, id, size/chunk, rem, chunk, codec == codecAZ, Compression(level)); err != nil {
-					return fmt.Errorf("blobstore: truncate %d: %w", id, err)
-				}
-			}
-		}
-
-		if _, err := sc.ExecContext(ctx,
-			`UPDATE `+s.objs+` SET size = ? WHERE id = ?`, size, id); err != nil {
-			return fmt.Errorf("blobstore: truncate %d: %w", id, err)
-		}
-		return nil
-	})
-	if err != nil {
+	if err := s.withTx(ctx, func(sc *sql.Conn) error {
+		var e error
+		cur, e = s.truncateOnConn(ctx, sc, id, size)
+		return e
+	}); err != nil {
 		return err
 	}
 	if size < cur {
 		s.maybeVacuum(ctx)
 	}
 	return nil
+}
+
+// truncateOnConn sets object id to exactly size bytes on the in-transaction conn
+// sc and returns the object's prior size (for the caller's vacuum decision). The
+// caller owns the transaction.
+func (s *Store) truncateOnConn(ctx context.Context, sc *sql.Conn, id, size int64) (int64, error) {
+	var cur, chunk, codec, level int64
+	err := sc.QueryRowContext(ctx,
+		`SELECT size, chunk, codec, level FROM `+s.objs+` WHERE id = ?`, id).Scan(&cur, &chunk, &codec, &level)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("blobstore: truncate %d: %w", id, ErrNotFound)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("blobstore: truncate %d: %w", id, err)
+	}
+	if err := checkChunk(id, chunk); err != nil {
+		return 0, err
+	}
+	if size < cur {
+		// Chunks whose first byte is at or past the new size are gone.
+		firstDead := (size + chunk - 1) / chunk // ceil(size/chunk)
+		if err := s.releaseChunks(ctx, sc, id, firstDead, true); err != nil {
+			return 0, fmt.Errorf("blobstore: truncate %d: %w", id, err)
+		}
+		// Zero the live tail of the boundary chunk so a later re-grow reads zeros
+		// there rather than resurrecting old bytes.
+		if rem := size % chunk; rem != 0 {
+			if err := s.zeroChunkTail(ctx, sc, id, size/chunk, rem, chunk, codec == codecAZ, Compression(level)); err != nil {
+				return 0, fmt.Errorf("blobstore: truncate %d: %w", id, err)
+			}
+		}
+	}
+	if _, err := sc.ExecContext(ctx,
+		`UPDATE `+s.objs+` SET size = ? WHERE id = ?`, size, id); err != nil {
+		return 0, fmt.Errorf("blobstore: truncate %d: %w", id, err)
+	}
+	return cur, nil
 }
 
 // zeroChunkTail zeroes bytes [from:chunk) of the chunk at (id, seq) if it

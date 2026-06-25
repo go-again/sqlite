@@ -124,26 +124,33 @@ func (s *Store) writeAt(ctx context.Context, id int64, p []byte, off int64) (int
 	if err != nil || !ok {
 		return 0, err
 	}
-	err = s.withTx(ctx, func(sc *sql.Conn) error {
-		chunk, codec, level, err := s.objWriteMeta(ctx, sc, id, "WriteAt")
-		if err != nil {
-			return err
-		}
-		if err := s.writeSpans(ctx, sc, id, chunk, codec, level, off, p); err != nil {
-			return fmt.Errorf("blobstore: WriteAt %d: %w", id, err)
-		}
-		if _, err := sc.ExecContext(ctx,
-			`UPDATE `+s.objs+` SET size = max(size, ?) WHERE id = ?`, end, id); err != nil {
-			return fmt.Errorf("blobstore: WriteAt %d: %w", id, err)
-		}
-		return nil
-	})
-	if err != nil {
+	if err := s.withTx(ctx, func(sc *sql.Conn) error {
+		return s.writeOnConn(ctx, sc, id, p, off, end)
+	}); err != nil {
 		// The transaction rolled back (or commit failed): nothing was persisted,
 		// so report 0 written per io.WriterAt rather than a count that didn't stick.
 		return 0, err
 	}
 	return len(p), nil
+}
+
+// writeOnConn performs a WriteAt's work on the in-transaction conn sc — read the
+// object's write metadata, write the spans, bump the logical size. It manages no
+// transaction; the caller (a per-call withTx, or a caller-provided connection via
+// [Store.OnConn]) owns that.
+func (s *Store) writeOnConn(ctx context.Context, sc *sql.Conn, id int64, p []byte, off, end int64) error {
+	chunk, codec, level, err := s.objWriteMeta(ctx, sc, id, "WriteAt")
+	if err != nil {
+		return err
+	}
+	if err := s.writeSpans(ctx, sc, id, chunk, codec, level, off, p); err != nil {
+		return fmt.Errorf("blobstore: WriteAt %d: %w", id, err)
+	}
+	if _, err := sc.ExecContext(ctx,
+		`UPDATE `+s.objs+` SET size = max(size, ?) WHERE id = ?`, end, id); err != nil {
+		return fmt.Errorf("blobstore: WriteAt %d: %w", id, err)
+	}
+	return nil
 }
 
 // Batch runs fn's writes against object id in a single transaction: all of fn's
@@ -163,22 +170,29 @@ func (s *Store) writeAt(ctx context.Context, id int64, p []byte, off int64) (int
 // id does not exist.
 func (s *Store) Batch(ctx context.Context, id int64, fn func(w io.WriterAt) error) error {
 	return s.withTx(ctx, func(sc *sql.Conn) error {
-		chunk, codec, level, err := s.objWriteMeta(ctx, sc, id, "Batch")
-		if err != nil {
-			return err
-		}
-		bw := &batchWriter{s: s, ctx: ctx, sc: sc, id: id, chunk: chunk, codec: codec, level: level}
-		if err := fn(bw); err != nil {
-			return err
-		}
-		if bw.maxEnd > 0 {
-			if _, err := sc.ExecContext(ctx,
-				`UPDATE `+s.objs+` SET size = max(size, ?) WHERE id = ?`, bw.maxEnd, id); err != nil {
-				return fmt.Errorf("blobstore: Batch %d: %w", id, err)
-			}
-		}
-		return nil
+		return s.batchOnConn(ctx, sc, id, fn)
 	})
+}
+
+// batchOnConn runs a Batch's callback on the in-transaction conn sc, with one
+// size update at the end. The caller owns the transaction (a per-call withTx, or
+// a caller-provided connection via [Store.OnConn]).
+func (s *Store) batchOnConn(ctx context.Context, sc *sql.Conn, id int64, fn func(w io.WriterAt) error) error {
+	chunk, codec, level, err := s.objWriteMeta(ctx, sc, id, "Batch")
+	if err != nil {
+		return err
+	}
+	bw := &batchWriter{s: s, ctx: ctx, sc: sc, id: id, chunk: chunk, codec: codec, level: level}
+	if err := fn(bw); err != nil {
+		return err
+	}
+	if bw.maxEnd > 0 {
+		if _, err := sc.ExecContext(ctx,
+			`UPDATE `+s.objs+` SET size = max(size, ?) WHERE id = ?`, bw.maxEnd, id); err != nil {
+			return fmt.Errorf("blobstore: Batch %d: %w", id, err)
+		}
+	}
+	return nil
 }
 
 // batchWriter is the io.WriterAt handed to a [Store.Batch] callback. It writes on
@@ -223,38 +237,66 @@ func (s *Store) WriteAtFrom(ctx context.Context, id, off int64, r io.Reader) (in
 	if off < 0 {
 		return 0, errors.New("blobstore: WriteAtFrom: negative offset")
 	}
-	// Stage reads at the object's own chunk size (frozen at Create), not this
-	// handle's configured WithChunkSize, so the writes re-chunk cleanly even when
-	// the two differ.
-	var chunk int64
-	if err := s.db.QueryRowContext(ctx, `SELECT chunk FROM `+s.objs+` WHERE id = ?`, id).Scan(&chunk); err != nil {
-		return 0, fmt.Errorf("blobstore: WriteAtFrom %d: %w", id, err)
+	chunk, err := s.chunkSizeOf(ctx, s.db, id)
+	if err != nil {
+		return 0, err
 	}
 	var total int64
-	err := s.Batch(ctx, id, func(w io.WriterAt) error {
-		buf := make([]byte, chunk) // staging buffer for reads, object chunk-sized
-		pos := off
-		for {
-			n, rerr := r.Read(buf)
-			if n > 0 {
-				if _, werr := w.WriteAt(buf[:n], pos); werr != nil {
-					return werr
-				}
-				pos += int64(n)
-				total += int64(n)
-			}
-			if rerr == io.EOF {
-				return nil
-			}
-			if rerr != nil {
-				return rerr
-			}
-		}
+	err = s.Batch(ctx, id, func(w io.WriterAt) error {
+		var e error
+		total, e = copyInto(w, r, off, chunk)
+		return e
 	})
 	if err != nil {
 		return 0, err
 	}
 	return total, nil
+}
+
+// queryRower and execer are satisfied by both *sql.DB and *sql.Conn, so a helper
+// can run on the pool or on a caller-pinned connection (via [Store.OnConn]).
+type (
+	queryRower interface {
+		QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	}
+	execer interface {
+		ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	}
+)
+
+// chunkSizeOf reads object id's frozen chunk size from q (the pool, or a pinned
+// connection via [Store.OnConn]). Reads stage at the object's own chunk size, not
+// this handle's configured WithChunkSize, so writes re-chunk cleanly when the two
+// differ.
+func (s *Store) chunkSizeOf(ctx context.Context, q queryRower, id int64) (int64, error) {
+	var chunk int64
+	if err := q.QueryRowContext(ctx, `SELECT chunk FROM `+s.objs+` WHERE id = ?`, id).Scan(&chunk); err != nil {
+		return 0, fmt.Errorf("blobstore: WriteAtFrom %d: %w", id, err)
+	}
+	return chunk, nil
+}
+
+// copyInto copies all of r into w starting at off, in chunk-sized reads, and
+// returns the bytes written.
+func copyInto(w io.WriterAt, r io.Reader, off, chunk int64) (int64, error) {
+	buf := make([]byte, chunk)
+	pos, total := off, int64(0)
+	for {
+		n, rerr := r.Read(buf)
+		if n > 0 {
+			if _, werr := w.WriteAt(buf[:n], pos); werr != nil {
+				return total, werr
+			}
+			pos += int64(n)
+			total += int64(n)
+		}
+		if rerr == io.EOF {
+			return total, nil
+		}
+		if rerr != nil {
+			return total, rerr
+		}
+	}
 }
 
 // readAt reads into p from object offset off, clamping to logical size and
@@ -281,9 +323,17 @@ func (s *Store) readAt(ctx context.Context, id int64, p []byte, off int64) (int,
 		return 0, fmt.Errorf("blobstore: ReadAt %d: %w", id, err)
 	}
 	defer func() { _, _ = sc.ExecContext(context.Background(), "ROLLBACK") }()
+	return s.readOnConn(ctx, sc, id, p, off)
+}
 
+// readOnConn reads into p from object offset off on the conn sc, clamping to
+// logical size and zero-filling sparse holes, from one consistent view. The caller
+// owns the snapshot/transaction: the pooled readAt wraps it in a short read-only
+// BEGIN, while [Store.OnConn] runs it inside the caller's open transaction — so a
+// read there sees that transaction's own uncommitted writes.
+func (s *Store) readOnConn(ctx context.Context, sc *sql.Conn, id int64, p []byte, off int64) (int, error) {
 	var size, chunk, codec int64
-	err = sc.QueryRowContext(ctx,
+	err := sc.QueryRowContext(ctx,
 		`SELECT size, chunk, codec FROM `+s.objs+` WHERE id = ?`, id).Scan(&size, &chunk, &codec)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, fmt.Errorf("blobstore: ReadAt %d: %w", id, ErrNotFound)
