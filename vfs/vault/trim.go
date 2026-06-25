@@ -11,7 +11,29 @@ package vault
 import (
 	"fmt"
 	"path/filepath"
+
+	sqlite "gosqlite.org"
 )
+
+// Checkpoint folds the write-ahead log back into the container and returns any
+// freed trailing blocks to the OS, while the database stays open — the "shrink a
+// mounted container" operation, combining a WAL checkpoint with [Trim] in one call.
+// It runs PRAGMA wal_checkpoint(TRUNCATE) on db, then Trim on path; db and path
+// must be the same database (the one path it was opened with). It returns the bytes
+// Trim reclaimed.
+//
+// Because the directory is segmented, the per-checkpoint container commit re-encodes
+// only the segments the fold touched, so the checkpoint holds the write lock for a
+// bounded slice rather than the whole directory. On a rollback-journal database the
+// checkpoint is a no-op and only Trim applies. TRUNCATE briefly needs the write lock;
+// open the database with a busy timeout (e.g. [gosqlite.org.OpenWAL]) so it queues
+// rather than failing under contention.
+func Checkpoint(db *sqlite.DB, path string) (reclaimed int64, err error) {
+	if _, err := db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		return 0, fmt.Errorf("vault: checkpoint: %w", err)
+	}
+	return Trim(path, 0)
+}
 
 // Trim returns trailing free blocks of the OPEN container at path to the OS,
 // shrinking the file while the database stays open, and reports the bytes
@@ -71,6 +93,13 @@ func (c *container) trim(maxBytes int64) (int64, error) {
 	if c.readOnlyRecipient {
 		return 0, ErrReadOnlyRecipient // a reader with no write authority must not shrink the file
 	}
+	return c.trimLocked(maxBytes)
+}
+
+// trimLocked is the body of [container.trim] with the caller already holding c.mu
+// and having checked the read-only guards. The online compactor calls it directly
+// after a relocation commit, inside the same locked section.
+func (c *container) trimLocked(maxBytes int64) (int64, error) {
 	a := c.alloc
 	n := len(a.free)
 	if n == 0 {

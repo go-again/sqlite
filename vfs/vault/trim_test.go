@@ -3,9 +3,40 @@ package vault
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	sqlite "gosqlite.org"
 )
+
+// TestCheckpoint folds the WAL and reclaims freed tail blocks in one call on an
+// encrypted WAL container, leaving the data intact and the database writable.
+func TestCheckpoint(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ckpt.db")
+	db, err := Open(sqlite.Config{
+		Path:    path,
+		Pragmas: sqlite.Pragmas{JournalMode: sqlite.JournalWAL, BusyTimeout: 2 * time.Second},
+	}, Options{Key: randKey(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	churn(t, db) // grow, then free most of it
+
+	reclaimed, err := Checkpoint(db, path)
+	if err != nil {
+		t.Fatalf("Checkpoint: %v", err)
+	}
+	if reclaimed < 0 {
+		t.Fatalf("Checkpoint reported negative reclaim %d", reclaimed)
+	}
+	if n := rowCount(t, db); n != 30 {
+		t.Fatalf("row count after Checkpoint = %d, want 30", n)
+	}
+	mustExec(t, db, `INSERT INTO t(id, blob) VALUES(88888, ?)`, []byte("post-checkpoint"))
+	if n := rowCount(t, db); n != 31 {
+		t.Fatalf("row count after post-Checkpoint insert = %d, want 31", n)
+	}
+}
 
 // TestContainerTrim drives the trim mechanism directly over a hand-built allocator,
 // so the physical layout is deterministic (the live container's layout depends on

@@ -17,6 +17,17 @@
 // commit atomically flips a ping-pong superblock, so a crash leaves the previous
 // committed state intact and SQLite's rollback journal recovers the rest.
 //
+// The page directory is stored in fixed-size segments under a small segment index,
+// so a commit re-encodes (and re-encrypts) only the segments whose pages changed,
+// plus the index — the per-commit directory write is O(changed pages), not O(total
+// pages), so it does not grow with the database. [Options.DirSegmentPages] tunes
+// the segment size (smaller bounds the per-commit write at the cost of a larger
+// index). Under WAL this also bounds the per-checkpoint fold, so a checkpoint holds
+// the write lock only for the segments it touches; checkpoint cadence is SQLite's
+// standard PRAGMA wal_autocheckpoint (vault does not override it), and a snapshot
+// read on another connection proceeds against the last committed state rather than
+// blocking on a concurrent writer.
+//
 //	db, err := vault.Open(sqlite.Config{Path: "app.db"}, vault.Options{}) // plain container
 //	if err != nil { ... }
 //	defer db.Close()
@@ -65,14 +76,23 @@
 //
 // [Compact] reclaims space on a closed database: under churn the container reuses
 // freed blocks (the at-rest file plateaus rather than growing), and Compact rewrites
-// it into a fresh, densely-packed file — returning the freed blocks to the OS —
-// while continuing the commit generation so an [Options.Anchor] stays valid.
-// [Trim] is the online counterpart: it returns TRAILING free blocks to the OS while
-// the database stays open (a cheap truncate, no page relocation), reclaiming space
-// when free blocks have collected at the tail; Compact remains the densest reclaim.
-// [Snapshot] writes a consistent, encrypted, compressed copy to a NEW path
-// (optionally re-sealed to a different recipient set) without plaintext on disk —
-// the at-rest analogue of [Pack] for an encrypted database.
+// every physical page into a fresh, densely-packed file — returning the freed blocks
+// to the OS — while continuing the commit generation so an [Options.Anchor] stays
+// valid. [CompactLogical] is the O(live) closed-database reclaim: a VACUUM INTO
+// through a fresh container copies only the live b-tree, so reclaiming a large
+// deletion needs no prior vacuum and is one pass proportional to what is kept; it
+// preserves the key/membership (a reclaim, not a rotation) but starts a fresh
+// generation, so an anchored database uses [Compact] instead.
+// [CompactOnline] is the online relocating reclaim: while the database stays open it
+// moves live slots down into the free holes a delete scatters through the middle and
+// truncates the tail, recovering space that tail-only [Trim] cannot. [Trim] is the
+// cheap online tail reclaim: it returns TRAILING free blocks to the OS (a truncate,
+// no relocation) when free blocks have collected at the tail. Do NOT run a full
+// SQLite VACUUM to reclaim a container — copy-on-write makes it roughly DOUBLE the
+// file rather than shrink; use PRAGMA incremental_vacuum then [CompactOnline], or
+// [Compact]. [Snapshot] writes a consistent, encrypted, compressed copy to a NEW
+// path (optionally re-sealed to a different recipient set) without plaintext on
+// disk — the at-rest analogue of [Pack] for an encrypted database.
 //
 // # Untrusted input
 //

@@ -68,6 +68,15 @@ type Options struct {
 	// power of two in [512, 65536] and must not exceed PageSize.
 	BlockSize int
 
+	// DirSegmentPages is the number of page-directory entries per on-disk
+	// directory segment, set at create only and recorded in the container (so it
+	// reads back regardless of the value configured later). A commit re-encodes
+	// only the segments whose pages changed, so a smaller value bounds the
+	// per-commit directory write at the cost of a larger segment index. Zero uses
+	// a balanced default; it must be in [16, 1048576]. Ignored by [OpenSnapshot]
+	// and when opening an existing container (its stored value wins).
+	DirSegmentPages int
+
 	// Key, if non-empty, encrypts the database at rest in the live compressing
 	// VFS ([Open]/[NewVFS]). It is the raw cipher key — 32 bytes for the default
 	// Adiantum cipher, 64 bytes for AES-XTS-256; derive one from a passphrase
@@ -147,7 +156,7 @@ type Options struct {
 
 // resolveLive validates and defaults the live-VFS geometry, returning the
 // physical block size and logical page size in bytes.
-func (o Options) resolveLive() (blockSize, pageSize uint64, err error) {
+func (o Options) resolveLive() (blockSize, pageSize, segEntries uint64, err error) {
 	ps := o.PageSize
 	if ps == 0 {
 		ps = defaultPageSize
@@ -156,16 +165,23 @@ func (o Options) resolveLive() (blockSize, pageSize uint64, err error) {
 	if bs == 0 {
 		bs = defaultBlockSize
 	}
+	se := o.DirSegmentPages
+	if se == 0 {
+		se = defaultSegEntries
+	}
 	if !isPow2InRange(ps) {
-		return 0, 0, fmt.Errorf("vault: invalid PageSize %d (want a power of two in [512, 65536])", ps)
+		return 0, 0, 0, fmt.Errorf("vault: invalid PageSize %d (want a power of two in [512, 65536])", ps)
 	}
 	if !isPow2InRange(bs) {
-		return 0, 0, fmt.Errorf("vault: invalid BlockSize %d (want a power of two in [512, 65536])", bs)
+		return 0, 0, 0, fmt.Errorf("vault: invalid BlockSize %d (want a power of two in [512, 65536])", bs)
 	}
 	if bs > ps {
-		return 0, 0, fmt.Errorf("vault: BlockSize %d exceeds PageSize %d", bs, ps)
+		return 0, 0, 0, fmt.Errorf("vault: BlockSize %d exceeds PageSize %d", bs, ps)
 	}
-	return uint64(bs), uint64(ps), nil
+	if se < 16 || se > 1<<20 {
+		return 0, 0, 0, fmt.Errorf("vault: invalid DirSegmentPages %d (want [16, 1048576])", se)
+	}
+	return uint64(bs), uint64(ps), uint64(se), nil
 }
 
 // isPow2InRange reports whether n is a power of two within SQLite's valid page

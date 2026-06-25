@@ -14,7 +14,7 @@ import (
 // crashBacking had Sync'd), the same way openMainOver recovers on disk.
 func reopenContainer(t *testing.T, durable []byte) *mainFile {
 	t.Helper()
-	f, err := openMainOver(newCrashBacking(durable), false, defaultBlockSize, crashPageSize, CompressionDefault)
+	f, err := openMainOver(newCrashBacking(durable), false, defaultBlockSize, crashPageSize, defaultSegEntries, CompressionDefault)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -33,7 +33,7 @@ func readPage(t *testing.T, f *mainFile, pageNo int) []byte {
 
 func TestMainFileTruncateShrinkAndGrow(t *testing.T) {
 	cb := newCrashBacking(nil)
-	f, err := openMainOver(cb, false, defaultBlockSize, crashPageSize, CompressionDefault)
+	f, err := openMainOver(cb, false, defaultBlockSize, crashPageSize, defaultSegEntries, CompressionDefault)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestMainFileTruncateShrinkAndGrow(t *testing.T) {
 
 func TestMainFileSparsePages(t *testing.T) {
 	cb := newCrashBacking(nil)
-	f, err := openMainOver(cb, false, defaultBlockSize, crashPageSize, CompressionDefault)
+	f, err := openMainOver(cb, false, defaultBlockSize, crashPageSize, defaultSegEntries, CompressionDefault)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

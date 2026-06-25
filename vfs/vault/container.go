@@ -143,6 +143,17 @@ type container struct {
 	dir       []dirEntry // page directory, index = logical page number
 	alloc     *allocator // physical block allocator
 
+	// segEntries is the per-segment directory entry count (geometry, read from the
+	// superblock); the segmented commit/open path (containerVersion 2) uses it to
+	// rewrite only the directory segments whose pages changed. segIndex mirrors the
+	// committed on-disk segment index, so a commit releases the segments it
+	// supersedes after the durable flip. dirtySegs holds the segments whose entries
+	// changed since the last commit; a commit rewrites those (and the index) and
+	// carries the rest forward in place — the O(changed pages) directory write.
+	segEntries uint64
+	segIndex   []segDesc
+	dirtySegs  map[uint64]struct{}
+
 	committedGen       uint64 // generation of the on-disk authoritative superblock
 	committedDirOffset uint64 // its directory extent (released after the next commit)
 	committedDirBlocks uint32
@@ -298,13 +309,28 @@ func (c *container) truncate(size int64) error {
 	if uint64(size)%c.pageSize != 0 {
 		newCount++ // defensive: SQLite truncates on page boundaries
 	}
-	for i := newCount; i < uint64(len(c.dir)); i++ {
+	oldLen := uint64(len(c.dir))
+	for i := newCount; i < oldLen; i++ {
 		if e := c.dir[i]; e.physOffset != 0 {
 			c.releaseLater(e.physOffset, e.blocks)
 		}
 	}
-	if newCount < uint64(len(c.dir)) {
+	if newCount < oldLen {
 		c.dir = c.dir[:newCount]
+	}
+	// Every directory segment from the new last page through the OLD last page
+	// changed: the new last segment shrank, and the segments above it were dropped.
+	// Mark them all dirty so a regrow later in this SAME transaction recomputes them
+	// from c.dir rather than carrying the stale pre-truncate on-disk segment forward
+	// — which would resurrect the just-dropped pages as durable, silent corruption.
+	if oldLen > 0 && c.segEntries != 0 {
+		first := uint64(0)
+		if newCount > 0 {
+			first = (newCount - 1) / c.segEntries // the (shrunk) new last segment
+		}
+		for s := first; s*c.segEntries < oldLen; s++ {
+			c.markSegmentDirty(s * c.segEntries)
+		}
 	}
 	c.pageCount = newCount
 	c.dirty = true
@@ -464,12 +490,18 @@ func (c *container) storePage(pageNo uint64, page []byte) error {
 		checksum:   checksum,
 		hash:       hash,
 	}
+	c.markSegmentDirty(pageNo)
 	return nil
 }
 
 // growDir extends the directory so index pageNo exists, filling gaps with
 // sparse entries.
 func (c *container) growDir(pageNo uint64) {
+	// The old last segment's page range extends as the directory grows, so its
+	// content (entry count) changes — rewrite it, not just pageNo's segment.
+	if old := uint64(len(c.dir)); old <= pageNo && old > 0 {
+		c.markSegmentDirty(old - 1)
+	}
 	for uint64(len(c.dir)) <= pageNo {
 		c.dir = append(c.dir, dirEntry{})
 	}
@@ -523,40 +555,12 @@ func (c *container) writeBlocks(data []byte, physOffset, blocks uint64) error {
 //     critical section should be shrunk before optimizing for heavy multi-reader
 //     concurrency.
 func (c *container) commit() error {
-	var dirOffset uint64
-	var dirBlocks uint32
-	var dirChecksum uint32
-	var dirHash [dirHashLen]byte
-	// An encrypted container always writes a directory (at least the canary) so a
-	// wrong key is caught at open even on an empty database.
-	if len(c.dir) > 0 || c.cipher != nil {
-		entries := marshalDirectory(c.dir, c.authenticated)
-		if c.cipher != nil {
-			// [canary || entries], zero-padded to a block run and encrypted in
-			// place; the checksum covers the on-disk ciphertext.
-			nb := blocksFor(uint64(dirCanaryLen+len(entries)), c.blockSize)
-			buf := make([]byte, nb*c.blockSize)
-			copy(buf, dirCanary[:])
-			copy(buf[dirCanaryLen:], entries)
-			c.cipher.Encrypt(buf, dirTweak, domainDirectory)
-			dirOffset = c.alloc.alloc(nb) * c.blockSize
-			dirBlocks = uint32(nb)
-			dirChecksum = crc32.Checksum(buf, crc32C)
-			if c.authenticated {
-				dirHash = sha256.Sum256(buf) // crypto hash of the on-disk directory, signed below
-			}
-			if _, err := c.back.WriteAt(buf, int64(dirOffset)); err != nil {
-				return err
-			}
-		} else {
-			dirChecksum = crc32.Checksum(entries, crc32C)
-			nb := blocksFor(uint64(len(entries)), c.blockSize)
-			dirOffset = c.alloc.alloc(nb) * c.blockSize
-			dirBlocks = uint32(nb)
-			if err := c.writeBlocks(entries, dirOffset, nb); err != nil {
-				return err
-			}
-		}
+	// Persist the directory as segments + a segment index; an encrypted container
+	// always writes the index (at least the canary) so a wrong key is caught at
+	// open even on an empty database. oldSegs are released after the durable flip.
+	dirOffset, dirBlocks, dirChecksum, dirHash, oldSegs, err := c.writeDirectory()
+	if err != nil {
+		return err
 	}
 	if err := c.back.Sync(); err != nil {
 		return err
@@ -569,6 +573,7 @@ func (c *container) commit() error {
 		pageCount:     c.pageCount,
 		dirOffset:     dirOffset,
 		dirBlocks:     dirBlocks,
+		segEntries:    uint32(c.segEntries),
 		generation:    newGen,
 		codec:         c.codecTag(),
 		enc:           c.enc,
@@ -599,7 +604,12 @@ func (c *container) commit() error {
 	}
 
 	if c.committedDirBlocks > 0 {
-		c.releaseLater(c.committedDirOffset, c.committedDirBlocks)
+		c.releaseLater(c.committedDirOffset, c.committedDirBlocks) // the old segment-index extent
+	}
+	for _, d := range oldSegs {
+		if d.physOffset != 0 {
+			c.releaseLater(d.physOffset, d.blocks) // the old directory-segment extents
+		}
 	}
 	for _, e := range c.pendingRelease {
 		c.alloc.release(e.start, e.count)
@@ -610,6 +620,7 @@ func (c *container) commit() error {
 	c.committedDirBlocks = dirBlocks
 	c.nextSlot = 1 - c.nextSlot
 	c.dirty = false
+	c.dirtySegs = nil // every change since the last commit is now durable
 	// Advance the external replay floor now that newGen is durable. The store is
 	// surfaced as an error because the caller must know the anti-replay floor did
 	// NOT advance — a lagging floor leaves a window in which a rollback to a
@@ -625,6 +636,145 @@ func (c *container) commit() error {
 		}
 	}
 	return nil
+}
+
+// writeMetaExtent writes one directory-metadata extent — a directory segment, or
+// the segment index — to a freshly allocated COW block run and returns where it
+// landed plus its integrity fields. content is the marshaled bytes; withCanary
+// prepends the wrong-key canary (the index only); tweak and domain key the cipher.
+// Empty plaintext content writes nothing (off 0). hash is the on-disk (ciphertext)
+// digest used in authenticated mode; the caller keeps its full 32 bytes for the
+// index (superblock dirHash) or its truncation for a segment (segDesc.hash).
+// Caller holds c.mu (write).
+func (c *container) writeMetaExtent(content []byte, withCanary bool, tweak uint64, domain byte) (off uint64, blocks, storedLen, checksum uint32, hash [dirHashLen]byte, err error) {
+	storedLen = uint32(len(content))
+	if c.cipher != nil {
+		prefix := 0
+		if withCanary {
+			prefix = dirCanaryLen
+		}
+		nb := blocksFor(uint64(prefix+len(content)), c.blockSize)
+		if nb == 0 {
+			nb = 1 // an encrypted extent always occupies at least one block (the canary)
+		}
+		buf := make([]byte, nb*c.blockSize)
+		if withCanary {
+			copy(buf, dirCanary[:])
+		}
+		copy(buf[prefix:], content)
+		c.cipher.Encrypt(buf, tweak, domain)
+		off = c.alloc.alloc(nb) * c.blockSize
+		blocks = uint32(nb)
+		checksum = crc32.Checksum(buf, crc32C)
+		if c.authenticated {
+			hash = sha256.Sum256(buf)
+		}
+		if _, werr := c.back.WriteAt(buf, int64(off)); werr != nil {
+			return 0, 0, 0, 0, hash, werr
+		}
+		return off, blocks, storedLen, checksum, hash, nil
+	}
+	if len(content) == 0 {
+		return 0, 0, 0, 0, hash, nil
+	}
+	checksum = crc32.Checksum(content, crc32C)
+	nb := blocksFor(uint64(len(content)), c.blockSize)
+	off = c.alloc.alloc(nb) * c.blockSize
+	blocks = uint32(nb)
+	if werr := c.writeBlocks(content, off, nb); werr != nil {
+		return 0, 0, 0, 0, hash, werr
+	}
+	return off, blocks, storedLen, checksum, hash, nil
+}
+
+// writeDirectory persists the page directory as fixed-size segments plus a small
+// segment index, and returns the index extent's location and integrity fields for
+// the superblock, along with the previous segments for the caller to release after
+// the durable commit. It carries an unchanged (clean) segment forward in place and
+// rewrites only the dirty ones plus the index — the O(changed pages) path. The
+// integrity chain is superblock(dirHash) → index → segDesc.hash → segment. Caller
+// holds c.mu (write).
+func (c *container) writeDirectory() (off uint64, blocks, checksum uint32, hash [dirHashLen]byte, released []segDesc, err error) {
+	// Defensive: a (non-occurring) truncate-grow could leave pageCount past the
+	// in-memory directory; pad so every segment slice below is in bounds.
+	for uint64(len(c.dir)) < c.pageCount {
+		c.dir = append(c.dir, dirEntry{})
+	}
+	// free schedules a segment's superseded on-disk extent for release after the
+	// durable commit (the same COW discipline as data slots and the index).
+	free := func(s uint64) {
+		if s < uint64(len(c.segIndex)) && c.segIndex[s].physOffset != 0 {
+			released = append(released, c.segIndex[s])
+		}
+	}
+	nSegs := segmentCount(c.pageCount, c.segEntries)
+	if nSegs == 0 && c.cipher == nil {
+		for s := range uint64(len(c.segIndex)) { // plaintext empty: drop all segments + index
+			free(s)
+		}
+		c.segIndex, c.dirtySegs = nil, nil
+		return 0, 0, 0, hash, released, nil
+	}
+	newSegs := make([]segDesc, nSegs)
+	for s := range nSegs {
+		// Carry an unchanged existing segment forward in place — the O(changed
+		// pages) win: its bytes are untouched, so it is neither re-encrypted nor
+		// rewritten, and its extent is not released.
+		if _, dirty := c.dirtySegs[s]; !dirty && s < uint64(len(c.segIndex)) {
+			newSegs[s] = c.segIndex[s]
+			continue
+		}
+		lo, hi := segmentBounds(s, c.segEntries, c.pageCount)
+		if allSparse(c.dir[lo:hi]) {
+			free(s) // an all-sparse segment is recorded as physOffset 0 (not written)
+			continue
+		}
+		entries := marshalDirectory(c.dir[lo:hi], c.authenticated)
+		soff, sblocks, slen, scrc, shash, werr := c.writeMetaExtent(entries, false, s, domainDirectory)
+		if werr != nil {
+			return 0, 0, 0, hash, nil, werr
+		}
+		d := segDesc{physOffset: soff, storedLen: slen, blocks: sblocks, checksum: scrc}
+		copy(d.hash[:], shash[:slotHashLen])
+		newSegs[s] = d
+		free(s)
+	}
+	for s := nSegs; s < uint64(len(c.segIndex)); s++ { // segments dropped by a shrink
+		if c.segIndex[s].physOffset != 0 {
+			released = append(released, c.segIndex[s])
+		}
+	}
+	// The index carries the wrong-key canary and is the root the superblock
+	// hashes/signs; it is small (O(#segments)) and rewritten every commit.
+	off, blocks, _, checksum, hash, err = c.writeMetaExtent(marshalSegmentIndex(newSegs), true, 0, domainSegIndex)
+	if err != nil {
+		return 0, 0, 0, hash, nil, err
+	}
+	c.segIndex = newSegs
+	return off, blocks, checksum, hash, released, nil
+}
+
+// allSparse reports whether every entry of a directory segment is sparse (never
+// written), so the segment need not be stored on disk at all.
+func allSparse(entries []dirEntry) bool {
+	for _, e := range entries {
+		if e.physOffset != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// markSegmentDirty records that the directory segment holding pageNo changed, so
+// the next commit rewrites it instead of carrying it forward.
+func (c *container) markSegmentDirty(pageNo uint64) {
+	if c.segEntries == 0 {
+		return
+	}
+	if c.dirtySegs == nil {
+		c.dirtySegs = make(map[uint64]struct{})
+	}
+	c.dirtySegs[pageNo/c.segEntries] = struct{}{}
 }
 
 // --- vfs.File: in-process advisory locking via the shared vfs.AdvisoryLock ---

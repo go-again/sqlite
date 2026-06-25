@@ -11,6 +11,61 @@ import (
 	"gosqlite.org/crypto/keyring"
 )
 
+// TestCompactPreservesMembership proves Compact of a recipients image with ONLY a
+// read identity (no Recipients) preserves the existing keyslot and data key — every
+// current recipient still opens the compacted copy, a non-member still cannot, and
+// the data is intact — so `compact -identity <key>` works on a shared image without
+// re-specifying the whole recipient set.
+func TestCompactPreservesMembership(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shared.db")
+	alice, aliceID, err := keyring.GenerateX25519()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, bobID, err := keyring.GenerateX25519()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, strangerID, err := keyring.GenerateX25519()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(sqlite.Config{Path: path}, Options{Recipients: []keyring.Recipient{alice, bob}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, db, `CREATE TABLE t(v)`)
+	mustExec(t, db, `INSERT INTO t(v) VALUES('kept')`)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Compact with only alice's identity — no Recipients to re-seal to.
+	if err := Compact(sqlite.Config{Path: path}, Options{Identities: []keyring.Identity{aliceID}}); err != nil {
+		t.Fatalf("Compact -identity: %v", err)
+	}
+
+	open := func(id keyring.Identity) (*sqlite.DB, error) {
+		return Open(sqlite.Config{Path: path}, Options{Identities: []keyring.Identity{id}})
+	}
+	for name, id := range map[string]keyring.Identity{"alice": aliceID, "bob": bobID} {
+		d, err := open(id)
+		if err != nil {
+			t.Fatalf("reopen as %s after preserve-compact: %v", name, err)
+		}
+		var v string
+		if err := d.QueryRow(`SELECT v FROM t`).Scan(&v); err != nil || v != "kept" {
+			t.Fatalf("%s reads (%q,%v), want kept", name, v, err)
+		}
+		_ = d.Close()
+	}
+	if d, err := open(strangerID); err == nil {
+		_ = d.Close()
+		t.Fatal("a non-member opened the compacted image; membership leaked")
+	}
+}
+
 // churn fills a database with incompressible rows, deletes almost all of them, and
 // VACUUMs — leaving a small logical database inside a container whose physical file
 // has plateaued large (freed blocks are reused, not returned to the OS).
@@ -235,10 +290,12 @@ func TestReservedPathRefusesOpen(t *testing.T) {
 	_ = d2.Close()
 }
 
-// TestCompactEncryptedRequiresKey: compacting an encrypted database with only
-// Identities (forgetting Recipients) must be REFUSED, not silently rewritten as
-// plaintext. The original file is left intact.
-func TestCompactEncryptedRequiresKey(t *testing.T) {
+// TestCompactPreserveStaysEncrypted: compacting an encrypted (recipients) database
+// with only Identities preserves the membership and MUST NOT decrypt — the rewritten
+// file carries no plaintext marker and a recipient still reads it. (The same path
+// for a raw-key source, which has no keyslot to preserve, still refuses without the
+// Key — covered by the rewrite guard.)
+func TestCompactPreserveStaysEncrypted(t *testing.T) {
 	alice, aliceID, err := keyring.GenerateX25519()
 	if err != nil {
 		t.Fatal(err)
@@ -248,7 +305,7 @@ func TestCompactEncryptedRequiresKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "rk.db")
-	marker := []byte("REQUIRES-KEY-marker-must-stay-encrypted")
+	marker := []byte("PRESERVE-marker-must-stay-encrypted")
 
 	db, err := Open(sqlite.Config{Path: path}, Options{Recipients: []keyring.Recipient{alice, bob}})
 	if err != nil {
@@ -264,27 +321,27 @@ func TestCompactEncryptedRequiresKey(t *testing.T) {
 	}
 	_ = db.Close()
 
-	// Only Identities (no Recipients): must error before touching the file.
-	if err := Compact(sqlite.Config{Path: path}, Options{Identities: []keyring.Identity{aliceID}}); err == nil {
-		t.Fatal("Compact with only Identities on an encrypted database succeeded; want a refusal")
+	// Only Identities (no Recipients): preserves the keyslot, does not decrypt.
+	if err := Compact(sqlite.Config{Path: path}, Options{Identities: []keyring.Identity{aliceID}}); err != nil {
+		t.Fatalf("Compact -identity on a recipients image: %v", err)
 	}
 
-	// The original is untouched and still encrypted: no plaintext marker on disk,
-	// and a recipient still reads it.
+	// The compacted file is still encrypted: no plaintext marker on disk, and a
+	// recipient still reads it.
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if bytes.Contains(raw, marker) {
-		t.Fatal("plaintext marker on disk after a refused compact — database was decrypted")
+		t.Fatal("plaintext marker on disk after preserve-compact — database was decrypted")
 	}
 	rdb, err := Open(sqlite.Config{Path: path}, Options{Identities: []keyring.Identity{bobID}})
 	if err != nil {
-		t.Fatalf("original database damaged after a refused compact: %v", err)
+		t.Fatalf("recipient cannot open after preserve-compact: %v", err)
 	}
 	defer rdb.Close()
 	if n := rowCount(t, rdb); n != 20 {
-		t.Fatalf("row count after refused compact = %d, want 20", n)
+		t.Fatalf("row count after preserve-compact = %d, want 20", n)
 	}
 }
 

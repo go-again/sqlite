@@ -248,7 +248,7 @@ func openAtRest(path string, identity keyring.Identity) (*container, error) {
 	}
 
 	kc := keyConfig{identities: []keyring.Identity{identity}}
-	c, err := newContainerOver(fileBacking{file}, false, defaultBlockSize, defaultPageSize, CompressionDefault, kc)
+	c, err := newContainerOver(fileBacking{file}, false, defaultBlockSize, defaultPageSize, defaultSegEntries, CompressionDefault, kc)
 	if err != nil {
 		releasePath(abs)
 		return nil, err // newContainerOver closes the file on error

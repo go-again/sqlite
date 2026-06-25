@@ -19,6 +19,7 @@ func sampleSuperblock() *superblock {
 		pageCount:   12345,
 		dirOffset:   2 * defaultBlockSize,
 		dirBlocks:   9,
+		segEntries:  defaultSegEntries,
 		generation:  7,
 		codec:       1,
 		enc:         0,
@@ -42,7 +43,7 @@ func TestSuperblockRoundTrip(t *testing.T) {
 func TestSuperblockKeyslot(t *testing.T) {
 	const bs = defaultBlockSize
 	got, err := parseSuperblock((&superblock{
-		blockSize: bs, pageSize: 65536, generation: 1, codec: 1,
+		blockSize: bs, pageSize: 65536, segEntries: defaultSegEntries, generation: 1, codec: 1,
 		enc: encAdiantum, keyslotOffset: 5 * bs,
 	}).marshal())
 	if err != nil {
@@ -279,7 +280,7 @@ func TestRebuildAllocatorFromDirectory(t *testing.T) {
 	}
 	// File spans 8 blocks. Used: dir{2,1}, page1{3,1}, page0{5,2}. Block 4 (a
 	// gap) and block 7 (tail) are unreferenced → reclaimed as free.
-	a := rebuildAllocator(dir, sb, 8*bs, 0)
+	a := rebuildAllocator(dir, nil, sb, 8*bs, 0)
 	if !reflect.DeepEqual(a.free, []extent{{4, 1}, {7, 1}}) {
 		t.Fatalf("rebuilt free = %v, want [{4 1}{7 1}]", a.free)
 	}
@@ -290,7 +291,7 @@ func TestRebuildAllocatorFromDirectory(t *testing.T) {
 	// Self-healing: an orphaned block (referenced by no committed entry) is
 	// reclaimed automatically. Drop page 0 so blocks 5,6 are now orphaned.
 	dir[0] = dirEntry{}
-	a = rebuildAllocator(dir, sb, 8*bs, 0)
+	a = rebuildAllocator(dir, nil, sb, 8*bs, 0)
 	if got := a.freeBlocksTotal(); got != 4 { // blocks 4,5,6,7
 		t.Fatalf("after orphaning a slot, free total = %d, want 4", got)
 	}
@@ -303,7 +304,7 @@ func crc32Checksum(b []byte) uint32 { return crc32.Checksum(b, crc32C) }
 func TestSuperblockValidateRejectsHostileFields(t *testing.T) {
 	const fileSize = 1 << 20
 	good := func() superblock {
-		return superblock{blockSize: defaultBlockSize, pageSize: defaultPageSize, pageCount: 4, dirOffset: 2 * defaultBlockSize, dirBlocks: 1}
+		return superblock{blockSize: defaultBlockSize, pageSize: defaultPageSize, pageCount: 4, dirOffset: 2 * defaultBlockSize, dirBlocks: 1, segEntries: defaultSegEntries}
 	}
 	if err := (func() *superblock { s := good(); return &s }()).validate(fileSize); err != nil {
 		t.Fatalf("valid superblock rejected: %v", err)
@@ -316,9 +317,12 @@ func TestSuperblockValidateRejectsHostileFields(t *testing.T) {
 		{"zero page size", func(s *superblock) { s.pageSize = 0 }},
 		{"non-pow2 block size", func(s *superblock) { s.blockSize = 4097 }},
 		{"block size exceeds page size", func(s *superblock) { s.blockSize = 65536; s.pageSize = 4096 }},
+		{"zero segment size", func(s *superblock) { s.segEntries = 0 }},
 		{"overflowing page count", func(s *superblock) { s.pageCount = math.MaxUint64 }},
 		{"directory past EOF", func(s *superblock) { s.dirOffset = fileSize + 1 }},
-		{"directory too small for pages", func(s *superblock) { s.pageCount = 1000; s.dirBlocks = 1 }},
+		// Many segments (large page count, default segment size) but a one-block
+		// index that cannot hold them all.
+		{"segment index too small", func(s *superblock) { s.pageCount = 1_000_000; s.dirBlocks = 1 }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := good()
@@ -337,7 +341,7 @@ func TestValidateDirectoryRejectsHostileEntries(t *testing.T) {
 		{}, // sparse
 		{physOffset: 2 * defaultBlockSize, storedLen: defaultBlockSize, blocks: 1, checksum: 1},
 	}
-	if err := validateDirectory(good, sb, fileSize); err != nil {
+	if err := validateDirectory(good, nil, sb, fileSize); err != nil {
 		t.Fatalf("valid directory rejected: %v", err)
 	}
 	for _, tc := range []struct {
@@ -352,7 +356,7 @@ func TestValidateDirectoryRejectsHostileEntries(t *testing.T) {
 		{"overflowing slot extent", dirEntry{physOffset: 0xFFFFFFFFFFFFF000, storedLen: defaultBlockSize, blocks: 1}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := validateDirectory([]dirEntry{tc.entry}, sb, fileSize); err == nil {
+			if err := validateDirectory([]dirEntry{tc.entry}, nil, sb, fileSize); err == nil {
 				t.Fatalf("validateDirectory accepted a hostile entry (%s)", tc.name)
 			}
 		})
@@ -378,7 +382,7 @@ func TestValidateDirectoryRejectsOverlap(t *testing.T) {
 		{physOffset: 4 * bs, storedLen: defaultBlockSize, blocks: 1, checksum: 1},
 		{physOffset: 5 * bs, storedLen: 2 * defaultBlockSize, blocks: 2, checksum: 1},
 	}
-	if err := validateDirectory(good, okSB, fileSize); err != nil {
+	if err := validateDirectory(good, nil, okSB, fileSize); err != nil {
 		t.Fatalf("disjoint directory rejected: %v", err)
 	}
 
@@ -405,7 +409,7 @@ func TestValidateDirectoryRejectsOverlap(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := validateDirectory(tc.dir, tc.sb, fileSize); err == nil {
+			if err := validateDirectory(tc.dir, nil, tc.sb, fileSize); err == nil {
 				t.Fatalf("validateDirectory accepted overlapping extents (%s)", tc.name)
 			}
 		})
@@ -429,7 +433,7 @@ func TestOpenRejectsMaliciousContainerNoPanic(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			sb := &superblock{blockSize: defaultBlockSize, pageSize: defaultPageSize, generation: 1}
 			tc.mutate(sb)
-			if _, err := openMainOver(newCrashBacking(sb.marshal()), false, defaultBlockSize, defaultPageSize, CompressionDefault); err == nil {
+			if _, err := openMainOver(newCrashBacking(sb.marshal()), false, defaultBlockSize, defaultPageSize, defaultSegEntries, CompressionDefault); err == nil {
 				t.Fatalf("opened a malicious container (%s) without error", tc.name)
 			}
 		})

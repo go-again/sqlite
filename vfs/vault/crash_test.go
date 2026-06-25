@@ -123,7 +123,7 @@ func applyTxn(f *mainFile) {
 func TestCommitCrashAtEveryStep(t *testing.T) {
 	open := func(cb *crashBacking) *mainFile {
 		t.Helper()
-		f, err := openMainOver(cb, false, defaultBlockSize, crashPageSize, CompressionDefault)
+		f, err := openMainOver(cb, false, defaultBlockSize, crashPageSize, defaultSegEntries, CompressionDefault)
 		if err != nil {
 			t.Fatalf("openMainOver: %v", err)
 		}
@@ -163,7 +163,7 @@ func TestCommitCrashAtEveryStep(t *testing.T) {
 
 		// Reopen over the durable image and verify a consistent committed state.
 		rec := newCrashBacking(cb.synced)
-		fr, err := openMainOver(rec, false, defaultBlockSize, crashPageSize, CompressionDefault)
+		fr, err := openMainOver(rec, false, defaultBlockSize, crashPageSize, defaultSegEntries, CompressionDefault)
 		if err != nil {
 			t.Fatalf("crash at op %d: reopen failed: %v", k, err)
 		}
@@ -211,7 +211,7 @@ func TestAuthCommitCrash(t *testing.T) {
 		writeAs:    masterID,
 	}
 	openWith := func(cb *crashBacking, kc keyConfig) (*mainFile, error) {
-		ct, oerr := newContainerOver(cb, false, defaultBlockSize, crashPageSize, CompressionDefault, kc)
+		ct, oerr := newContainerOver(cb, false, defaultBlockSize, crashPageSize, defaultSegEntries, CompressionDefault, kc)
 		if oerr != nil {
 			return nil, oerr
 		}
@@ -282,7 +282,7 @@ func TestAuthCommitCrash(t *testing.T) {
 
 func TestTornSuperblockFallsBackToPrevGen(t *testing.T) {
 	cb := newCrashBacking(nil)
-	f, err := openMainOver(cb, false, defaultBlockSize, crashPageSize, CompressionDefault)
+	f, err := openMainOver(cb, false, defaultBlockSize, crashPageSize, defaultSegEntries, CompressionDefault)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -309,7 +309,7 @@ func TestTornSuperblockFallsBackToPrevGen(t *testing.T) {
 	img[off+30] ^= 0xFF
 
 	rec := newCrashBacking(img)
-	fr, err := openMainOver(rec, false, defaultBlockSize, crashPageSize, CompressionDefault)
+	fr, err := openMainOver(rec, false, defaultBlockSize, crashPageSize, defaultSegEntries, CompressionDefault)
 	if err != nil {
 		t.Fatalf("reopen after torn superblock: %v", err)
 	}
@@ -322,7 +322,7 @@ func TestTornSuperblockFallsBackToPrevGen(t *testing.T) {
 
 func TestDirectoryCorruptionRejected(t *testing.T) {
 	cb := newCrashBacking(nil)
-	f, err := openMainOver(cb, false, defaultBlockSize, crashPageSize, CompressionDefault)
+	f, err := openMainOver(cb, false, defaultBlockSize, crashPageSize, defaultSegEntries, CompressionDefault)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -330,21 +330,22 @@ func TestDirectoryCorruptionRejected(t *testing.T) {
 	if err := f.Sync(0); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
-	dirOffset := f.c.committedDirOffset
-	if dirOffset == 0 {
-		t.Fatal("expected a non-empty directory")
+	if len(f.c.segIndex) == 0 || f.c.segIndex[0].physOffset == 0 {
+		t.Fatal("expected a non-empty directory segment")
 	}
+	segOffset := f.c.segIndex[0].physOffset
 
-	// Corrupt a byte of the committed directory (superblock stays valid).
+	// Corrupt a byte of a committed directory segment (the superblock and the
+	// segment index stay valid, so the per-segment checksum is what must fire).
 	img := append([]byte(nil), cb.synced...)
-	img[dirOffset] ^= 0xFF
+	img[segOffset] ^= 0xFF
 
 	rec := newCrashBacking(img)
-	_, err = openMainOver(rec, false, defaultBlockSize, crashPageSize, CompressionDefault)
+	_, err = openMainOver(rec, false, defaultBlockSize, crashPageSize, defaultSegEntries, CompressionDefault)
 	if err == nil {
-		t.Fatal("reopen accepted a corrupted directory; want a checksum error")
+		t.Fatal("reopen accepted a corrupted directory segment; want a checksum error")
 	}
-	if !bytes.Contains([]byte(err.Error()), []byte("directory checksum")) {
+	if !bytes.Contains([]byte(err.Error()), []byte("checksum mismatch")) {
 		t.Fatalf("error = %v, want a directory checksum mismatch", err)
 	}
 }

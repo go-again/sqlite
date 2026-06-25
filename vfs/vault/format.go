@@ -24,8 +24,11 @@ const (
 	// synthesises, so the container is free to brand block 0 as its own.
 	superblockMagic = "VAULTv01" // exactly 8 bytes
 
-	// containerVersion is bumped on any incompatible wire-format change.
-	containerVersion = 1
+	// containerVersion is bumped on any incompatible wire-format change. Version 2
+	// introduced the segmented page directory: the superblock points at a small
+	// segment index, and the directory lives in fixed-size segments rewritten
+	// independently, so a commit's directory write is O(changed pages).
+	containerVersion = 2
 
 	// defaultBlockSize is the physical block granularity B: every physical
 	// read and write is a multiple of it. 4 KiB matches common device sectors
@@ -35,6 +38,14 @@ const (
 	// defaultPageSize is the logical SQLite page size. A large page amortises
 	// the per-page directory entry and widens the compression window.
 	defaultPageSize = 65536
+
+	// defaultSegEntries is the number of page-directory entries per on-disk
+	// directory segment. A commit re-marshals and re-encrypts only the segments
+	// whose pages changed (plus the small segment index), so this trades the index
+	// size against the per-dirty-segment write cost. Stored in the superblock
+	// (self-describing), so a container always reads back at whatever value it was
+	// created with.
+	defaultSegEntries = 1024
 
 	// superblockBlocks is the reserved prefix: block 0 = superblock A,
 	// block 1 = superblock B. The data region begins at this block index.
@@ -53,11 +64,12 @@ const (
 
 	// Superblock byte offsets. marshal and parse must agree byte-for-byte, so the
 	// interior offsets are named once here rather than spelled as literals.
-	sbAuthOff      = 60                            // 1-byte authenticated flag (0/1)
-	sbDirHashOff   = 64                            // dirHash[dirHashLen]
-	sbWriterSigOff = sbDirHashOff + dirHashLen     // 96: writerSig[writerSigLen]
-	sbSignedLen    = sbWriterSigOff                // 96: bytes a writer signs (base ‖ auth flag ‖ dirHash)
-	sbCRCOff       = sbWriterSigOff + writerSigLen // 160: CRC32C over [0:sbCRCOff]
+	sbAuthOff       = 60                            // 1-byte authenticated flag (0/1)
+	sbSegEntriesOff = 61                            // segEntries (u32): directory entries per segment
+	sbDirHashOff    = sbSegEntriesOff + 4           // 65: dirHash[dirHashLen] (hashes the segment index)
+	sbWriterSigOff  = sbDirHashOff + dirHashLen     // 97: writerSig[writerSigLen]
+	sbSignedLen     = sbWriterSigOff                // 97: bytes a writer signs (base ‖ auth flag ‖ segEntries ‖ dirHash)
+	sbCRCOff        = sbWriterSigOff + writerSigLen // 161: CRC32C over [0:sbCRCOff]
 
 	// dirEntrySize is the encoded length of one page-directory entry;
 	// dirEntrySizeAuth adds a 16-byte per-slot crypto hash in authenticated mode.
@@ -100,8 +112,9 @@ type superblock struct {
 	blockSize     uint32 // physical block size B
 	pageSize      uint32 // logical SQLite page size
 	pageCount     uint64 // logical page count; logical size = pageSize*pageCount
-	dirOffset     uint64 // physical byte offset of the directory extent (0 ⇒ empty directory)
-	dirBlocks     uint32 // directory length in blocks (0 ⇒ no pages yet)
+	dirOffset     uint64 // physical byte offset of the segment-index extent (0 ⇒ empty directory)
+	dirBlocks     uint32 // segment-index length in blocks (0 ⇒ no pages yet)
+	segEntries    uint32 // directory entries per segment (geometry; see defaultSegEntries)
 	generation    uint64 // monotonic; newest valid superblock wins
 	codec         uint8  // 0 raw / 1 az
 	enc           uint8  // page-cipher kind (0 = unencrypted); see crypt.go
@@ -133,6 +146,7 @@ func (s *superblock) marshal() []byte {
 	b[47] = s.enc
 	binary.LittleEndian.PutUint32(b[48:52], s.dirChecksum)
 	binary.LittleEndian.PutUint64(b[52:60], s.keyslotOffset)
+	binary.LittleEndian.PutUint32(b[sbSegEntriesOff:sbSegEntriesOff+4], s.segEntries)
 	if s.authenticated {
 		b[sbAuthOff] = 1
 		copy(b[sbDirHashOff:], s.dirHash[:])
@@ -178,6 +192,7 @@ func parseSuperblock(b []byte) (*superblock, error) {
 		enc:           b[47],
 		dirChecksum:   binary.LittleEndian.Uint32(b[48:52]),
 		keyslotOffset: binary.LittleEndian.Uint64(b[52:60]),
+		segEntries:    binary.LittleEndian.Uint32(b[sbSegEntriesOff : sbSegEntriesOff+4]),
 		authenticated: b[sbAuthOff] != 0,
 	}
 	if sb.authenticated {
@@ -234,6 +249,9 @@ func (s *superblock) validate(fileSize int64) error {
 	if s.blockSize > s.pageSize {
 		return fmt.Errorf("vault: container block size %d exceeds page size %d", s.blockSize, s.pageSize)
 	}
+	if s.segEntries == 0 {
+		return errors.New("vault: container segment size is zero")
+	}
 	// Bound pageCount so neither the logical size (pageCount*pageSize) nor the
 	// directory length (pageCount*dirEntrySize) can overflow int64/uint64.
 	if s.pageCount > uint64(math.MaxInt64)/uint64(s.pageSize) {
@@ -243,10 +261,12 @@ func (s *superblock) validate(fileSize int64) error {
 	fsz := uint64(fileSize)
 	dirBytes := uint64(s.dirBlocks) * bs // dirBlocks(u32) * blockSize(<=65536) cannot overflow
 	if s.dirOffset > fsz || dirBytes > fsz-s.dirOffset {
-		return fmt.Errorf("vault: directory extent [%d,+%d) out of bounds (file %d bytes)", s.dirOffset, dirBytes, fsz)
+		return fmt.Errorf("vault: segment index extent [%d,+%d) out of bounds (file %d bytes)", s.dirOffset, dirBytes, fsz)
 	}
-	if s.pageCount*uint64(dirEntryBytes(s.authenticated)) > dirBytes {
-		return fmt.Errorf("vault: directory holds %d bytes, too small for %d pages", dirBytes, s.pageCount)
+	// dirOffset/dirBlocks is the segment index: it must hold one descriptor per
+	// segment (the encrypted form also has a canary, which only adds bytes).
+	if nSegs := segmentCount(s.pageCount, uint64(s.segEntries)); nSegs*segDescSize > dirBytes {
+		return fmt.Errorf("vault: segment index holds %d bytes, too small for %d segments", dirBytes, nSegs)
 	}
 	// The keyslot block (if present) must be a block-aligned extent inside the
 	// file; its self-described length is bounded when the block is read.
@@ -269,7 +289,7 @@ func (s *superblock) validate(fileSize int64) error {
 // or fall outside the file — the per-page counterpart to [superblock.validate],
 // so a crafted entry cannot drive a huge per-page allocation or an out-of-bounds
 // read. It assumes sb already passed validate (blockSize/pageSize sane).
-func validateDirectory(dir []dirEntry, sb *superblock, fileSize int64) error {
+func validateDirectory(dir []dirEntry, segs []segDesc, sb *superblock, fileSize int64) error {
 	bs := uint64(sb.blockSize)
 	fsz := uint64(fileSize)
 	for i, e := range dir {
@@ -300,15 +320,29 @@ func validateDirectory(dir []dirEntry, sb *superblock, fileSize int64) error {
 	// reference, i.e. silent cross-page corruption. Authenticated mode catches this
 	// via the signed directory; this is the structural guard for the rest.
 	type blockRun struct{ start, end uint64 } // [start,end) in block units
-	runs := make([]blockRun, 0, len(dir)+2)
+	runs := make([]blockRun, 0, len(dir)+len(segs)+3)
 	runs = append(runs, blockRun{0, superblockBlocks}) // the two reserved superblocks
 	if sb.dirBlocks > 0 {
 		s := sb.dirOffset / bs
-		runs = append(runs, blockRun{s, s + uint64(sb.dirBlocks)})
+		runs = append(runs, blockRun{s, s + uint64(sb.dirBlocks)}) // the segment-index extent
 	}
 	if sb.keyslotOffset != 0 {
 		s := sb.keyslotOffset / bs
 		runs = append(runs, blockRun{s, s + 1}) // pins at least the first keyslot block (see superblock.validate)
+	}
+	for i, d := range segs { // each directory-segment extent (bounds, then overlap)
+		if d.physOffset == 0 {
+			continue
+		}
+		if d.physOffset%bs != 0 {
+			return fmt.Errorf("vault: directory segment %d offset %d not block-aligned", i, d.physOffset)
+		}
+		span := uint64(d.blocks) * bs
+		if end := d.physOffset + span; d.blocks == 0 || end < d.physOffset || end > fsz {
+			return fmt.Errorf("vault: directory segment %d extent [%d,+%d) out of bounds (file %d bytes)", i, d.physOffset, span, fsz)
+		}
+		s := d.physOffset / bs
+		runs = append(runs, blockRun{s, s + uint64(d.blocks)})
 	}
 	for _, e := range dir {
 		if e.physOffset == 0 {
@@ -397,6 +431,77 @@ func parseDirectory(b []byte, n int, auth bool) ([]dirEntry, error) {
 	return entries, nil
 }
 
+// segDesc is one entry of the on-disk segment index: where a directory segment's
+// block run lives and how to verify it. The index is itself a small extent the
+// superblock points at and (in authenticated mode) hashes, so the integrity chain
+// is superblock → segment index → segments → pages. A zero physOffset marks a
+// segment that has never been written (all its pages are sparse).
+type segDesc struct {
+	physOffset uint64            // byte offset of the segment's block run; 0 ⇒ unwritten
+	storedLen  uint32            // encoded segment length in bytes, before block padding
+	blocks     uint32            // blocks the segment occupies
+	checksum   uint32            // CRC32C of the on-disk segment bytes
+	hash       [slotHashLen]byte // crypto hash of the on-disk segment bytes (authenticated mode)
+}
+
+// segDescSize is the encoded length of one segment-index entry.
+const segDescSize = 8 + 4 + 4 + 4 + slotHashLen // 36
+
+func (d segDesc) marshalInto(b []byte) {
+	binary.LittleEndian.PutUint64(b[0:8], d.physOffset)
+	binary.LittleEndian.PutUint32(b[8:12], d.storedLen)
+	binary.LittleEndian.PutUint32(b[12:16], d.blocks)
+	binary.LittleEndian.PutUint32(b[16:20], d.checksum)
+	copy(b[20:20+slotHashLen], d.hash[:])
+}
+
+func parseSegDesc(b []byte) segDesc {
+	d := segDesc{
+		physOffset: binary.LittleEndian.Uint64(b[0:8]),
+		storedLen:  binary.LittleEndian.Uint32(b[8:12]),
+		blocks:     binary.LittleEndian.Uint32(b[12:16]),
+		checksum:   binary.LittleEndian.Uint32(b[16:20]),
+	}
+	copy(d.hash[:], b[20:20+slotHashLen])
+	return d
+}
+
+// marshalSegmentIndex encodes the segment index as a dense array of descriptors.
+func marshalSegmentIndex(segs []segDesc) []byte {
+	b := make([]byte, len(segs)*segDescSize)
+	for i := range segs {
+		segs[i].marshalInto(b[i*segDescSize:])
+	}
+	return b
+}
+
+// parseSegmentIndex decodes n segment descriptors from b.
+func parseSegmentIndex(b []byte, n int) ([]segDesc, error) {
+	if len(b) < n*segDescSize {
+		return nil, errShortBlock
+	}
+	segs := make([]segDesc, n)
+	for i := range segs {
+		segs[i] = parseSegDesc(b[i*segDescSize:])
+	}
+	return segs, nil
+}
+
+// segmentCount is the number of directory segments for pageCount pages at
+// segEntries entries per segment (the segment index length).
+func segmentCount(pageCount, segEntries uint64) uint64 {
+	if segEntries == 0 {
+		return 0
+	}
+	return (pageCount + segEntries - 1) / segEntries
+}
+
+// segmentBounds returns the half-open page range [lo, hi) covered by segment s.
+func segmentBounds(s, segEntries, pageCount uint64) (lo, hi uint64) {
+	lo = s * segEntries
+	return lo, min(lo+segEntries, pageCount)
+}
+
 // extent is a run of contiguous physical blocks [start, start+count) measured
 // in block indices, not bytes.
 type extent struct {
@@ -462,6 +567,51 @@ func (a *allocator) alloc(blocks uint64) uint64 {
 	return start
 }
 
+// lowestFitAbove returns the start block of the lowest-addressed free run of at
+// least blocks contiguous blocks that starts at or above floor, and whether one
+// exists. The online compactor uses it to relocate a slot strictly downward while
+// leaving the lowest free blocks (below floor) reserved for the rewritten directory.
+// It does not allocate.
+func (a *allocator) lowestFitAbove(blocks, floor uint64) (uint64, bool) {
+	for _, e := range a.free {
+		start, count := e.start, e.count
+		if start < floor { // clip the part of this extent below the reserve floor
+			if start+count <= floor {
+				continue
+			}
+			count -= floor - start
+			start = floor
+		}
+		if count >= blocks {
+			return start, true
+		}
+	}
+	return 0, false
+}
+
+// allocAt reserves exactly [start, start+blocks) from the free list, which must lie
+// entirely within one free extent (the compactor passes a run lowestFitAbove just
+// returned). It carves that extent into the up-to-two fragments around the run,
+// preserving the sorted, coalesced invariant.
+func (a *allocator) allocAt(start, blocks uint64) {
+	for i := range a.free {
+		e := a.free[i]
+		if start < e.start || start+blocks > e.start+e.count {
+			continue
+		}
+		repl := append([]extent(nil), a.free[:i]...)
+		if start > e.start {
+			repl = append(repl, extent{start: e.start, count: start - e.start})
+		}
+		if end := start + blocks; end < e.start+e.count {
+			repl = append(repl, extent{start: end, count: e.start + e.count - end})
+		}
+		a.free = append(repl, a.free[i+1:]...)
+		return
+	}
+	panic("vault: allocAt run not within a free extent")
+}
+
 // release returns a run to the free list and coalesces it with neighbours. The
 // commit protocol calls this only for extents superseded by a durable commit,
 // so freed space is never reused before the generation that vacated it is safe.
@@ -512,7 +662,7 @@ func (a *allocator) freeBlocksTotal() uint64 {
 // directory whose freeing never reached disk) is unreferenced by the committed
 // directory, so it is reclaimed automatically. It also keeps the free list out
 // of the crash-critical commit path entirely.
-func rebuildAllocator(dir []dirEntry, sb *superblock, fileSize int64, keyslotBlocks uint32) *allocator {
+func rebuildAllocator(dir []dirEntry, segs []segDesc, sb *superblock, fileSize int64, keyslotBlocks uint32) *allocator {
 	bs := uint64(sb.blockSize)
 	highWater := uint64(fileSize) / bs
 
@@ -524,8 +674,11 @@ func rebuildAllocator(dir []dirEntry, sb *superblock, fileSize int64, keyslotBlo
 		}
 		used = append(used, run{start: physOffset / bs, count: uint64(blocks)})
 	}
-	add(sb.dirOffset, sb.dirBlocks)
+	add(sb.dirOffset, sb.dirBlocks)      // the segment-index extent
 	add(sb.keyslotOffset, keyslotBlocks) // referenced by the superblock, not the directory
+	for _, d := range segs {             // each directory segment
+		add(d.physOffset, d.blocks)
+	}
 	for _, e := range dir {
 		add(e.physOffset, e.blocks)
 	}

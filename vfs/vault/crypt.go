@@ -24,31 +24,38 @@ import (
 // encrypted units, while the superblock header stays plaintext to bootstrap.
 
 // Cipher domain bytes (the file-kind tweak ingredient), distinct per on-disk
-// unit so a ciphertext can't be replayed as a different one.
+// unit so a ciphertext can't be replayed as a different one. Grouped persistent
+// (the container's own at-rest extents) then transient (the pass-through journal,
+// WAL, and temp files), assigned sequentially.
 const (
-	domainPageData    byte = 1 // a compressed data slot (persistent)
-	domainDirectory   byte = 2 // the page directory (persistent)
-	domainJournal     byte = 3 // the rollback journal (-journal)
-	domainWAL         byte = 4 // the write-ahead log (-wal)
-	domainTempDB      byte = 5 // a temporary database
-	domainTempJournal byte = 6 // a temporary database's journal
-	domainSubJournal  byte = 7 // a statement sub-journal
-	domainTempAux     byte = 8 // anonymous / super-journal / other transient temp files
+	// Persistent container extents.
+	domainPageData  byte = 1 // a compressed data slot
+	domainDirectory byte = 2 // a page-directory segment; cipher tweak = segment index
+	domainSegIndex  byte = 3 // the segment index; the root the superblock hashes/signs
+
+	// Transient pass-through files (recreated each session).
+	domainJournal     byte = 4 // the rollback journal (-journal)
+	domainWAL         byte = 5 // the write-ahead log (-wal)
+	domainTempDB      byte = 6 // a temporary database
+	domainTempJournal byte = 7 // a temporary database's journal
+	domainSubJournal  byte = 8 // a statement sub-journal
+	domainTempAux     byte = 9 // anonymous / super-journal / other transient temp files
 )
 
-// dirTweak is the cipher tweak for the directory. The directory is a single
-// unit (not indexed like data pages), so a constant tweak suffices; the domain
-// byte separates it from data slots.
-const dirTweak uint64 = 0
-
-// dirCanary is a known plaintext written at the front of the encrypted
-// directory. After decrypting the directory, a mismatch means the key is wrong
-// — a crisp signal ([ErrWrongKey]) instead of a downstream parse/decompress
-// failure. dirCanaryLen bytes, always present in an encrypted container (even an
-// empty one writes a canary-only directory).
+// dirCanary is a known plaintext written at the front of the encrypted segment
+// index. After decrypting it, a mismatch means the key is wrong — a crisp signal
+// ([ErrWrongKey]) instead of a downstream parse/decompress failure. It is branded
+// from (and so versioned with) the container's [superblockMagic], keeping the
+// on-disk branding in one place; dirCanaryLen bytes, always present in an
+// encrypted container (even an empty one writes a canary-only index).
 const dirCanaryLen = 16
 
-var dirCanary = [dirCanaryLen]byte{'g', 'o', 's', 'q', 'l', 'i', 't', 'e', 'z', '-', 'e', 'n', 'c', 'v', '1', 0}
+// dirCanary is superblockMagic ("VAULTv01") followed by "-canary", NUL-padded to
+// dirCanaryLen, e.g. "VAULTv01-canary\0".
+var dirCanary = func() (c [dirCanaryLen]byte) {
+	copy(c[:], superblockMagic+"-canary")
+	return
+}()
 
 // ErrWrongKey reports that the supplied key (of the right cipher) failed to
 // decrypt the container — the directory canary did not match. Test for it with
@@ -173,6 +180,26 @@ type keyConfig struct {
 	writeAs      keyring.WriterIdentity    // who signs commits on this connection
 	authenticate bool                      // symmetric (MAC'd) authenticated mode, without ed25519 writers
 	anchor       ReplayAnchor              // external monotonic replay floor (requires authenticated mode)
+
+	// preserve, when set, makes a fresh container reproduce a SOURCE container's
+	// encryption verbatim — the same data key and sealed keyslot, not a new key or a
+	// re-seal to a new recipient set. It is what lets [Compact] run with only a read
+	// identity (no write creds): the densely-repacked copy keeps the existing
+	// membership. Set only by the rewrite path; mutually exclusive with the create
+	// inputs above.
+	preserve *preservedKey
+}
+
+// preservedKey is a source container's resolved encryption state, copied into a
+// rewrite's destination so it keeps the same data key and membership (see
+// [keyConfig.preserve]).
+type preservedKey struct {
+	dek     []byte
+	keyslot []byte
+	enc     uint8
+	auth    bool                   // source authenticated mode
+	writers []ed25519.PublicKey    // writer mode: the authorized writer set (empty ⇒ symmetric/none)
+	writeAs keyring.WriterIdentity // writer mode: who re-signs the copy's commits (nil ⇒ cannot rewrite)
 }
 
 func (kc keyConfig) encrypting() bool {
@@ -211,6 +238,12 @@ func keyConfigFromOptions(opts Options) (keyConfig, error) {
 // block). It sets c.cipher/c.enc/c.keyslotOffset; the caller holds the allocator
 // ready and commits afterward.
 func (c *container) initCipherForCreate(kc keyConfig) error {
+	// Reproduce a source container's encryption verbatim (Compact -identity): same
+	// data key, same sealed keyslot, no re-seal. Handled before the guards below
+	// because it legitimately carries identities but no create creds.
+	if kc.preserve != nil {
+		return c.initCipherFromPreserved(kc.preserve)
+	}
 	// Identities alone open an EXISTING encrypted container; they carry no material
 	// to create one with. Without this guard such a create would fall through the
 	// switch and silently produce a plaintext container (a data-exposure footgun,
@@ -272,6 +305,36 @@ func (c *container) initCipherForCreate(kc keyConfig) error {
 	return nil
 }
 
+// initCipherFromPreserved builds the cipher for a fresh container from a source's
+// resolved key material: the same data key and a verbatim copy of its sealed
+// keyslot, so the rewrite keeps the source's membership. The symmetric MAC key is
+// re-derived from the data key; in writer mode the source's writers carry over and
+// the commits re-sign with p.writeAs (which the caller has verified is present).
+func (c *container) initCipherFromPreserved(p *preservedKey) error {
+	kind, ok := cipherForEnc(p.enc)
+	if !ok {
+		return fmt.Errorf("vault: unknown on-disk cipher marker %d", p.enc)
+	}
+	cph, err := crypto.NewCipher(kind, p.dek)
+	if err != nil {
+		return err
+	}
+	off, err := c.writeKeyslot(p.keyslot)
+	if err != nil {
+		return err
+	}
+	c.cipher, c.enc, c.keyslotOffset = cph, p.enc, off
+	c.dek = append([]byte(nil), p.dek...)
+	c.keyslotBlob = p.keyslot
+	c.authenticated = p.auth
+	c.writers = p.writers
+	c.writeAs = p.writeAs
+	if p.auth && len(p.writers) == 0 {
+		c.macKey = deriveMacKey(c.dek) // symmetric authenticated mode
+	}
+	return nil
+}
+
 // resolveCipherForOpen resolves the cipher for an existing container from its
 // superblock: validates the supplied key/identities against the on-disk enc and
 // keyslot, builds the cipher, and returns the keyslot's block count (0 if none)
@@ -314,7 +377,11 @@ func (c *container) resolveCipherForOpen(kc keyConfig, sb *superblock, fileSize 
 	if err != nil {
 		return 0, err
 	}
-	c.cipher, c.enc, c.keyslotOffset, c.dek = cph, sb.enc, sb.keyslotOffset, dek
+	// Defensive copy: in raw-key mode dek aliases Options.Key, and c.dek backs the
+	// constant-time compare in matchesKeyConfig and the re-wrap in Rewrap/Rekey, so a
+	// caller mutating Options.Key after open must not corrupt it (matching the create
+	// path, which already copies). The cipher itself already holds its own copy.
+	c.cipher, c.enc, c.keyslotOffset, c.dek = cph, sb.enc, sb.keyslotOffset, append([]byte(nil), dek...)
 	// In authenticated mode the opener may sign commits (writeAs) or, without one,
 	// is a read-only recipient. The writer set verified against is c.writers above.
 	c.authenticated = sb.authenticated
@@ -391,13 +458,24 @@ func (c *container) matchesKeyConfig(kc keyConfig) error {
 // age header for many recipients is well under this.
 const maxKeyslotLen = 1 << 20
 
-// writeKeyslot allocates a block run and writes the length-prefixed blob,
-// returning its physical byte offset. The block is referenced only by the
+// keyslotBanner brands the on-disk keyslot block as a gosqlite vault container,
+// so the file plainly identifies itself right beside the age envelope it wraps
+// (which carries age's own "age-encryption.org/v1"). It is vault's own framing
+// around the opaque keyring blob; keyring/age supply no such marker.
+const keyslotBanner = "gosqlite.org/vault/v1\n"
+
+// keyslotHeaderLen is the banner plus the 4-byte blob length that precede the
+// keyring keyslot blob in the on-disk block.
+const keyslotHeaderLen = len(keyslotBanner) + 4
+
+// writeKeyslot allocates a block run and writes the banner-and-length-prefixed
+// blob, returning its physical byte offset. The block is referenced only by the
 // superblock's keyslotOffset, never the directory.
 func (c *container) writeKeyslot(blob []byte) (uint64, error) {
-	framed := make([]byte, 4+len(blob))
-	binary.LittleEndian.PutUint32(framed[:4], uint32(len(blob)))
-	copy(framed[4:], blob)
+	framed := make([]byte, keyslotHeaderLen+len(blob))
+	n := copy(framed, keyslotBanner)
+	binary.LittleEndian.PutUint32(framed[n:n+4], uint32(len(blob)))
+	copy(framed[keyslotHeaderLen:], blob)
 	nb := blocksFor(uint64(len(framed)), c.blockSize)
 	off := c.alloc.alloc(nb) * c.blockSize
 	buf := make([]byte, nb*c.blockSize)
@@ -408,21 +486,24 @@ func (c *container) writeKeyslot(blob []byte) (uint64, error) {
 	return off, nil
 }
 
-// readKeyslot reads the length-prefixed keyslot blob at off, returning it and
-// the number of blocks it occupies. The length is bounded against the file and
-// maxKeyslotLen (untrusted input).
+// readKeyslot reads the keyslot blob at off — the banner, then the blob length,
+// then the keyring blob — returning the blob and the blocks it occupies. The
+// banner and length are bounded against the file and maxKeyslotLen (untrusted).
 func (c *container) readKeyslot(off uint64, fileSize int64) (blob []byte, blocks uint32, err error) {
-	var lenbuf [4]byte
-	if _, err := c.back.ReadAt(lenbuf[:], int64(off)); err != nil {
-		return nil, 0, fmt.Errorf("vault: read keyslot length: %w", err)
+	head := make([]byte, keyslotHeaderLen)
+	if _, err := c.back.ReadAt(head, int64(off)); err != nil {
+		return nil, 0, fmt.Errorf("vault: read keyslot header: %w", err)
 	}
-	n := binary.LittleEndian.Uint32(lenbuf[:])
-	if n == 0 || n > maxKeyslotLen || off+4+uint64(n) > uint64(fileSize) {
+	if string(head[:len(keyslotBanner)]) != keyslotBanner {
+		return nil, 0, errors.New("vault: keyslot banner mismatch (not a vault keyslot, or corruption)")
+	}
+	n := binary.LittleEndian.Uint32(head[len(keyslotBanner):])
+	if n == 0 || n > maxKeyslotLen || off+uint64(keyslotHeaderLen)+uint64(n) > uint64(fileSize) {
 		return nil, 0, errors.New("vault: keyslot length out of range (corruption)")
 	}
 	blob = make([]byte, n)
-	if _, err := c.back.ReadAt(blob, int64(off)+4); err != nil {
+	if _, err := c.back.ReadAt(blob, int64(off)+int64(keyslotHeaderLen)); err != nil {
 		return nil, 0, fmt.Errorf("vault: read keyslot: %w", err)
 	}
-	return blob, uint32(blocksFor(4+uint64(n), c.blockSize)), nil
+	return blob, uint32(blocksFor(uint64(keyslotHeaderLen)+uint64(n), c.blockSize)), nil
 }

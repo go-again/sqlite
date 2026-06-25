@@ -38,11 +38,12 @@ import (
 // it into [sqlite.Config.VFSCloser] (as [Open] does) so a single
 // db.Close() both drains the pool and releases the VFS.
 type VFS struct {
-	name      string
-	blockSize uint64
-	pageSize  uint64
-	codec     Compression
-	keyCfg    keyConfig // encryption inputs from Options (raw key / recipients / identities)
+	name       string
+	blockSize  uint64
+	pageSize   uint64
+	segEntries uint64
+	codec      Compression
+	keyCfg     keyConfig // encryption inputs from Options (raw key / recipients / identities)
 
 	// cipher is the data-key cipher resolved at the main-DB open, cached so the
 	// aux pass-through files (journal/WAL/temp) encrypt with it; nil = unencrypted.
@@ -50,8 +51,17 @@ type VFS struct {
 	// pooled connections can open concurrently (each cold connection triggers its
 	// own Open), so the write and the aux-open read are guarded to make the
 	// publication well-defined under the race detector.
-	cipherMu sync.Mutex
-	cipher   crypto.PageCipher
+	//
+	// preserveNewFiles, when set (only by [CompactLogical]), makes a NEW main-DB file
+	// created through this VFS — a VACUUM INTO target — seal to the FIRST-opened
+	// database's key and membership rather than failing (identity-only opts cannot
+	// create) or re-sealing under a fresh key. preserve is that captured key material,
+	// taken from the source open and applied to the target create; both are guarded by
+	// cipherMu.
+	cipherMu         sync.Mutex
+	cipher           crypto.PageCipher
+	preserveNewFiles bool
+	preserve         *preservedKey
 }
 
 // Name is the registered VFS name, for use as sqlite.Config.VFS.
@@ -73,22 +83,37 @@ func (v *VFS) Close() error {
 // nothing and would only complicate recovery.
 func (v *VFS) Open(name string, flags vfs.OpenFlags) (vfs.File, vfs.OpenFlags, error) {
 	if flags.Has(vfs.OpenMainDB) {
-		f, err := openMain(name, flags, v.blockSize, v.pageSize, v.codec, v.keyCfg)
+		kc := v.keyCfg
+		if v.preserveNewFiles {
+			// Seal a VACUUM INTO target to the source's key/membership: nil on the first
+			// (source) open, set afterward, so initCipherForCreate preserves it.
+			v.cipherMu.Lock()
+			kc.preserve = v.preserve
+			v.cipherMu.Unlock()
+		}
+		f, err := openMain(name, flags, v.blockSize, v.pageSize, v.segEntries, v.codec, kc)
 		if err != nil {
 			return nil, 0, err
 		}
 		// Cache the resolved data-key cipher so the journal/WAL pass-through files
 		// (opened after the main DB) encrypt with it. SQLite always opens the main
-		// DB first, so this is set in time.
+		// DB first, so this is set in time. When preserving (CompactLogical), capture
+		// the first encrypted recipients open's key material for the VACUUM INTO target.
 		v.cipherMu.Lock()
 		v.cipher = f.c.cipher
+		if v.preserveNewFiles && v.preserve == nil && f.c.cipher != nil && f.c.keyslotOffset != 0 {
+			v.preserve = &preservedKey{
+				dek: f.c.dek, keyslot: f.c.keyslotBlob, enc: f.c.enc,
+				auth: f.c.authenticated, writers: f.c.writers, writeAs: f.c.writeAs,
+			}
+		}
 		v.cipherMu.Unlock()
 		return f, flags, nil
 	}
 	v.cipherMu.Lock()
 	cipher := v.cipher
 	v.cipherMu.Unlock()
-	f, err := openPass(name, flags, cipher, int64(v.pageSize))
+	f, err := openPass(name, flags, cipher)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -204,7 +229,7 @@ func requireOnDiskPath(cfg sqlite.Config) error {
 //     directory loaded, and the allocator rebuilt by scanning it.
 //   - existing non-container (e.g. a raw .db someone pointed us at): rejected,
 //     so the file is never clobbered.
-func openMain(path string, flags vfs.OpenFlags, blockSize, pageSize uint64, codec Compression, kc keyConfig) (*mainFile, error) {
+func openMain(path string, flags vfs.OpenFlags, blockSize, pageSize, segEntries uint64, codec Compression, kc keyConfig) (*mainFile, error) {
 	containers.mu.Lock()
 	defer containers.mu.Unlock()
 
@@ -236,7 +261,7 @@ func openMain(path string, flags vfs.OpenFlags, blockSize, pageSize uint64, code
 	if err != nil {
 		return nil, err // dispatcher maps a not-exist error to SQLITE_CANTOPEN
 	}
-	ct, err := newContainerOver(fileBacking{file}, readOnly, blockSize, pageSize, codec, kc)
+	ct, err := newContainerOver(fileBacking{file}, readOnly, blockSize, pageSize, segEntries, codec, kc)
 	if err != nil {
 		return nil, fmt.Errorf("vault: open %q: %w", path, err)
 	}
@@ -251,6 +276,9 @@ func openMain(path string, flags vfs.OpenFlags, blockSize, pageSize uint64, code
 // unshared container (tests / anonymous) just closes its backing.
 func (c *container) release() error {
 	if c.name == "" {
+		// An unshared container (tests / anonymous / offline ops) is single-handle —
+		// never in the registry, so no second goroutine can reach it; the refs dance
+		// here needs no containers.mu (the shared branch below holds it).
 		c.refs--
 		if c.refs > 0 {
 			return nil
@@ -270,8 +298,8 @@ func (c *container) release() error {
 // openMainOver builds a single-handle, unshared mainFile over an already-open
 // backing — the seam tests use to drive the storage engine over an in-memory,
 // fault-injecting store.
-func openMainOver(back backing, readOnly bool, blockSize, pageSize uint64, codec Compression) (*mainFile, error) {
-	ct, err := newContainerOver(back, readOnly, blockSize, pageSize, codec, keyConfig{})
+func openMainOver(back backing, readOnly bool, blockSize, pageSize, segEntries uint64, codec Compression) (*mainFile, error) {
+	ct, err := newContainerOver(back, readOnly, blockSize, pageSize, segEntries, codec, keyConfig{})
 	if err != nil {
 		return nil, err
 	}
@@ -281,14 +309,14 @@ func openMainOver(back backing, readOnly bool, blockSize, pageSize uint64, codec
 
 // newContainerOver loads or initialises a container over an already-open
 // backing. It closes back on any error.
-func newContainerOver(back backing, readOnly bool, cfgBlockSize, cfgPageSize uint64, codec Compression, kc keyConfig) (*container, error) {
+func newContainerOver(back backing, readOnly bool, cfgBlockSize, cfgPageSize, cfgSegEntries uint64, codec Compression, kc keyConfig) (*container, error) {
 	size, err := back.Size()
 	if err != nil {
 		_ = back.Close()
 		return nil, err
 	}
 
-	c := &container{back: back, blockSize: cfgBlockSize, pageSize: cfgPageSize, codec: codec, readOnly: readOnly, anchor: kc.anchor}
+	c := &container{back: back, blockSize: cfgBlockSize, pageSize: cfgPageSize, segEntries: cfgSegEntries, codec: codec, readOnly: readOnly, anchor: kc.anchor}
 
 	// The external replay floor (if any). Loaded once: it gates an empty file
 	// (truncation/rollback to before any commit) here, and the committed generation
@@ -359,6 +387,7 @@ func newContainerOver(back backing, readOnly bool, cfgBlockSize, cfgPageSize uin
 	c.blockSize = uint64(sb.blockSize)
 	c.pageSize = uint64(sb.pageSize)
 	c.pageCount = sb.pageCount
+	c.segEntries = uint64(sb.segEntries)
 	c.committedGen = sb.generation
 	c.committedDirOffset = sb.dirOffset
 	c.committedDirBlocks = sb.dirBlocks
@@ -411,57 +440,116 @@ func newContainerOver(back backing, readOnly bool, cfgBlockSize, cfgPageSize uin
 	}
 
 	if sb.dirBlocks > 0 {
-		dirBuf := make([]byte, uint64(sb.dirBlocks)*c.blockSize)
-		if _, err := back.ReadAt(dirBuf, int64(sb.dirOffset)); err != nil {
+		nSegs := segmentCount(sb.pageCount, uint64(sb.segEntries))
+		idxLen := int(nSegs) * segDescSize
+
+		// Read, verify, and decrypt the segment index (the canary catches a wrong
+		// key; in authenticated mode the superblock-signed dirHash covers it).
+		idxBuf := make([]byte, uint64(sb.dirBlocks)*c.blockSize)
+		if _, err := back.ReadAt(idxBuf, int64(sb.dirOffset)); err != nil {
 			_ = back.Close()
-			return nil, fmt.Errorf("read directory: %w", err)
+			return nil, fmt.Errorf("read segment index: %w", err)
 		}
-		var content []byte
+		var idxContent []byte
 		if c.cipher != nil {
-			// In authenticated mode the on-disk directory must match the writer-signed
-			// hash (checked over the ciphertext, before decryption mutates dirBuf).
-			if c.authenticated && sha256.Sum256(dirBuf) != sb.dirHash {
+			if c.authenticated && sha256.Sum256(idxBuf) != sb.dirHash {
 				_ = back.Close()
 				if c.macKey != nil { // symmetric mode reports integrity failures as ErrTampered
 					return nil, ErrTampered
 				}
 				return nil, ErrUnauthorized
 			}
-			// Checksum the on-disk ciphertext, decrypt, then verify the canary
-			// (wrong key) before reading the entries past it.
-			if !c.readVerifyDecrypt(dirBuf, sb.dirChecksum, dirTweak, domainDirectory) {
+			if !c.readVerifyDecrypt(idxBuf, sb.dirChecksum, 0, domainSegIndex) {
 				_ = back.Close()
-				return nil, errors.New("directory checksum mismatch (corruption)")
+				return nil, errors.New("segment index checksum mismatch (corruption)")
 			}
-			if !bytes.Equal(dirBuf[:dirCanaryLen], dirCanary[:]) {
+			if !bytes.Equal(idxBuf[:dirCanaryLen], dirCanary[:]) {
 				_ = back.Close()
 				return nil, ErrWrongKey
 			}
-			need := dirCanaryLen + int(sb.pageCount)*dirEntryBytes(sb.authenticated)
-			if need > len(dirBuf) {
+			if dirCanaryLen+idxLen > len(idxBuf) {
 				_ = back.Close()
-				return nil, errors.New("vault: directory too small for its page count (corruption)")
+				return nil, errors.New("vault: segment index too small for its segment count (corruption)")
 			}
-			content = dirBuf[dirCanaryLen:need]
+			idxContent = idxBuf[dirCanaryLen : dirCanaryLen+idxLen]
 		} else {
-			content = dirBuf[:int(sb.pageCount)*dirEntryBytes(sb.authenticated)]
-			if crc32.Checksum(content, crc32C) != sb.dirChecksum {
+			if idxLen > len(idxBuf) {
 				_ = back.Close()
-				return nil, errors.New("directory checksum mismatch (corruption)")
+				return nil, errors.New("vault: segment index too small for its segment count (corruption)")
+			}
+			idxContent = idxBuf[:idxLen]
+			if crc32.Checksum(idxContent, crc32C) != sb.dirChecksum {
+				_ = back.Close()
+				return nil, errors.New("segment index checksum mismatch (corruption)")
 			}
 		}
-		dir, err := parseDirectory(content, int(sb.pageCount), sb.authenticated)
+		segIndex, err := parseSegmentIndex(idxContent, int(nSegs))
 		if err != nil {
 			_ = back.Close()
-			return nil, fmt.Errorf("parse directory: %w", err)
+			return nil, fmt.Errorf("parse segment index: %w", err)
 		}
-		if err := validateDirectory(dir, sb, size); err != nil {
+
+		// Read each (non-sparse) segment, verify it against its index descriptor,
+		// decrypt, and assemble the directory.
+		dir := make([]dirEntry, sb.pageCount)
+		for s := range nSegs {
+			d := segIndex[s]
+			if d.physOffset == 0 {
+				continue // an all-sparse segment: its entries stay zero
+			}
+			span := uint64(d.blocks) * c.blockSize
+			if d.physOffset%c.blockSize != 0 || d.blocks == 0 || d.physOffset+span < d.physOffset || d.physOffset+span > uint64(size) {
+				_ = back.Close()
+				return nil, fmt.Errorf("vault: directory segment %d extent out of bounds", s)
+			}
+			lo, hi := segmentBounds(s, uint64(sb.segEntries), sb.pageCount)
+			n := int(hi - lo)
+			need := n * dirEntryBytes(sb.authenticated)
+			segBuf := make([]byte, span)
+			if _, err := back.ReadAt(segBuf, int64(d.physOffset)); err != nil {
+				_ = back.Close()
+				return nil, fmt.Errorf("read directory segment %d: %w", s, err)
+			}
+			if need > len(segBuf) {
+				_ = back.Close()
+				return nil, fmt.Errorf("vault: directory segment %d too small (corruption)", s)
+			}
+			if c.cipher != nil {
+				if c.authenticated {
+					var h [slotHashLen]byte
+					full := sha256.Sum256(segBuf)
+					copy(h[:], full[:slotHashLen])
+					if h != d.hash {
+						_ = back.Close()
+						if c.macKey != nil {
+							return nil, ErrTampered
+						}
+						return nil, ErrUnauthorized
+					}
+				}
+				if !c.readVerifyDecrypt(segBuf, d.checksum, s, domainDirectory) {
+					_ = back.Close()
+					return nil, fmt.Errorf("vault: directory segment %d checksum mismatch (corruption)", s)
+				}
+			} else if crc32.Checksum(segBuf[:need], crc32C) != d.checksum {
+				_ = back.Close()
+				return nil, fmt.Errorf("vault: directory segment %d checksum mismatch (corruption)", s)
+			}
+			segDir, err := parseDirectory(segBuf[:need], n, sb.authenticated)
+			if err != nil {
+				_ = back.Close()
+				return nil, fmt.Errorf("parse directory segment %d: %w", s, err)
+			}
+			copy(dir[lo:hi], segDir)
+		}
+		if err := validateDirectory(dir, segIndex, sb, size); err != nil {
 			_ = back.Close()
 			return nil, err
 		}
 		c.dir = dir
+		c.segIndex = segIndex
 	}
-	c.alloc = rebuildAllocator(c.dir, sb, size, keyslotBlocks)
+	c.alloc = rebuildAllocator(c.dir, c.segIndex, sb, size, keyslotBlocks)
 	return c, nil
 }
 
@@ -477,6 +565,12 @@ func readSuperblockAt(back backing, off int64) []byte {
 // fileBacking adapts *os.File to the backing interface.
 type fileBacking struct{ *os.File }
 
+// Sync uses a write barrier (F_BARRIERFSYNC on darwin) rather than the full
+// device-cache flush os.File.Sync issues (F_FULLFSYNC). The container's copy-on-write
+// commit needs write ORDERING, not a platter flush, for crash consistency; the barrier
+// is ~30x cheaper on macOS. See syncBacking (sync_darwin.go) for the durability rationale.
+func (f fileBacking) Sync() error { return syncBacking(f.File) }
+
 func (f fileBacking) Size() (int64, error) {
 	fi, err := f.Stat()
 	if err != nil {
@@ -487,27 +581,39 @@ func (f fileBacking) Size() (int64, error) {
 
 func (f fileBacking) Truncate(size int64) error { return f.File.Truncate(size) }
 
+// auxCryptUnit is the cipher alignment unit for the transient aux files
+// (journal / WAL / temp). It is deliberately SMALL and decoupled from the DB page
+// size: SQLite writes the WAL as stride-(24+pageSize) frames whose 24-byte frame
+// headers never land on a page boundary, so aligning the cipher to the page size
+// turned every header write into a full-page read-modify-write (measured ~8× cipher
+// and ~5× write amplification on a large sequential write). A 512-byte unit bounds
+// each RMW to one sector and leaves the bulk of a frame's page data on whole-unit
+// boundaries, so the aux path runs at close to the plaintext rate. 512 is also
+// Adiantum's design sector size, so the wide-block guarantee is unweakened. The
+// unit is a code constant, never stored: aux files are recreated each session (and
+// crash-recovered by the same build), so there is no on-disk compatibility concern.
+const auxCryptUnit int64 = 512
+
 // passFile is a thin *os.File wrapper for journals and temp files: no
 // compression. It embeds NoLock (single-connection). When the database is
-// encrypted it also encrypts these auxiliaries at rest, page-aligned by absolute
-// offset with read-modify-write for sub-page writes — the same scheme vfs/crypto
-// uses — so a transaction's page images never hit disk in the clear.
+// encrypted it also encrypts these auxiliaries at rest, aligned to auxCryptUnit by
+// absolute offset with read-modify-write for sub-unit writes, so a transaction's
+// page images never hit disk in the clear.
 type passFile struct {
 	vfs.NoLock
-	f        *os.File
-	temp     bool
-	cipher   crypto.PageCipher // nil = plain passthrough
-	pageSize int64
-	domain   byte
+	f      *os.File
+	temp   bool
+	cipher crypto.PageCipher // nil = plain passthrough
+	domain byte
 }
 
-func openPass(name string, flags vfs.OpenFlags, cipher crypto.PageCipher, pageSize int64) (*passFile, error) {
+func openPass(name string, flags vfs.OpenFlags, cipher crypto.PageCipher) (*passFile, error) {
 	if name == "" { // anonymous temp file: never shared, never reopened
 		f, err := os.CreateTemp("", "gosqlitez-")
 		if err != nil {
 			return nil, err
 		}
-		return &passFile{f: f, temp: true, cipher: cipher, pageSize: pageSize, domain: passDomain(flags)}, nil
+		return &passFile{f: f, temp: true, cipher: cipher, domain: passDomain(flags)}, nil
 	}
 	oflag := os.O_RDWR
 	if flags.Has(vfs.OpenReadOnly) {
@@ -523,37 +629,63 @@ func openPass(name string, flags vfs.OpenFlags, cipher crypto.PageCipher, pageSi
 	if err != nil {
 		return nil, err
 	}
-	return &passFile{f: f, cipher: cipher, pageSize: pageSize, domain: passDomain(flags)}, nil
+	return &passFile{f: f, cipher: cipher, domain: passDomain(flags)}, nil
 }
 
-// cryptPages encrypts or decrypts each whole page in span (a page-aligned run
-// starting at baseOffset), tweaked by the page number and the file's domain.
+// cryptPages encrypts or decrypts each whole auxCryptUnit-sized unit in span (a
+// unit-aligned run starting at baseOffset), tweaked by the unit number and the
+// file's domain.
+//
+// On decrypt it skips a unit whose on-disk bytes are all zero: that is a sparse
+// hole (a region the file never wrote, e.g. a gap an extending write left behind),
+// which must read back as zeros — decrypting it would yield garbage. Real
+// ciphertext is pseudo-random, so an all-zero unit is never genuine encrypted data
+// (a coincidental all-zero ciphertext has ~2^-4096 probability). This restores the
+// "unwritten regions read as zeros" property that page-granularity materialization
+// gave before the unit shrank, with no extra I/O.
 func (p *passFile) cryptPages(span []byte, baseOffset int64, encrypt bool) {
-	ps := p.pageSize
-	for i := int64(0); i+ps <= int64(len(span)); i += ps {
-		pageNum := uint64((baseOffset + i) / ps)
+	u := auxCryptUnit
+	for i := int64(0); i+u <= int64(len(span)); i += u {
+		unit := span[i : i+u]
+		if !encrypt && allZero(unit) {
+			continue // sparse hole: leave it zero rather than decrypt to garbage
+		}
+		unitNum := uint64((baseOffset + i) / u)
 		if encrypt {
-			p.cipher.Encrypt(span[i:i+ps], pageNum, p.domain)
+			p.cipher.Encrypt(unit, unitNum, p.domain)
 		} else {
-			p.cipher.Decrypt(span[i:i+ps], pageNum, p.domain)
+			p.cipher.Decrypt(unit, unitNum, p.domain)
 		}
 	}
+}
+
+// allZero reports whether b is entirely zero bytes, early-exiting on the first
+// non-zero (so a real ciphertext unit costs ~one byte to reject).
+func allZero(b []byte) bool {
+	for _, x := range b {
+		if x != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *passFile) ReadAt(b []byte, off int64) (int, error) {
 	if p.cipher == nil {
 		return p.f.ReadAt(b, off)
 	}
-	ps := p.pageSize
-	pageStart := (off / ps) * ps
-	pageEnd := (off + int64(len(b)) + ps - 1) / ps * ps
-	span := make([]byte, pageEnd-pageStart)
-	rn, rerr := p.f.ReadAt(span, pageStart)
+	u := auxCryptUnit
+	unitStart := (off / u) * u
+	unitEnd := (off + int64(len(b)) + u - 1) / u * u
+	bp := getExtent(uint64(unitEnd - unitStart)) // pooled; only [0,rn) is read back below
+	defer putExtent(bp)
+	span := *bp
+	rn, rerr := p.f.ReadAt(span, unitStart)
 	if rerr != nil && rerr != io.EOF {
 		return 0, rerr
 	}
-	p.cryptPages(span[:(int64(rn)/ps)*ps], pageStart, false) // decrypt the full pages we read
-	lo := off - pageStart
+	p.cryptPages(span[:(int64(rn)/u)*u], unitStart, false) // decrypt the full units we read
+	lo := off - unitStart
 	avail := int64(rn) - lo
 	if avail <= 0 {
 		return 0, io.EOF
@@ -570,29 +702,34 @@ func (p *passFile) WriteAt(b []byte, off int64) (int, error) {
 	if p.cipher == nil {
 		return p.f.WriteAt(b, off)
 	}
-	ps := p.pageSize
-	pageStart := (off / ps) * ps
-	pageEnd := (off + int64(len(b)) + ps - 1) / ps * ps
-	span := make([]byte, pageEnd-pageStart)
-	if off == pageStart && int64(len(b)) == int64(len(span)) {
-		copy(span, b) // full page-aligned span: overwrite entirely
+	u := auxCryptUnit
+	unitStart := (off / u) * u
+	unitEnd := (off + int64(len(b)) + u - 1) / u * u
+	bp := getExtent(uint64(unitEnd - unitStart))
+	defer putExtent(bp)
+	span := *bp
+	if off == unitStart && int64(len(b)) == int64(len(span)) {
+		copy(span, b) // unit-aligned span: overwrite entirely (no read, no pre-clear)
 	} else {
-		// Read-modify-write: fetch the enclosing pages, decrypt, splice in b.
-		rn, rerr := p.f.ReadAt(span, pageStart)
+		// Read-modify-write: fetch the enclosing units, decrypt, splice in b. The
+		// pooled buffer is not pre-zeroed, so clear it first to reproduce make()'s
+		// zero padding for any hole/tail the read and b do not cover.
+		clear(span)
+		rn, rerr := p.f.ReadAt(span, unitStart)
 		if rerr != nil && rerr != io.EOF {
 			return 0, rerr
 		}
-		p.cryptPages(span[:(int64(rn)/ps)*ps], pageStart, false)
-		copy(span[off-pageStart:], b)
+		p.cryptPages(span[:(int64(rn)/u)*u], unitStart, false)
+		copy(span[off-unitStart:], b)
 	}
-	p.cryptPages(span, pageStart, true)
-	if _, err := p.f.WriteAt(span, pageStart); err != nil {
+	p.cryptPages(span, unitStart, true)
+	if _, err := p.f.WriteAt(span, unitStart); err != nil {
 		return 0, err
 	}
 	return len(b), nil
 }
 func (p *passFile) Truncate(n int64) error                 { return p.f.Truncate(n) }
-func (p *passFile) Sync(vfs.SyncFlags) error               { return p.f.Sync() }
+func (p *passFile) Sync(vfs.SyncFlags) error               { return syncBacking(p.f) } // barrier, not F_FULLFSYNC (see syncBacking)
 func (p *passFile) SectorSize() int                        { return defaultBlockSize }
 func (p *passFile) DeviceCharacteristics() vfs.DeviceFlags { return 0 }
 
@@ -618,7 +755,7 @@ func (p *passFile) Close() error {
 // calling Close to unregister. Most callers want [Open], which wires all of
 // that up.
 func NewVFS(opts Options) (*VFS, error) {
-	blockSize, pageSize, err := opts.resolveLive()
+	blockSize, pageSize, segEntries, err := opts.resolveLive()
 	if err != nil {
 		return nil, err
 	}
@@ -627,11 +764,12 @@ func NewVFS(opts Options) (*VFS, error) {
 		return nil, err
 	}
 	v := &VFS{
-		name:      cabi.UniqueName("vault"),
-		blockSize: blockSize,
-		pageSize:  pageSize,
-		codec:     opts.Level,
-		keyCfg:    kc,
+		name:       cabi.UniqueName("vault"),
+		blockSize:  blockSize,
+		pageSize:   pageSize,
+		segEntries: segEntries,
+		codec:      opts.Level,
+		keyCfg:     kc,
 	}
 	if err := vfs.Register(v.name, v); err != nil {
 		return nil, err
@@ -663,11 +801,20 @@ func Open(cfg sqlite.Config, opts Options) (*sqlite.DB, error) {
 	if err := requireOnDiskPath(cfg); err != nil {
 		return nil, err
 	}
+	return openThroughVault(cfg, opts, false)
+}
 
+// openThroughVault registers a vault VFS for opts, wires it into cfg with the
+// standard pragmas (page size, no mmap, a default busy timeout and journal), and
+// opens the database. preserveNewFiles makes a NEW main-DB file created through the
+// VFS — a VACUUM INTO target — seal to the first-opened database's key and
+// membership; only [CompactLogical] sets it. The caller has already validated cfg.
+func openThroughVault(cfg sqlite.Config, opts Options, preserveNewFiles bool) (*sqlite.DB, error) {
 	v, err := NewVFS(opts)
 	if err != nil {
 		return nil, err
 	}
+	v.preserveNewFiles = preserveNewFiles
 
 	cfg.VFS = v.name
 	cfg.VFSCloser = v

@@ -94,7 +94,7 @@ func TestLiveEncryptionRoundTrip(t *testing.T) {
 }
 
 // TestPassFileEncryptRoundTrip exercises the auxiliary-file (journal/WAL)
-// page-aligned read-modify-write encryption directly: assorted aligned, sub-page,
+// unit-aligned read-modify-write encryption directly: assorted aligned, sub-unit,
 // and spanning writes round-trip, and the plaintext never appears on disk.
 func TestPassFileEncryptRoundTrip(t *testing.T) {
 	const ps = 4096
@@ -104,7 +104,7 @@ func TestPassFileEncryptRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "x-journal")
-	pf, err := openPass(path, vfs.OpenCreate|vfs.OpenMainJournal, cipher, ps)
+	pf, err := openPass(path, vfs.OpenCreate|vfs.OpenMainJournal, cipher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +322,7 @@ func TestRegistryKeyReuse(t *testing.T) {
 func TestEmptyReadOnlyEncrypted(t *testing.T) {
 	const bs, ps = defaultBlockSize, defaultPageSize
 	kc := keyConfig{cipher: crypto.Adiantum, rawKey: bytes.Repeat([]byte{1}, 32)}
-	if _, err := newContainerOver(newCrashBacking(nil), true, bs, ps, CompressionDefault, kc); err == nil {
+	if _, err := newContainerOver(newCrashBacking(nil), true, bs, ps, defaultSegEntries, CompressionDefault, kc); err == nil {
 		t.Fatal("empty read-only open with a key: want error")
 	}
 }
@@ -336,33 +336,33 @@ func TestEncryptionCheckEnc(t *testing.T) {
 	withKey := keyConfig{cipher: crypto.Adiantum, rawKey: key}
 
 	// Create an empty encrypted container (its commit records enc on disk).
-	if _, err := newContainerOver(cb, false, bs, ps, CompressionDefault, withKey); err != nil {
+	if _, err := newContainerOver(cb, false, bs, ps, defaultSegEntries, CompressionDefault, withKey); err != nil {
 		t.Fatalf("create encrypted container: %v", err)
 	}
 
 	// Reopen without a key → ErrEncrypted.
-	if _, err := newContainerOver(cb, true, bs, ps, CompressionDefault, keyConfig{}); !errors.Is(err, ErrEncrypted) {
+	if _, err := newContainerOver(cb, true, bs, ps, defaultSegEntries, CompressionDefault, keyConfig{}); !errors.Is(err, ErrEncrypted) {
 		t.Fatalf("reopen without key = %v, want ErrEncrypted", err)
 	}
 
 	// Reopen with the wrong key bytes → ErrWrongKey (the directory canary fails),
 	// even on this empty database.
 	wrong := keyConfig{cipher: crypto.Adiantum, rawKey: bytes.Repeat([]byte{8}, 32)}
-	if _, err := newContainerOver(cb, true, bs, ps, CompressionDefault, wrong); !errors.Is(err, ErrWrongKey) {
+	if _, err := newContainerOver(cb, true, bs, ps, defaultSegEntries, CompressionDefault, wrong); !errors.Is(err, ErrWrongKey) {
 		t.Fatalf("reopen with wrong key = %v, want ErrWrongKey", err)
 	}
 
 	// Reopen with the right key → succeeds.
-	if _, err := newContainerOver(cb, true, bs, ps, CompressionDefault, withKey); err != nil {
+	if _, err := newContainerOver(cb, true, bs, ps, defaultSegEntries, CompressionDefault, withKey); err != nil {
 		t.Fatalf("reopen with key: %v", err)
 	}
 
 	// A plaintext container rejects a key.
 	cbPlain := newCrashBacking(nil)
-	if _, err := newContainerOver(cbPlain, false, bs, ps, CompressionDefault, keyConfig{}); err != nil {
+	if _, err := newContainerOver(cbPlain, false, bs, ps, defaultSegEntries, CompressionDefault, keyConfig{}); err != nil {
 		t.Fatalf("create plaintext container: %v", err)
 	}
-	if _, err := newContainerOver(cbPlain, true, bs, ps, CompressionDefault, withKey); err == nil {
+	if _, err := newContainerOver(cbPlain, true, bs, ps, defaultSegEntries, CompressionDefault, withKey); err == nil {
 		t.Fatal("reopen plaintext with key: want error")
 	}
 }
