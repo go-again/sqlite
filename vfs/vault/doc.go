@@ -83,16 +83,22 @@
 // deletion needs no prior vacuum and is one pass proportional to what is kept; it
 // preserves the key/membership (a reclaim, not a rotation) but starts a fresh
 // generation, so an anchored database uses [Compact] instead.
-// [CompactOnline] is the online relocating reclaim: while the database stays open it
-// moves live slots down into the free holes a delete scatters through the middle and
-// truncates the tail, recovering space that tail-only [Trim] cannot. [Trim] is the
-// cheap online tail reclaim: it returns TRAILING free blocks to the OS (a truncate,
-// no relocation) when free blocks have collected at the tail. Do NOT run a full
-// SQLite VACUUM to reclaim a container — copy-on-write makes it roughly DOUBLE the
-// file rather than shrink; use PRAGMA incremental_vacuum then [CompactOnline], or
-// [Compact]. [Snapshot] writes a consistent, encrypted, compressed copy to a NEW
-// path (optionally re-sealed to a different recipient set) without plaintext on
-// disk — the at-rest analogue of [Pack] for an encrypted database.
+// [CompactLogicalOnline] is the O(live) ONLINE reclaim: while the database stays open
+// it reads SQLite's freelist, drops the dead pages' container slots (no page is
+// written, moved, or re-encrypted), and relocates + trims the freed blocks back to the
+// OS — so a large deletion shrinks the mounted image in time proportional to the live
+// data, with no incremental_vacuum (which would re-encrypt every page it moves, since
+// the cipher tweak is the page number). [CompactOnline] is the online RELOCATING
+// reclaim: while open it moves live slots down into the holes a delete scatters and
+// truncates the tail, recovering space that tail-only [Trim] cannot (use it after
+// incremental_vacuum, or as the trim step of the logical reclaim). [Trim] is the cheap
+// online tail reclaim: it returns TRAILING free blocks to the OS (a truncate, no
+// relocation). [ReclaimableBytes] reports how much any of these would return. Do NOT
+// run a full SQLite VACUUM to reclaim a container — copy-on-write makes it roughly
+// DOUBLE the file rather than shrink; use [CompactLogicalOnline] (online) or
+// [CompactLogical] / [Compact] (offline). [Snapshot] writes a consistent, encrypted,
+// compressed copy to a NEW path (optionally re-sealed to a different recipient set)
+// without plaintext on disk — the at-rest analogue of [Pack] for an encrypted database.
 //
 // # Untrusted input
 //
