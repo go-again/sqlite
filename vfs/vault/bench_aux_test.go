@@ -60,7 +60,7 @@ func BenchmarkEncryptedWAL(b *testing.B) {
 				if err != nil {
 					b.Fatal(err)
 				}
-				for r := 0; r < nRows; r++ {
+				for r := range nRows {
 					if _, err := tx.Exec(`INSERT INTO t(id, v) VALUES(?, ?)`, r, blob); err != nil {
 						b.Fatal(err)
 					}

@@ -44,7 +44,7 @@ func BenchmarkWALWrite(b *testing.B) {
 			}
 			b.StartTimer()
 			tx, _ := db.Begin()
-			for r := 0; r < nRows; r++ {
+			for r := range nRows {
 				if _, err := tx.Exec(`INSERT INTO t(id, v) VALUES(?, ?)`, r, blob); err != nil {
 					b.Fatal(err)
 				}

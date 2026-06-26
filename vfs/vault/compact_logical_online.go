@@ -151,11 +151,8 @@ func (c *container) collectFreelistLeaves() ([]uint64, error) {
 			return nil, fmt.Errorf("vault: read freelist trunk %d: %w", trunk, err)
 		}
 		next := uint64(binary.BigEndian.Uint32(page[0:4]))
-		n := uint64(binary.BigEndian.Uint32(page[4:8]))
-		if n > maxLeavesPerTrunk {
-			n = maxLeavesPerTrunk
-		}
-		for i := uint64(0); i < n; i++ {
+		n := min(uint64(binary.BigEndian.Uint32(page[4:8])), maxLeavesPerTrunk)
+		for i := range n {
 			leaf := uint64(binary.BigEndian.Uint32(page[8+i*4 : 12+i*4]))
 			if leaf >= 2 && leaf <= c.pageCount {
 				leaves = append(leaves, leaf)
