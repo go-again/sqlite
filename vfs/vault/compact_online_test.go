@@ -88,7 +88,7 @@ func TestCompactOnlineReclaimsAndPreserves(t *testing.T) {
 			before := readAllLogical(t, f)
 			beforeSize := len(cb.data)
 
-			reclaimed, err := f.c.compactOnline(0)
+			reclaimed, err := f.c.compactOnline(0, nil)
 			if err != nil {
 				t.Fatalf("compactOnline: %v", err)
 			}
@@ -155,7 +155,7 @@ func TestCompactOnlineCrashSafe(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := fc.c.compactOnline(0); err != nil {
+			if _, err := fc.c.compactOnline(0, nil); err != nil {
 				t.Fatalf("clean compaction: %v", err)
 			}
 			if !bytes.Equal(readAllLogical(t, fc), before) {
@@ -174,7 +174,7 @@ func TestCompactOnlineCrashSafe(t *testing.T) {
 					t.Fatalf("crash %d: open: %v", k, err)
 				}
 				cb.failAt = k
-				_, _ = fk.c.compactOnline(0) // a crash here is expected
+				_, _ = fk.c.compactOnline(0, nil) // a crash here is expected
 				_ = fk.Close()
 
 				fr, err := newContainerOverFile(t, newCrashBacking(cb.synced), crashPageSize, tc.kc)
@@ -228,9 +228,23 @@ func TestCompactOnlineAfterDelete(t *testing.T) {
 	}
 	afterTrim := fileSize(t, path)
 
-	rec, err := CompactOnline(path, 0)
+	// A progress callback must fire with a non-decreasing cumulative reclaim that ends
+	// at the returned total.
+	var progress []int64
+	rec, err := CompactOnline(path, 0, func(reclaimed int64) { progress = append(progress, reclaimed) })
 	if err != nil {
 		t.Fatalf("CompactOnline: %v", err)
+	}
+	if len(progress) == 0 {
+		t.Fatal("progress callback never fired during a multi-batch reclaim")
+	}
+	for i := 1; i < len(progress); i++ {
+		if progress[i] < progress[i-1] {
+			t.Fatalf("progress went backwards: %v", progress)
+		}
+	}
+	if progress[len(progress)-1] != rec {
+		t.Fatalf("last progress %d != returned reclaimed %d", progress[len(progress)-1], rec)
 	}
 	afterOnline := fileSize(t, path)
 	t.Logf("write=%dKiB  trim→%dKiB(+%dKiB)  online→%dKiB(+%dKiB)",
@@ -264,11 +278,11 @@ func TestCompactOnlineAfterDelete(t *testing.T) {
 // container must refuse online compaction, like Trim.
 func TestCompactOnlineReadOnlyRefused(t *testing.T) {
 	c := &container{readOnlyRecipient: true, blockSize: defaultBlockSize}
-	if _, err := c.compactOnline(0); err != ErrReadOnlyRecipient {
+	if _, err := c.compactOnline(0, nil); err != ErrReadOnlyRecipient {
 		t.Fatalf("compactOnline on a read-only recipient = %v, want ErrReadOnlyRecipient", err)
 	}
 	c = &container{readOnly: true, blockSize: defaultBlockSize}
-	if _, err := c.compactOnline(0); err != errReadOnly {
+	if _, err := c.compactOnline(0, nil); err != errReadOnly {
 		t.Fatalf("compactOnline on a read-only container = %v, want errReadOnly", err)
 	}
 }

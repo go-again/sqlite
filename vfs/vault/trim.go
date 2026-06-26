@@ -35,6 +35,34 @@ func Checkpoint(db *sqlite.DB, path string) (reclaimed int64, err error) {
 	return Trim(path, 0)
 }
 
+// ReclaimableBytes reports how many bytes a compaction of the OPEN container at path
+// could return to the OS: the space currently allocated to the file but held on the
+// free list, not used by live data. It is what a full [Compact] / [CompactLogicalOnline]
+// would recover; [Trim] alone recovers only the part of it that sits at the tail. It is
+// cheap (an allocator sum, no I/O) and a snapshot — a concurrent writer can change it
+// the instant it returns — so use it to decide whether a reclaim pass is worthwhile and
+// to show progress, not as an exact promise. path must name a database currently open
+// in THIS process.
+func ReclaimableBytes(path string) (int64, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return 0, err
+	}
+	containers.mu.Lock()
+	c := containers.m[abs]
+	if c != nil {
+		c.refs++ // pin the container against a concurrent last-handle Close
+	}
+	containers.mu.Unlock()
+	if c == nil {
+		return 0, fmt.Errorf("vault: ReclaimableBytes: no open database at %q", path)
+	}
+	defer func() { _ = c.release() }()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return int64(c.alloc.freeBlocksTotal() * c.blockSize), nil
+}
+
 // Trim returns trailing free blocks of the OPEN container at path to the OS,
 // shrinking the file while the database stays open, and reports the bytes
 // reclaimed. It is safe to call from a background goroutine and cheap (a single

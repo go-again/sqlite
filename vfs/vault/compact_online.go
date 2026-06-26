@@ -43,7 +43,12 @@ import (
 // writes are idle (e.g. right after the checkpoint). maxBytes, if > 0, caps how much
 // is reclaimed this call; pass <= 0 to reclaim as much as possible. path must name a
 // database currently open in THIS process; on a closed file use [Compact].
-func CompactOnline(path string, maxBytes int64) (int64, error) {
+//
+// progress, if non-nil, is called after each batch with the cumulative bytes
+// reclaimed so far, so a long pass can report status and shrink visibly rather than
+// appearing to change the file only at the end. It runs without the container lock
+// held; keep it cheap and non-reentrant (do not call back into the same container).
+func CompactOnline(path string, maxBytes int64, progress func(reclaimed int64)) (int64, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return 0, err
@@ -58,7 +63,7 @@ func CompactOnline(path string, maxBytes int64) (int64, error) {
 		return 0, fmt.Errorf("vault: CompactOnline: no open database at %q (it needs the live container; run Compact on a closed file)", path)
 	}
 	defer func() { _ = c.release() }()
-	return c.compactOnline(maxBytes)
+	return c.compactOnline(maxBytes, progress)
 }
 
 // relocateBatchBlocks bounds how many blocks one locked relocation batch moves, so
@@ -69,7 +74,7 @@ const relocateBatchBlocks = 4096
 // down (everything is packed) or maxBytes is reached. Each iteration takes c.mu,
 // relocates a batch, commits (crash-safe COW), trims the freed tail, and releases
 // the lock.
-func (c *container) compactOnline(maxBytes int64) (reclaimed int64, err error) {
+func (c *container) compactOnline(maxBytes int64, progress func(int64)) (reclaimed int64, err error) {
 	for {
 		c.mu.Lock()
 		if c.readOnly {
@@ -100,6 +105,9 @@ func (c *container) compactOnline(maxBytes int64) (reclaimed int64, err error) {
 			reclaimed += rec
 		}
 		c.mu.Unlock()
+		if moved > 0 && progress != nil {
+			progress(reclaimed) // report cumulative reclaim after each batch (lock released)
+		}
 		if rerr != nil {
 			return reclaimed, rerr // surface an I/O error, after committing the moves that did succeed
 		}

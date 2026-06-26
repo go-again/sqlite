@@ -443,6 +443,21 @@ func (c *container) loadPageInto(dst []byte, pageNo uint64) error {
 // release at the next durable commit — never overwritten in place. The caller
 // holds c.mu for writing.
 func (c *container) storePage(pageNo uint64, page []byte) error {
+	// Sparse-on-write: an all-zero page needs no block. Store it sparse — release the
+	// previous slot and mark the directory entry empty (it reads back as zeros, so this
+	// is content-preserving) — instead of encoding, encrypting, and writing a block.
+	// Once a directory segment goes fully sparse the commit drops it too, so a freed
+	// region shrinks the directory as well. This is also the "release block + mark slot
+	// sparse" primitive the freelist reclaim ([CompactLogicalOnline]) reuses.
+	if allZero(page) {
+		c.growDir(pageNo)
+		if old := c.dir[pageNo]; old.physOffset != 0 {
+			c.releaseLater(old.physOffset, old.blocks)
+		}
+		c.dir[pageNo] = dirEntry{}
+		c.markSegmentDirty(pageNo)
+		return nil
+	}
 	stored, verbatim, err := encodePage(page, c.codec)
 	if err != nil {
 		return err
