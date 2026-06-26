@@ -15,10 +15,15 @@ set dotenv-load := true
 #   pubmods  — only the PUBLISHED ones (module path `gosqlite.org/<sub>`): these
 #              also get cross-built and lockstep-pinned. The xorm-compat harness
 #              (module `xormcompat`) is tested but never shipped, so it's not here.
-# Both exclude the root, the hidden reference clones (.xorm, .liteorm, …), and the
-# examples/* modules (run via `just example`).
+#   exmods   — the examples/* modules (own go.mod, external deps like gorm /
+#              liteorm). Out of submods/pubmods on purpose (not shipped, not
+#              pinned), but still lint + compile-checked via `lint-examples` so
+#              the consumer-facing examples can't silently rot.
+# submods/pubmods exclude the root, the hidden reference clones (.xorm, …), and
+# the examples/* modules (those are exmods, run via `just example`).
 submods := `for f in $(find . -mindepth 2 -name go.mod -not -path './.*/*' -not -path './examples/*'); do { grep -q 'replace gosqlite.org ' "$f" || grep -q '^module gosqlite[.]org/' "$f"; } && dirname "$f"; done | sed 's|^[.]/||' | sort | tr '\n' ' '`
 pubmods := `for f in $(find . -mindepth 2 -name go.mod -not -path './.*/*' -not -path './examples/*'); do grep -q '^module gosqlite[.]org/' "$f" && dirname "$f"; done | sed 's|^[.]/||' | sort | tr '\n' ' '`
+exmods := `find examples -name go.mod -not -path '*/.*/*' | sed 's|/go.mod$||; s|^[.]/||' | sort | tr '\n' ' '`
 
 # Default recipe: a fast pre-commit gate.
 default: build test lint
@@ -77,7 +82,7 @@ bench-vault:
 # golangci-lint + modernize (matches CI). fmt-check runs first because it's the
 # cheapest and the most common cause of CI failures from local-only pushes;
 # lint-submodules runs last because it lints N modules and is the slowest.
-lint: fmt-check vet staticcheck golangci modernize lint-submodules
+lint: fmt-check vet staticcheck golangci modernize lint-submodules lint-examples
 
 # go vet across all packages. unsafeptr=false suppresses the false-positive
 # storm from modernc's uintptr↔unsafe.Pointer conversions inherited in our
@@ -87,21 +92,22 @@ lint: fmt-check vet staticcheck golangci modernize lint-submodules
 vet:
     go vet -unsafeptr=false ./...
 
-# staticcheck. Install: `go install honnef.co/go/tools/cmd/staticcheck@latest`
+# staticcheck. Prefers an installed binary (PATH or GOPATH/bin — the latter is
+# often not on a fresh login shell's PATH), falling back to `go run` so the
+# recipe never depends on what happens to be on PATH. Install for speed:
+# `go install honnef.co/go/tools/cmd/staticcheck@latest`.
 staticcheck:
-    @if ! command -v staticcheck >/dev/null; then \
-        echo "staticcheck not installed; go install honnef.co/go/tools/cmd/staticcheck@latest"; \
-        exit 1; \
-    fi
-    staticcheck ./...
+    @bin=$(command -v staticcheck || echo "$(go env GOPATH)/bin/staticcheck"); \
+    if [ -x "$bin" ]; then "$bin" ./...; \
+    else go run honnef.co/go/tools/cmd/staticcheck@latest ./...; fi
 
-# golangci-lint. Install: `brew install golangci-lint` or see https://golangci-lint.run.
+# golangci-lint (v2). Same PATH-independent shape as staticcheck. The `go run`
+# fallback pins the v2 module path. Install for speed: `brew install
+# golangci-lint` or see https://golangci-lint.run.
 golangci:
-    @if ! command -v golangci-lint >/dev/null; then \
-        echo "golangci-lint not installed; see https://golangci-lint.run"; \
-        exit 1; \
-    fi
-    golangci-lint run --timeout 5m
+    @bin=$(command -v golangci-lint || echo "$(go env GOPATH)/bin/golangci-lint"); \
+    if [ -x "$bin" ]; then "$bin" run --timeout 5m; \
+    else go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run --timeout 5m; fi
 
 # gopls modernize: catches Go-version-bump idioms (range-over-int,
 # reflect.TypeFor, strings.SplitSeq, sync.WaitGroup.Go, etc.). Run via
@@ -206,24 +212,60 @@ test-submodules:
 # Lint EVERY sub-module in its own module context: vet + staticcheck +
 # golangci-lint + modernize (gofmt is already repo-wide via fmt-check). Mirrors
 # the per-module lint the CI `submodules` matrix runs. Slow — lints N modules.
-# Assumes staticcheck + golangci-lint are installed (the root `staticcheck` /
-# `golangci` recipes that run before this in `lint` already check that).
+# staticcheck/golangci-lint resolve the same PATH-independent way as the root
+# recipes (installed binary if present, else `go run`), so this never depends on
+# what's on PATH.
 lint-submodules:
     #!/usr/bin/env bash
     set -euo pipefail
     root="$(pwd)"
+    sc=$(command -v staticcheck || echo "$(go env GOPATH)/bin/staticcheck")
+    gc=$(command -v golangci-lint || echo "$(go env GOPATH)/bin/golangci-lint")
+    run_staticcheck() { if [ -x "$sc" ]; then "$sc" "$@"; else go run honnef.co/go/tools/cmd/staticcheck@latest "$@"; fi; }
+    run_golangci() { if [ -x "$gc" ]; then "$gc" "$@"; else go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest "$@"; fi; }
     for d in {{submods}}; do
         echo "=== lint $d ==="
         (
             cd "$d"
             go vet -unsafeptr=false ./...
-            staticcheck ./...
+            run_staticcheck ./...
             # Pin the config so resolution can't drift if a sub-module ever
             # gains its own .golangci.yml — always use the repo-root one.
-            golangci-lint run --timeout 5m --config "$root/.golangci.yml" ./...
+            run_golangci run --timeout 5m --config "$root/.golangci.yml" ./...
             # Modernize, minus the forked upstream files we keep verbatim (gorm's
             # sqlite.go/migrator.go; matched on the path tail since these run with
             # the sub-module as the working dir).
+            out=$(go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest ./... 2>&1 \
+                | grep -v -E '(^|/)(sqlite|vtab|rows|migrator)\.go:' \
+                | grep -v '^exit status' | grep -v '^go: ' || true)
+            [ -z "$out" ] || { echo "$out"; exit 1; }
+        )
+    done
+
+# Lint + compile-check every examples/* module in its own context. These are
+# separate modules (own go.mod, external deps like gorm / liteorm), so the root
+# `./...` can't reach them and they're outside `submods` — without this they'd
+# get no vet/lint/build anywhere. The build guards that the runnable examples
+# still compile, writing binaries to a throwaway dir (a bare `go build ./...`
+# would drop an executable in each example dir); the rest is the same gate as
+# `lint-submodules`. Same PATH-independent tool resolution.
+lint-examples:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="$(pwd)"
+    sc=$(command -v staticcheck || echo "$(go env GOPATH)/bin/staticcheck")
+    gc=$(command -v golangci-lint || echo "$(go env GOPATH)/bin/golangci-lint")
+    run_staticcheck() { if [ -x "$sc" ]; then "$sc" "$@"; else go run honnef.co/go/tools/cmd/staticcheck@latest "$@"; fi; }
+    run_golangci() { if [ -x "$gc" ]; then "$gc" "$@"; else go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest "$@"; fi; }
+    for d in {{exmods}}; do
+        echo "=== lint $d ==="
+        (
+            cd "$d"
+            tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+            go build -o "$tmp/" ./...
+            go vet -unsafeptr=false ./...
+            run_staticcheck ./...
+            run_golangci run --timeout 5m --config "$root/.golangci.yml" ./...
             out=$(go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest ./... 2>&1 \
                 | grep -v -E '(^|/)(sqlite|vtab|rows|migrator)\.go:' \
                 | grep -v '^exit status' | grep -v '^go: ' || true)
