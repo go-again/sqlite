@@ -5,8 +5,57 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 	"testing"
 )
+
+// TestOnConnConcurrentMetadata exercises concurrent OnConn usage on independent
+// connections (each in its own transaction) under -race, on the METADATA path only
+// (Create / Size — no BLOB I/O, which trips the upstream checkptr analyzer that
+// skipUnderRace exists for). It covers the transaction-joining + pinned-connection
+// threading that the BLOB-I/O OnConn tests must skip under -race.
+func TestOnConnConcurrentMetadata(t *testing.T) {
+	ctx := context.Background()
+	s, db := newStore(t)
+	db.SetMaxOpenConns(4)
+
+	const workers, each = 4, 15
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Go(func() {
+			for range each {
+				conn, err := db.Conn(ctx)
+				if err != nil {
+					t.Errorf("Conn: %v", err)
+					return
+				}
+				if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+					_ = conn.Close()
+					t.Errorf("BEGIN: %v", err)
+					return
+				}
+				cs := s.OnConn(conn)
+				id, err := cs.Create(ctx)
+				if err != nil {
+					t.Errorf("Create: %v", err)
+				}
+				if _, err := cs.Size(ctx, id); err != nil {
+					t.Errorf("Size: %v", err)
+				}
+				if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+					t.Errorf("COMMIT: %v", err)
+				}
+				_ = conn.Close()
+			}
+		})
+	}
+	wg.Wait()
+
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM files_objects`).Scan(&n); err != nil || n != workers*each {
+		t.Fatalf("objects = (%d, %v), want %d", n, err, workers*each)
+	}
+}
 
 // TestOnConnJoinsTx: object content written through OnConn joins the caller's
 // open transaction — it is invisible to other connections until the caller

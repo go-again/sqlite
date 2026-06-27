@@ -17,13 +17,36 @@ import (
 // for the write lock.
 //
 // Build one with [Store.OnConn]. The caller owns the transaction lifecycle — open
-// it on the connection (a raw BEGIN / BEGIN IMMEDIATE, or [database/sql.Conn.BeginTx]),
-// run any mix of ConnStore operations and your own statements on that same
-// connection, then commit or roll back. These methods never open or close a
-// transaction. They also never run the post-delete / post-truncate incremental
-// vacuum that the pooled [Store.Delete] / [Store.Truncate] do, because
-// incremental_vacuum cannot run inside an open transaction — call it yourself
-// after you commit if you need the space returned to the OS.
+// it on the connection (a raw BEGIN IMMEDIATE for a write transaction; a deferred
+// BEGIN, including [database/sql.DB.BeginTx], upgrades its lock on the first write
+// and can then collide with another writer), run any mix of ConnStore operations and
+// your own statements on that same connection, then commit or roll back. These
+// methods never open or close a transaction. They also never run the
+// post-delete / post-truncate incremental vacuum that the pooled [Store.Delete] /
+// [Store.Truncate] do, because incremental_vacuum cannot run inside an open
+// transaction — call it yourself after you commit if you need the space returned.
+//
+// Open a transaction first: a ConnStore driven in autocommit (no BEGIN) commits each
+// statement on its own, so a Create followed by a failing WriteAt leaves a committed
+// empty object — the atomicity this type exists for requires the surrounding
+// transaction.
+//
+// Do NOT call the pooled [Store] mutators on the same Store while a transaction is
+// open on this connection. [Store.NewVersion], [Store.Prune], [Store.Clone], and the
+// pooled [Store.Delete] / [Store.Truncate] each acquire a SEPARATE pooled connection
+// and BEGIN IMMEDIATE on it: with SetMaxOpenConns(1) that second acquire deadlocks
+// (your pinned connection has exhausted the pool), and with more connections it
+// blocks on your write lock and cannot see your uncommitted writes. Do a
+// transaction's blobstore work through the ConnStore, and run pooled
+// versioning/vacuum after you commit. (Set MaxOpenConns above the number of
+// connections you pin concurrently.)
+//
+// Reads ([ConnStore.ReadAt], [ConnStore.Size]) are a consistent snapshot only inside
+// an open transaction: outside one each underlying statement is its own implicit
+// transaction, so a concurrent committed writer can tear a multi-chunk read. The
+// pooled [Store] read path wraps reads in a transaction for you; the ConnStore defers
+// to the transaction you control, so open one (a read transaction suffices) when you
+// need a stable view.
 //
 // A ConnStore is bound to one connection and is no safer for concurrent use than
 // that connection: drive it sequentially.
