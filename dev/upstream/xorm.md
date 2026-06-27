@@ -4,7 +4,7 @@
 
 ## The CI gate
 
-The `xorm-compat` job runs `go test ./...` inside the isolated `xorm-compat/` module — a separate `go.mod` with `replace gosqlite.org => ..`, so `xorm.io/xorm` never enters the main module's graph (a consumer importing `gosqlite.org` carries no xorm at all). `go build ./...` / `go test ./...` from the repo root skip it because it is a separate module. It exercises xorm's public surface against our driver:
+The `submodules` CI matrix (matrix entry `xorm-compat`) runs `go test ./...` inside the isolated `xorm-compat/` module — a separate `go.mod` with `replace gosqlite.org => ..`, so `xorm.io/xorm` never enters the main module's graph (a consumer importing `gosqlite.org` carries no xorm at all). `go build ./...` / `go test ./...` from the repo root skip it because it is a separate module. It exercises xorm's public surface against our driver:
 
 - **CRUD** — `Sync2`, `Insert`, `Get`, `Where`, `Find`/`OrderBy`, `ID().Cols().Update()`, `Count`, `Delete`.
 - **Types** — int / int64 / float64 / bool / string / `[]byte` / `time.Time` (incl. a `created` column) round-trip.

@@ -124,7 +124,7 @@ second local run.
 
 ## How this runs in CI
 
-This is a dedicated `gorm-upstream` job in `.github/workflows/ci.yml`,
+This is a dedicated `gorm_upstream` job in `.github/workflows/ci.yml`,
 on every push and pull request to `main`. It's a separate job on
 purpose: the `gorm/tests` module pulls in ~20 indirect drivers
 (postgres, mysql, sqlserver, mssql, gaussdb) even though we only

@@ -18,7 +18,7 @@ SQLite's incremental BLOB I/O (`(*sqlite.Conn).OpenBlob`) is **fixed-size**: a v
 ```go
 import "gosqlite.org/blobstore"
 
-store, _ := blobstore.Open(db, "files")     // creates files_objects, files_blocks, files_chunks
+store, _ := blobstore.Open(db, "files")     // creates files_objects, files_blocks, files_chunks, files_versions
 id, _ := store.Create(ctx)                    // a new empty object → int64 id
 
 w, _ := store.Writer(ctx, id)                 // io.WriterAt + io.Closer

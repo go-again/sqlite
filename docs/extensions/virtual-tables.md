@@ -41,7 +41,7 @@ Typed handles (`csv.Table`, `lines.Table`, `closure.Graph`, `rtree.Table`) hide 
 
 ## fs.FS-bound readers
 
-`csv`, `lines`, `fileio`, `blobio` accept a sandbox `fs.FS` at registration time (which the `/auto` package can't carry). Install a connect-hook on the singleton driver before `gorm.Open` so every pooled conn picks it up:
+`csv`, `lines`, `fileio` accept a sandbox `fs.FS` at registration time (which the `/auto` package can't carry). Install a connect-hook on the singleton driver before `gorm.Open` so every pooled conn picks it up:
 
 ```go
 sqlite.DefaultDriver().RegisterConnectionHook(
@@ -50,4 +50,4 @@ sqlite.DefaultDriver().RegisterConnectionHook(
 	})
 ```
 
-The same shape works for `lines.RegisterFS`, `fileio.RegisterFS`, `blobio.RegisterFS`. `blobio` provides incremental BLOB I/O; `fileio` provides sandboxed file read/write SQL functions.
+The same shape works for `lines.RegisterFS` and `fileio.RegisterFS` (`fileio` provides sandboxed file read/write SQL functions). `blobio` is not filesystem-bound: it registers with plain `blobio.Register(conn)` and provides incremental BLOB I/O over database columns, not an `fs.FS`.

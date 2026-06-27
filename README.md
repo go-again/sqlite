@@ -20,7 +20,7 @@ defer db.Close()
 // db embeds *sql.DB — every database/sql method works.
 ```
 
-Existing mattn / modernc / glebarez / ncruces code keeps working after the import swap; the legacy `sql.Open("sqlite3", "file:...?_pragma=…")` form is still accepted. Your ORM works too — the [gorm](docs/guides/gorm.md) dialector is a companion module (`gosqlite.org/gorm`), and [xorm](docs/guides/migrating.md#with-xorm) uses the driver as-is. See the **[migration guide](docs/guides/migrating.md)**.
+Existing mattn / modernc / glebarez / ncruces code keeps working after the import swap; the legacy `sql.Open("sqlite3", "file:...?_pragma=…")` form is still accepted. Your ORM works too — [LiteORM](https://liteorm.org) is built on this driver, the [gorm](docs/guides/gorm.md) dialector is a companion module (`gosqlite.org/gorm`), and [xorm](docs/guides/migrating.md#with-xorm) uses the driver as-is. See the **[migration guide](docs/guides/migrating.md)**.
 
 ## Why gosqlite
 
@@ -143,7 +143,7 @@ Plain `database/sql` works too: `sql.Open("sqlite", "file:app.db")`. The full se
 |---|---|
 | `_ "github.com/mattn/go-sqlite3"` | → `_ "gosqlite.org"`; `sql.Open("sqlite3", ...)` keeps working |
 | `_ "modernc.org/sqlite"` | → `_ "gosqlite.org"`; `sql.Open("sqlite", ...)` keeps working |
-| `"github.com/glebarez/sqlite"` / `"github.com/go-gorm/sqlite"` | → `"gosqlite.org/gorm"`; `sqlite.Open(dsn)` keeps working |
+| `"github.com/glebarez/sqlite"` / `"gorm.io/driver/sqlite"` | → `"gosqlite.org/gorm"`; `sqlite.Open(dsn)` keeps working |
 | `ncruces/go-sqlite3` | partial — `database/sql` + `_pragma` DSNs swap cleanly; custom UDFs/types need a rewrite |
 
 Full per-package recipes, the `_*` DSN-flag table, and build-tag mapping: **[Migrating](docs/guides/migrating.md)**, **[DSN flags](docs/reference/dsn-flags.md)**, **[Build tags](docs/reference/build-tags.md)**. Runnable: [`examples/migrating/`](examples/migrating/).
@@ -156,7 +156,7 @@ Because SQLite is transpiled to Go (via `modernc.org/sqlite`) rather than C-boun
 
 ## Examples
 
-Runnable, smoke-tested programs under [`examples/`](examples/), grouped by audience: [`migrating/`](examples/migrating/) (drop-in recipes), [`getting-started/`](examples/getting-started/) (the modern on-ramp), and [`features/`](examples/features/) (one per capability — search, VFS, the `ext/` catalog, hooks, sessions, …). `just example <name>` runs one; `just examples` smoke-tests all.
+Runnable, smoke-tested programs under [`examples/`](examples/), grouped by audience: [`migrating/`](examples/migrating/) (drop-in recipes), [`getting-started/`](examples/getting-started/) (the modern on-ramp), [`features/`](examples/features/) (one per capability — search, VFS, the `ext/` catalog, hooks, sessions, …), plus standalone cross-module demos ([`liteorm/`](examples/liteorm/), [`encrypted-blobstore/`](examples/encrypted-blobstore/), [`vault-blobstore/`](examples/vault-blobstore/)). `just example <name>` runs one; `just examples` smoke-tests all.
 
 ## Development & contributing
 

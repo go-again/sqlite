@@ -1,6 +1,6 @@
 # Coverage: gorm
 
-Last reviewed against `gorm.io/gorm v1.31.1` on 2026-05-26.
+Last reviewed against `gorm.io/gorm v1.31.1` on 2026-05-29.
 
 The version is pinned in this module's `go.mod`. When you bump it, walk
 this file top to bottom; the public interfaces are stable but methods do

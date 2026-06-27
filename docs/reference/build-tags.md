@@ -17,7 +17,7 @@ Mattn used build tags to enable SQLite compile-time features. Here those feature
 | `sqlite_rtree`, `sqlite_geopoly` | always on |
 | `sqlite_dbstat` | always on |
 | `sqlite_preupdate_hook` | always on, via `(*Conn).RegisterPreUpdateHook` |
-| `sqlite_userauth` | **dropped** (deprecated upstream) |
+| `sqlite_userauth` | **dropped** (removed upstream) |
 | `sqlite_unlock_notify` | inherited from modernc |
 | `sqlite_vtable` | always on, see [`modernc.org/sqlite/vtab`](https://pkg.go.dev/modernc.org/sqlite/vtab) |
 

@@ -3,7 +3,7 @@
 Comprehensive feature-by-feature test suite under `tests/sql/`. Every
 documented SQLite SQL surface this driver exposes is exercised by at
 least one test. Last reviewed against the SQLite + modernc/sqlite
-versions pinned in `go.mod` on 2026-05-26.
+versions pinned in `go.mod` on 2026-05-29.
 
 Run locally with `go test ./tests/sql/...`.
 

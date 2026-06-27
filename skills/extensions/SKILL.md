@@ -1,6 +1,6 @@
 ---
 name: extensions
-description: Use when the task needs a SQL function or virtual table from the gosqlite ext/ catalog — regexp, uuid, hash, ipaddr, stats, unicode, fuzzy, decimal, money, time, eval, csv, lines, rtree, series, array, bloom, spellfix1, fileio, blobio.
+description: Use when the task needs a SQL function or virtual table from the gosqlite ext/ catalog — regexp, uuid, hash, ipaddr, zorder, stats, unicode, encode, text, fuzzy, decimal, money, time, eval, csv, lines, statement, closure, pivot, rtree, series, array, bloom, spellfix1, fileio, blobio.
 ---
 
 # Loadable Go extensions (`ext/`)
@@ -34,7 +34,7 @@ db.Select(`hex(sha256(body)) AS digest`)
 ## Notes
 
 - Many vtab extensions also expose a **typed Go handle** (`csv.Table`, `lines.Table`, `closure.Graph`, `bloom.Filter`, `spellfix1.Vocab`, `rtree.Table`) that hides the DDL — prefer it for new code.
-- `csv` / `lines` / `fileio` / `blobio` need an `fs.FS` sandbox at registration, which `/auto` can't carry — register via `RegisterFS(conn, fsys)` or a `Driver.RegisterConnectionHook`.
+- `csv` / `lines` / `fileio` need an `fs.FS` sandbox at registration, which `/auto` can't carry — register via `RegisterFS(conn, fsys)` or a `Driver.RegisterConnectionHook`. (`blobio` is not filesystem-bound: register it with plain `blobio.Register(conn)` — it does incremental BLOB I/O over columns.)
 - To write your OWN SQL function in Go instead, use `Conn.RegisterFunc` / `RegisterAggregator` / `RegisterWindowFunction` (no ext package needed).
 
 Full catalog + status: [`docs/extensions/index.md`](../../docs/extensions/index.md), [`dev/coverage/ext.md`](../../dev/coverage/ext.md).

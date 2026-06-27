@@ -5,7 +5,7 @@ These are [Agent Skills](https://docs.claude.com/en/docs/agents-and-tools/agent-
 | Skill | Load it when the task is… |
 |---|---|
 | [`using-gosqlite`](using-gosqlite/SKILL.md) | opening a database / picking a driver name / choosing a sub-package (start here) |
-| [`migrating`](migrating/SKILL.md) | switching from mattn / modernc / glebarez / gorm-sqlite / ncruces |
+| [`migrating`](migrating/SKILL.md) | switching from mattn / modernc / glebarez / gorm.io/driver/sqlite / ncruces |
 | [`vector-search`](vector-search/SKILL.md) | semantic / similarity / KNN search |
 | [`full-text-search`](full-text-search/SKILL.md) | keyword / FTS5 / BM25 search |
 | [`hybrid-search`](hybrid-search/SKILL.md) | combining vector + keyword results |

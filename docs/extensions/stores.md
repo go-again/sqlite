@@ -15,12 +15,12 @@ A probabilistic set-membership store. Add many items cheaply, then test membersh
 
 ```go
 import "gosqlite.org/ext/bloom"
-// typed handle: bloom.Filter (Create / Add / Contains / Drop)
+// typed bloom.Filter handle — see pkg.go.dev/gosqlite.org/ext/bloom
 ```
 
 ## Fuzzy vocabulary — `ext/spellfix1`
 
-A Go-native re-implementation of SQLite's `spellfix1`: Soundex prefilter + Damerau-Levenshtein edit-distance ranking, with a persistent vocabulary shadow table. Same SQL surface as upstream (`CREATE VIRTUAL TABLE x USING spellfix1`, `INSERT INTO x(word[, rank])`, `SELECT word, distance FROM x WHERE word MATCH ?`), plus a typed `spellfix1.Vocab` handle (`Create` / `Open` / `Add` / `Correct` / `Drop`).
+A Go-native re-implementation of SQLite's `spellfix1`: Soundex prefilter + Damerau-Levenshtein edit-distance ranking, with a persistent vocabulary shadow table. Same SQL surface as upstream (`CREATE VIRTUAL TABLE x USING spellfix1`, `INSERT INTO x(word[, rank])`, `SELECT word, distance FROM x WHERE word MATCH ?`), plus a typed `spellfix1.Vocab` handle (see [pkg.go.dev](https://pkg.go.dev/gosqlite.org/ext/spellfix1)).
 
 ```go
 db.Exec(`CREATE VIRTUAL TABLE dict USING spellfix1`)

@@ -1,6 +1,6 @@
 ---
 name: migrating
-description: Use when switching an existing Go project to gosqlite from mattn/go-sqlite3, modernc.org/sqlite, glebarez/sqlite, go-gorm/sqlite, or ncruces/go-sqlite3.
+description: Use when switching an existing Go project to gosqlite from mattn/go-sqlite3, modernc.org/sqlite, glebarez/sqlite, gorm.io/driver/sqlite, or ncruces/go-sqlite3.
 ---
 
 # Migrating to gosqlite
@@ -9,7 +9,7 @@ description: Use when switching an existing Go project to gosqlite from mattn/go
 |---|---|---|
 | `mattn/go-sqlite3` | swap the blank import to `_ "gosqlite.org"` | keep `"sqlite3"` |
 | `modernc.org/sqlite` | swap the blank import | keep `"sqlite"` |
-| `glebarez/sqlite` / `go-gorm/sqlite` | swap dialector import to `gosqlite.org/gorm` | n/a (gorm) |
+| `glebarez/sqlite` / `gorm.io/driver/sqlite` | swap dialector import to `gosqlite.org/gorm` | n/a (gorm) |
 | `ncruces/go-sqlite3` | partial — see below | `"sqlite3"` |
 
 ## mattn / modernc

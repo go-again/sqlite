@@ -1,7 +1,7 @@
 # Coverage: vec (sqlite-vec)
 
 Last reviewed against `sqlite-vec` as bundled by `modernc.org/sqlite/vec`
-(per the `go.mod` pin) on 2026-05-26. The bundled build is what
+(per the `go.mod` pin) on 2026-05-29. The bundled build is what
 `vec_version()` reports at runtime; `TestRaw_VecVersion` asserts it
 loads.
 

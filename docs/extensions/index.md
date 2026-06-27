@@ -24,7 +24,7 @@ import _ "gosqlite.org/ext/regexp/auto"
 Beyond that, extensions fall into three usage patterns:
 
 - **[Scalars, aggregates & collations](scalars.md)** — SQL functions you call from any `Where` / `Order` / `Select`. Blank-import `/auto` and go.
-- **[Virtual tables](virtual-tables.md)** — data exposed through `CREATE VIRTUAL TABLE … USING module(…)`, some accepting Go data via `sqlite.Pointer`. Includes the `fs.FS`-sandboxed readers (csv, lines, fileio, blobio).
+- **[Virtual tables](virtual-tables.md)** — data exposed through `CREATE VIRTUAL TABLE … USING module(…)`, some accepting Go data via `sqlite.Pointer`. Includes the `fs.FS`-sandboxed readers (csv, lines, fileio).
 - **[Stores](stores.md)** — persistent specialised stores (Bloom filter, spellfix1 fuzzy vocabulary) that survive `db.Close`.
 
 Several vtab extensions also expose a **typed Go handle** (`csv.Table`, `lines.Table`, `closure.Graph`, `bloom.Filter`, `spellfix1.Vocab`, `rtree.Table`) mirroring `vec.Table` / `fts.Index`, so you can skip the DDL and query SQL. Runnable demos: [`examples/features/extensions/`](../../examples/features/extensions/).

@@ -41,7 +41,7 @@ import "gosqlite.org/vfs"
 var seed embed.FS
 
 name, _, _ := vfs.New(seed)
-db, _ := sql.Open("sqlite3", "file:seed.db?vfs="+name+"&mode=ro")
+db, _ := sql.Open("sqlite", "file:seed.db?vfs="+name+"&mode=ro")
 ```
 
 `vfs.New(fs.FS)` exposes any read-only `io/fs.FS` (embed.FS, fstest.MapFS, zip-fs) as a VFS. Runnable: [`examples/features/vfs/embed/`](../../examples/features/vfs/embed/main.go).

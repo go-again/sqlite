@@ -23,7 +23,7 @@ mem, _ := sqlite.OpenInMemory()          // private in-memory
 shared, _ := sqlite.OpenShared("name")   // shared in-memory (multi-conn tests)
 ro, _ := sqlite.OpenReadOnly("seed.db")  // refuses to create/write
 
-// 3. Typed Config — pragmas, encryption, pool tuning in one value.
+// 3. Typed Config — pragmas and pool tuning in one value (encryption is via the crypto/vault VFS).
 db, _ := sqlite.Open(sqlite.Config{
 	Path:    "app.db",
 	Pragmas: sqlite.RecommendedPragmas(),

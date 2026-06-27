@@ -5,7 +5,7 @@ If you're new here, start at the top and work down. These use the modern `"sqlit
 | example | what it shows |
 |---|---|
 | [`database-sql`](database-sql/) | the idiomatic foundation — plain `database/sql`: open, parameterized writes, `rows.Next/Scan`, transactions. Raw SQL here is the standard-library way, not "old". |
-| [`config`](config/) | `sqlite.Open(sqlite.Config{…})` — structured setup (pragmas, encryption, pool tuning) as one Go value, with no DSN-string assembly. Plain and encrypted variants. |
+| [`config`](config/) | `sqlite.Open(sqlite.Config{…})` — structured setup (pragmas, pool tuning) as one Go value, with no DSN-string assembly. The same `Config` shape opens an encrypted database through the `vfs/crypto` module's `crypto.Open` — see that example. |
 
 For gorm, the dialector is the separate `gosqlite.org/gorm` module — see its examples under `gorm/examples/`.
 

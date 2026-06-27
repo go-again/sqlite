@@ -1,7 +1,7 @@
 # Coverage: fts (SQLite FTS5)
 
 Last reviewed against SQLite FTS5 (via the modernc/sqlite pin in
-`go.mod`) on 2026-05-26.
+`go.mod`) on 2026-05-29.
 
 Underlying FTS5 docs: https://www.sqlite.org/fts5.html
 

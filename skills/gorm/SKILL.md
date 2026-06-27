@@ -1,16 +1,16 @@
 ---
 name: gorm
-description: Use when using gorm.io/gorm with gosqlite — the gosqlite.org/gorm dialector, a CGo-free drop-in for glebarez/go-gorm-sqlite, shipped as its own module.
+description: Use when using gorm.io/gorm with gosqlite — the gosqlite.org/gorm dialector, a CGo-free drop-in for glebarez/sqlite and gorm.io/driver/sqlite, shipped as its own module.
 ---
 
 # gorm with gosqlite
 
-`gosqlite.org/gorm` is a `gorm.Dialector` — a drop-in for `glebarez/sqlite` and `go-gorm/sqlite`. It is its **own module** (`go get gosqlite.org/gorm`); the gosqlite core does not depend on gorm.
+`gosqlite.org/gorm` is a `gorm.Dialector` — a drop-in for `glebarez/sqlite` and `gorm.io/driver/sqlite`. It is its **own module** (`go get gosqlite.org/gorm`); the gosqlite core does not depend on gorm.
 
 ```go
 import (
 	"gorm.io/gorm"
-	sqlite "gosqlite.org/gorm" // package is `sqlite` — drop-in for glebarez/go-gorm
+	sqlite "gosqlite.org/gorm" // package is `sqlite` — drop-in for glebarez/sqlite + gorm.io/driver/sqlite
 )
 
 db, _ := gorm.Open(sqlite.Open("file:my.db?_pragma=foreign_keys(1)"), &gorm.Config{})

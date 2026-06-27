@@ -12,7 +12,7 @@ This file is canonical; `CLAUDE.md` is a pointer to it. Deep C-ABI internals liv
 
 - `github.com/mattn/go-sqlite3` — the C-bound driver; we register as `"sqlite3"`.
 - `modernc.org/sqlite` — the upstream CGo-free driver this fork builds on; we register as `"sqlite"`.
-- `github.com/glebarez/sqlite` and `github.com/go-gorm/sqlite` — gorm dialectors; ours is the `gorm/` sub-package.
+- `github.com/glebarez/sqlite` and `gorm.io/driver/sqlite` — gorm dialectors; ours is the `gorm/` sub-package.
 
 Plus first-class typed Go APIs for **sqlite-vec** vector search and **FTS5** full-text search, encryption-at-rest, a user-implementable VFS, a bounded page cache, and a catalog of loadable Go SQL extensions.
 
@@ -75,7 +75,7 @@ doc.go                  package doc (pkg.go.dev landing)
 - `internal/` — `cabi/` (the C-ABI primitives), `sqlid/` (SQL-identifier toolkit), `obs/` (slog level-dispatch), `raceskip/`, `testhelp/`.
 - `ext/` — loadable Go extensions, one sub-package per ext, each with an `auto/` blank-import. Inventory + status: [`dev/coverage/ext.md`](dev/coverage/ext.md). `ext/internal/filevtab/` holds the file-vtab scaffolding shared by `ext/csv` + `ext/lines`.
 - `tests/sql/` — SQL conformance suite, organized by SQLite Language Reference category.
-- `examples/` — runnable examples grouped by reader intent: `migrating/`, `getting-started/`, `features/{search,vfs,extensions,advanced}/`. `examples/README.md` is the router. Smoke-tested by `just examples`; run one with `just example <leaf-or-subpath>`. (gorm examples live in the `gorm/` module under `gorm/examples/`.)
+- `examples/` — runnable examples grouped by reader intent: `migrating/`, `getting-started/`, `features/{search,vfs,extensions,advanced}/`, plus standalone cross-module demos (`liteorm/`, `encrypted-blobstore/`, `vault-blobstore/`). `examples/README.md` is the router. Smoke-tested by `just examples`; run one with `just example <leaf-or-subpath>`. (gorm examples live in the `gorm/` module under `gorm/examples/`.)
 
 Dot-prefixed top-level dirs (e.g. `.plans/`) are local-only working state, gitignored; nothing in the module references them by name.
 

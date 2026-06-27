@@ -16,7 +16,7 @@ The [README](../README.md) is the high-level landing page. These docs are the de
 ## Start here
 
 - **[Getting started](getting-started.md)** — install, your first query, and choosing a driver name.
-- **[Migrating](guides/migrating.md)** — drop-in recipes from mattn / modernc / glebarez / gorm-sqlite / ncruces.
+- **[Migrating](guides/migrating.md)** — drop-in recipes from mattn / modernc / glebarez / gorm.io/driver/sqlite / ncruces.
 - **[Configuration](guides/configuration.md)** — `sqlite.Config`, typed pragmas, open shortcuts.
 
 ## Guides

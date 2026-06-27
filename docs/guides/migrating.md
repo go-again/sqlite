@@ -1,6 +1,6 @@
 ---
 title: Migrating
-description: Drop-in recipes from mattn/go-sqlite3, modernc.org/sqlite, glebarez/sqlite, go-gorm/sqlite, and ncruces/go-sqlite3.
+description: Drop-in recipes from mattn/go-sqlite3, modernc.org/sqlite, glebarez/sqlite, gorm.io/driver/sqlite, and ncruces/go-sqlite3.
 sidebar:
   order: 3
 ---
@@ -12,7 +12,7 @@ sidebar:
 | `_ "github.com/mattn/go-sqlite3"` | `_ "gosqlite.org"` | `sql.Open("sqlite3", ...)` keeps working. |
 | `_ "modernc.org/sqlite"` | `_ "gosqlite.org"` | `sql.Open("sqlite", ...)` keeps working. |
 | `"github.com/glebarez/sqlite"` | `"gosqlite.org/gorm"` | `sqlite.Open(dsn)` keeps working. |
-| `"github.com/go-gorm/sqlite"` | `"gosqlite.org/gorm"` | `sqlite.New(sqlite.Config{...})` keeps working. |
+| `"gorm.io/driver/sqlite"` | `"gosqlite.org/gorm"` | `sqlite.New(sqlite.Config{...})` keeps working. |
 
 Runnable migration examples live under [`examples/migrating/`](../../examples/migrating/).
 
@@ -38,7 +38,7 @@ Swap the import; same `"sqlite"` driver name and DSN — nothing else changes.
 
 See [`examples/migrating/from-modernc/`](../../examples/migrating/from-modernc/main.go).
 
-## From glebarez/sqlite or go-gorm/sqlite (gorm dialectors)
+## From glebarez/sqlite or gorm.io/driver/sqlite (gorm dialectors)
 
 Swap the dialector import; the `sqlite.Open(dsn)` / `sqlite.New(Config{...})` signatures are identical, and `TranslateError` behaves the same.
 

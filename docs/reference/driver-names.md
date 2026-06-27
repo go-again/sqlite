@@ -23,7 +23,7 @@ sql.Register("sqlite3", drv) // mattn-compatible
 
 Both major Go ORMs use these driver names directly — no ORM-specific glue:
 
-- **gorm** — the [`gosqlite.org/gorm`](../guides/gorm.md) dialector (a separate module; a drop-in for `glebarez/sqlite` and `go-gorm/sqlite`).
+- **gorm** — the [`gosqlite.org/gorm`](../guides/gorm.md) dialector (a separate module; a drop-in for `glebarez/sqlite` and `gorm.io/driver/sqlite`).
 - **xorm** — `xorm.io/xorm` maps `"sqlite3"`, `"sqlite"`, and `"libsql"` to its SQLite dialect, so `xorm.NewEngine("sqlite3", dsn)` (or `"sqlite"`) drives it with this CGo-free driver, with no xorm-specific code. Compatibility is CI-enforced; see [Migrating → With xorm](../guides/migrating.md#with-xorm).
 
 ## Coexistence with mattn

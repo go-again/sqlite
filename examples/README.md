@@ -43,7 +43,7 @@ just examples                        # build + run all of them (smoke test)
 | | looks like | when |
 |---|---|---|
 | raw | `rows, _ := db.Query(...); for rows.Next() { rows.Scan(...) }` | full control; the base every example builds on |
-| high-level | `vec.Table` / `fts.Index` typed handles, or gorm / LiteORM models | vector / FTS5 search and ORM ergonomics without hand-written DDL |
+| high-level | `vec.Table` / `fts.Index` typed handles, or LiteORM / gorm models | vector / FTS5 search and ORM ergonomics without hand-written DDL |
 
 An example can be modern on one dial and raw on the other — that's normal. A `hooks` or `session` example uses raw SQL because the *feature* is connection-level; that raw SQL is the right tool, not legacy. The only genuinely "legacy" markers are the `sqlite3` driver alias and the `_`-prefixed DSN flags, and those appear **only** under [`migrating/`](migrating/), where they're the point.
 
@@ -56,7 +56,7 @@ An example can be modern on one dial and raw on the other — that's normal. A `
 | glebarez/sqlite | n/a (gorm) | `gorm.Open(sqlite.Open(dsn), …)` with `sqlite "gosqlite.org/gorm"` |
 | gorm.io/driver/sqlite | n/a (gorm) | same as glebarez — our dialector is a drop-in for both |
 
-When you're ready to modernize, move connection setup from a DSN string to [`sqlite.Config`](../config.go) (see [`getting-started/config`](getting-started/config/)), and reach for the typed [`vec`](../vec/) / [`fts`](../fts/) handles or [gorm](../gorm/) where they save you hand-written SQL. You gain typed pragmas, pool knobs in one value, and typed search — without giving up `database/sql`.
+When you're ready to modernize, move connection setup from a DSN string to [`sqlite.Config`](../config.go) (see [`getting-started/config`](getting-started/config/)), and reach for the typed [`vec`](../vec/) / [`fts`](../fts/) handles or an ORM — [LiteORM](https://liteorm.org) (built on this driver) or the [gorm](../gorm/) dialector — where they save you hand-written SQL. You gain typed pragmas, pool knobs in one value, and typed search — without giving up `database/sql`.
 
 ## Folders
 

@@ -1,13 +1,13 @@
 ---
 title: gorm integration
-description: The gosqlite.org/gorm dialector — a CGo-free drop-in for glebarez and go-gorm/sqlite, shipped as its own module.
+description: The gosqlite.org/gorm dialector — a CGo-free drop-in for glebarez/sqlite and gorm.io/driver/sqlite, shipped as its own module.
 sidebar:
   order: 4
 ---
 
 # gorm
 
-`gosqlite.org/gorm` is a `gorm.Dialector` — a drop-in for both `glebarez/sqlite` and the official `go-gorm/sqlite`. It ships as its **own module**, so the gosqlite core stays free of `gorm.io/gorm`; add it with `go get gosqlite.org/gorm`.
+`gosqlite.org/gorm` is a `gorm.Dialector` — a drop-in for both `glebarez/sqlite` and the official `gorm.io/driver/sqlite`. It ships as its **own module**, so the gosqlite core stays free of `gorm.io/gorm`; add it with `go get gosqlite.org/gorm`.
 
 ```go
 import (
