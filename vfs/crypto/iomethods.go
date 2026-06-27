@@ -317,6 +317,11 @@ func writeEncrypted(tls *libc.TLS, pFile, buf uintptr, amt int32, off sqlite3.Ts
 // stable. Aux files are recreated each session (and crash-recovered by the same
 // build), so the unit is a code constant, never stored — no format compatibility
 // concern.
+//
+// Intentionally mirrored by vfs/vault's auxCryptUnit (vfs.go): the two VFSes are
+// independent (vault never reads a file crypto wrote, so the value need not match for
+// correctness), but they implement the same small-unit + sparse-hole-skip scheme, so
+// keep the unit and the skip semantics in lockstep when changing one.
 const auxCryptUnit = 512
 
 // cryptUnitFor returns the cipher alignment unit for a file kind: the page size for

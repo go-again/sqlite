@@ -41,8 +41,13 @@
 //     compatibility, no integrity tag. An attacker with passive read
 //     access to disk recovers nothing without the key.
 //   - No integrity / no tamper detection. A write-capable attacker can
-//     flip ciphertext bytes; SQLite sees corruption (page checksum
-//     failure, header parse error). Pair with disk-level integrity
+//     flip ciphertext bytes; SQLite usually sees corruption (page
+//     checksum failure, header parse error). The one tamper that is NOT
+//     surfaced as garbage is ZEROING a unit: an all-zero on-disk unit is
+//     read back as zeros (it is treated as a never-written sparse hole,
+//     so the cipher is skipped), which for the main database is often a
+//     valid blank/free page rather than visible corruption. Either way
+//     nothing here authenticates the data. Pair with disk-level integrity
 //     (LUKS dm-integrity, ZFS checksums) if active tampering is in scope.
 //     Note that composing with `vfs/cksm` does NOT close this gap —
 //     cksm's Fletcher trailer detects bit-rot / cosmic-ray flips, not
