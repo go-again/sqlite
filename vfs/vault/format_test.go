@@ -341,7 +341,7 @@ func TestValidateDirectoryRejectsHostileEntries(t *testing.T) {
 		{}, // sparse
 		{physOffset: 2 * defaultBlockSize, storedLen: defaultBlockSize, blocks: 1, checksum: 1},
 	}
-	if err := validateDirectory(good, nil, sb, fileSize); err != nil {
+	if err := validateDirectory(good, nil, sb, fileSize, 0); err != nil {
 		t.Fatalf("valid directory rejected: %v", err)
 	}
 	for _, tc := range []struct {
@@ -356,7 +356,7 @@ func TestValidateDirectoryRejectsHostileEntries(t *testing.T) {
 		{"overflowing slot extent", dirEntry{physOffset: 0xFFFFFFFFFFFFF000, storedLen: defaultBlockSize, blocks: 1}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := validateDirectory([]dirEntry{tc.entry}, nil, sb, fileSize); err == nil {
+			if err := validateDirectory([]dirEntry{tc.entry}, nil, sb, fileSize, 0); err == nil {
 				t.Fatalf("validateDirectory accepted a hostile entry (%s)", tc.name)
 			}
 		})
@@ -382,34 +382,44 @@ func TestValidateDirectoryRejectsOverlap(t *testing.T) {
 		{physOffset: 4 * bs, storedLen: defaultBlockSize, blocks: 1, checksum: 1},
 		{physOffset: 5 * bs, storedLen: 2 * defaultBlockSize, blocks: 2, checksum: 1},
 	}
-	if err := validateDirectory(good, nil, okSB, fileSize); err != nil {
+	if err := validateDirectory(good, nil, okSB, fileSize, 1); err != nil {
 		t.Fatalf("disjoint directory rejected: %v", err)
 	}
 
 	plain := func() *superblock {
 		return &superblock{blockSize: defaultBlockSize, pageSize: defaultPageSize}
 	}
+	keyslotAt := func(block uint64) *superblock {
+		return &superblock{blockSize: defaultBlockSize, pageSize: defaultPageSize, keyslotOffset: block * bs}
+	}
 	for _, tc := range []struct {
 		name string
 		sb   *superblock
 		dir  []dirEntry
+		ks   uint32 // keyslot block count (0 when no keyslot)
 	}{
 		{"two slots overlap", plain(), []dirEntry{
 			{physOffset: 2 * bs, storedLen: 2 * defaultBlockSize, blocks: 2}, // [2,4)
 			{physOffset: 3 * bs, storedLen: defaultBlockSize, blocks: 1},     // [3,4) overlaps
-		}},
+		}, 0},
 		{"slot in the superblock region", plain(), []dirEntry{
 			{physOffset: bs, storedLen: defaultBlockSize, blocks: 1}, // block 1 is reserved
-		}},
+		}, 0},
 		{"slot overlaps the directory", &superblock{blockSize: defaultBlockSize, pageSize: defaultPageSize, dirOffset: 2 * bs, dirBlocks: 1}, []dirEntry{
 			{physOffset: 2 * bs, storedLen: defaultBlockSize, blocks: 1}, // block 2 == directory
-		}},
-		{"slot overlaps the keyslot", &superblock{blockSize: defaultBlockSize, pageSize: defaultPageSize, keyslotOffset: 4 * bs}, []dirEntry{
-			{physOffset: 4 * bs, storedLen: defaultBlockSize, blocks: 1}, // block 4 == keyslot
-		}},
+		}, 0},
+		{"slot overlaps the keyslot first block", keyslotAt(4), []dirEntry{
+			{physOffset: 4 * bs, storedLen: defaultBlockSize, blocks: 1}, // block 4 == keyslot block 0
+		}, 1},
+		// The multi-block-keyslot guard: a 3-block keyslot at [4,7) and a slot at block
+		// 6 (its TAIL, not the first block). Caught only because the full block count is
+		// threaded in — with the old "+1" pin this aliased a live slot undetected.
+		{"slot overlaps a multi-block keyslot tail", keyslotAt(4), []dirEntry{
+			{physOffset: 6 * bs, storedLen: defaultBlockSize, blocks: 1}, // block 6 ∈ [4,7)
+		}, 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := validateDirectory(tc.dir, nil, tc.sb, fileSize); err == nil {
+			if err := validateDirectory(tc.dir, nil, tc.sb, fileSize, tc.ks); err == nil {
 				t.Fatalf("validateDirectory accepted overlapping extents (%s)", tc.name)
 			}
 		})

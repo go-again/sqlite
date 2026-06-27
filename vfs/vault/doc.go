@@ -185,9 +185,18 @@
 // keyed by a key derived from the data key, so any holder of the data key can both
 // write and verify. It protects against an attacker WITHOUT the key — modification
 // or a partial/inconsistent rollback is detected and rejected with [ErrTampered] —
-// and needs no extra keys (it requires only encryption, Key or Recipients). A holder
-// cannot strip it: the authenticated flag lives in the signed state, so downgrading a
-// non-authenticated container to authenticated, or vice versa, is rejected.
+// and needs no extra keys (it requires only encryption, Key or Recipients).
+//
+// Reopen with [Options.Authenticate] set so the open REQUIRES authentication: it
+// then rejects a container whose flag is clear with [ErrUnauthorized]. This matters
+// because the on-disk flag itself is not self-protecting in raw-key symmetric mode —
+// it sits in the CRC-checked but unkeyed superblock, so a keyless attacker can clear
+// it and re-seal the CRC, and a bare Open with only the Key, finding the flag clear,
+// would skip verification entirely. Passing Authenticate makes the requirement
+// explicit and is the secure way to reopen an authenticated database. Recipients with
+// [Options.Masters] and writer mode ARE self-protecting without re-asserting it: the
+// writer set comes from the master-signed keyslot, so clearing the flag there is
+// rejected on open regardless (see [Options.Writers]).
 //
 // It is tamper-evident; rollback resistance is OPTIONAL. The signed root binds the
 // commit generation, so an attacker cannot renumber a state — but a complete, self-

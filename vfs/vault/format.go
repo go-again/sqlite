@@ -289,7 +289,7 @@ func (s *superblock) validate(fileSize int64) error {
 // or fall outside the file — the per-page counterpart to [superblock.validate],
 // so a crafted entry cannot drive a huge per-page allocation or an out-of-bounds
 // read. It assumes sb already passed validate (blockSize/pageSize sane).
-func validateDirectory(dir []dirEntry, segs []segDesc, sb *superblock, fileSize int64) error {
+func validateDirectory(dir []dirEntry, segs []segDesc, sb *superblock, fileSize int64, keyslotBlocks uint32) error {
 	bs := uint64(sb.blockSize)
 	fsz := uint64(fileSize)
 	for i, e := range dir {
@@ -328,7 +328,11 @@ func validateDirectory(dir []dirEntry, segs []segDesc, sb *superblock, fileSize 
 	}
 	if sb.keyslotOffset != 0 {
 		s := sb.keyslotOffset / bs
-		runs = append(runs, blockRun{s, s + 1}) // pins at least the first keyslot block (see superblock.validate)
+		n := uint64(keyslotBlocks) // the FULL keyslot extent (a large recipient set spans many blocks)
+		if n == 0 {
+			n = 1 // defensive: pin at least the first block if the count is unknown
+		}
+		runs = append(runs, blockRun{s, s + n})
 	}
 	for i, d := range segs { // each directory-segment extent (bounds, then overlap)
 		if d.physOffset == 0 {

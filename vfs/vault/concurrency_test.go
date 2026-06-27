@@ -134,3 +134,99 @@ func TestLiveConcurrentWritersSerialize(t *testing.T) {
 		t.Fatalf("integrity_check = (%q, %v), want ok", ic, err)
 	}
 }
+
+// TestReclaimConcurrentWithWrites drives the online reclaim ops (CompactOnline /
+// Trim / ReclaimableBytes) in a loop while two goroutines churn the database, under
+// -race: the ops pin the container through the registry and release the write lock
+// between batches, so this exercises the pin/lock interplay against live writes. The
+// database must stay consistent.
+func TestReclaimConcurrentWithWrites(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reclaim-writes.dbz")
+	db, err := Open(sqlite.Config{
+		Path:         path,
+		MaxOpenConns: 4,
+		Pragmas:      sqlite.Pragmas{JournalMode: sqlite.JournalWAL, BusyTimeout: 30 * time.Second},
+	}, Options{PageSize: 8192})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE t (k INTEGER PRIMARY KEY, v BLOB)`); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	blob := make([]byte, 2048)
+	for i := range 300 {
+		if _, err := db.Exec(`INSERT INTO t VALUES (?, ?)`, i, blob); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	for w := range 2 {
+		base := 1000 + w*1_000_000
+		wg.Go(func() {
+			for i := base; ; i++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if _, err := db.Exec(`INSERT INTO t VALUES (?, ?)`, i, blob); err != nil {
+					return // a busy/closed error is fine; the reclaimer drives termination
+				}
+				_, _ = db.Exec(`DELETE FROM t WHERE k = ?`, i-3) // churn → freed pages
+			}
+		})
+	}
+	// The reclaimer runs a bounded number of passes, then stops the writers.
+	wg.Go(func() {
+		defer close(stop)
+		for range 60 {
+			_, _ = CompactOnline(path, 0, nil)
+			_, _ = Trim(path, 0)
+			_, _ = ReclaimableBytes(path)
+		}
+	})
+	wg.Wait()
+
+	var ic string
+	if err := db.QueryRow(`PRAGMA integrity_check`).Scan(&ic); err != nil || ic != "ok" {
+		t.Fatalf("integrity_check = (%q, %v), want ok", ic, err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+}
+
+// TestReclaimRacesClose runs reclaim ops on a loop while the database is Closed out
+// from under them, under -race. The registry refcount must keep a pinned container
+// alive for the in-flight op; once Closed, later calls return a "no open database"
+// error rather than panicking or racing the backing teardown.
+func TestReclaimRacesClose(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reclaim-close.dbz")
+	db, err := Open(sqlite.Config{Path: path, MaxOpenConns: 2}, Options{})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE t (k INTEGER PRIMARY KEY, v BLOB)`); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	blob := make([]byte, 2048)
+	for i := range 200 {
+		if _, err := db.Exec(`INSERT INTO t VALUES (?, ?)`, i, blob); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for range 300 {
+			_, _ = CompactOnline(path, 0, nil) // after Close: returns an error, never panics
+			_, _ = ReclaimableBytes(path)
+		}
+	})
+	if err := db.Close(); err != nil { // races the reclaim loop above
+		t.Fatalf("close: %v", err)
+	}
+	wg.Wait()
+}

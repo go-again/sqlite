@@ -140,7 +140,13 @@ type Options struct {
 	// needs a monotonic anchor outside the file; use [Rekey] for durable revocation.
 	// For read-only recipients (where a holder of the read key must not be able to
 	// forge a write), use Writers instead, which authenticates with a writer
-	// signature. Set at create only.
+	// signature.
+	//
+	// Set it at create to enable, AND set it again on every reopen to REQUIRE
+	// verification: a reopen with only the Key cannot detect a stripped-flag
+	// downgrade in raw-key symmetric mode (the flag is in the unkeyed superblock), so
+	// pass Authenticate to reject a cleared flag with [ErrUnauthorized]. Recipients
+	// with Masters, and Writers mode, are self-protecting and need no re-assertion.
 	Authenticate bool
 
 	// Anchor upgrades authenticated mode from tamper-evident to rollback-RESISTANT

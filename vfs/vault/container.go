@@ -765,6 +765,14 @@ func (c *container) writeDirectory() (off uint64, blocks, checksum uint32, hash 
 	if err != nil {
 		return 0, 0, 0, hash, nil, err
 	}
+	// c.segIndex advances to the new extents here, before commit's durable superblock
+	// flip. The COW invariant still holds — no block is freed in place; the superseded
+	// extents are released only after the flip (see commit). The one consequence: if
+	// commit then fails (a Sync/WriteAt error) and is retried on the SAME live
+	// container, the extents this attempt would have released are no longer reachable
+	// and leak for the session. That is benign — never a double-free or corruption —
+	// and rebuildAllocator reclaims them on the next reopen (it counts only what the
+	// committed superblock references).
 	c.segIndex = newSegs
 	return off, blocks, checksum, hash, released, nil
 }
