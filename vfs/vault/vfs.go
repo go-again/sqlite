@@ -60,6 +60,7 @@ type VFS struct {
 	// cipherMu.
 	cipherMu         sync.Mutex
 	cipher           crypto.PageCipher
+	mainReadOnly     bool // resolved read-only state of the main-DB open (guarded by cipherMu)
 	preserveNewFiles bool
 	preserve         *preservedKey
 }
@@ -101,6 +102,10 @@ func (v *VFS) Open(name string, flags vfs.OpenFlags) (vfs.File, vfs.OpenFlags, e
 		// the first encrypted recipients open's key material for the VACUUM INTO target.
 		v.cipherMu.Lock()
 		v.cipher = f.c.cipher
+		// Record the resolved read-only state (SQLite has already folded mode=ro,
+		// immutable=1, and a path-encoded mode into OpenReadOnly) so openThroughVault
+		// can skip the header-writing setup pragmas on a read-only open.
+		v.mainReadOnly = flags.Has(vfs.OpenReadOnly)
 		if v.preserveNewFiles && v.preserve == nil && f.c.cipher != nil && f.c.keyslotOffset != 0 {
 			v.preserve = &preservedKey{
 				dek: f.c.dek, keyslot: f.c.keyslotBlob, enc: f.c.enc,
@@ -542,7 +547,7 @@ func newContainerOver(back backing, readOnly bool, cfgBlockSize, cfgPageSize, cf
 			}
 			copy(dir[lo:hi], segDir)
 		}
-		if err := validateDirectory(dir, segIndex, sb, size); err != nil {
+		if err := validateDirectory(dir, segIndex, sb, size, keyslotBlocks); err != nil {
 			_ = back.Close()
 			return nil, err
 		}
@@ -592,6 +597,9 @@ func (f fileBacking) Truncate(size int64) error { return f.File.Truncate(size) }
 // Adiantum's design sector size, so the wide-block guarantee is unweakened. The
 // unit is a code constant, never stored: aux files are recreated each session (and
 // crash-recovered by the same build), so there is no on-disk compatibility concern.
+//
+// Mirrors vfs/crypto's auxCryptUnit (same small-unit + sparse-hole-skip scheme on an
+// independent VFS); keep the unit and the cryptPages/allZero skip semantics in sync.
 const auxCryptUnit int64 = 512
 
 // passFile is a thin *os.File wrapper for journals and temp files: no
@@ -853,17 +861,28 @@ func openThroughVault(cfg sqlite.Config, opts Options, preserveNewFiles bool) (*
 		_ = v.Close()
 		return nil, err
 	}
-	// page_size is pending; set the header-writing pragmas in order — auto_vacuum
-	// before the journal, both before the database gets any content.
-	setup := make([]string, 0, 2)
-	if autoVacuum != "" {
-		setup = append(setup, "PRAGMA auto_vacuum = "+string(autoVacuum))
-	}
-	setup = append(setup, "PRAGMA journal_mode = "+string(journal))
-	for _, p := range setup {
-		if _, err := db.Exec(p); err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("vault: %s: %w", p, err)
+	// Skip the header-writing setup pragmas on a read-only open: both auto_vacuum and
+	// journal_mode write the database header, which a read-only connection cannot do
+	// (it fails with SQLITE_READONLY — the symptom a previously-mounted encrypted image,
+	// left at-rest in WAL, would hit on the next `ls`/`cat`/`stat`). A read-only reader
+	// neither can nor needs to change them: SQLite reads whatever mode the file is in.
+	// PingContext in sqlite.Open already opened the main DB, so mainReadOnly is set.
+	v.cipherMu.Lock()
+	readOnly := v.mainReadOnly
+	v.cipherMu.Unlock()
+	if !readOnly {
+		// page_size is pending; set the header-writing pragmas in order — auto_vacuum
+		// before the journal, both before the database gets any content.
+		setup := make([]string, 0, 2)
+		if autoVacuum != "" {
+			setup = append(setup, "PRAGMA auto_vacuum = "+string(autoVacuum))
+		}
+		setup = append(setup, "PRAGMA journal_mode = "+string(journal))
+		for _, p := range setup {
+			if _, err := db.Exec(p); err != nil {
+				_ = db.Close()
+				return nil, fmt.Errorf("vault: %s: %w", p, err)
+			}
 		}
 	}
 	return db, nil
