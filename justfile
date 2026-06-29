@@ -439,3 +439,32 @@ release VERSION:
         echo "      git tag -d ${tags[*]}"
         [ "$committed" -eq 1 ] && echo "      git reset --hard HEAD~1"
     fi
+
+# Pin every examples/* module's intra-repo gosqlite.org requires that are REPLACED
+# to a local tree up to VERSION, so the require line reads the release version (the
+# build still resolves through the replace). Example modules are not gosqlite.org/*,
+# so `just release` never touches them; run this AFTER it. A gosqlite require that is
+# NOT replaced locally is left alone — it resolves from a published tag and is pinned
+# by its own module (e.g. a sibling project's dialect), not the example. go.sum is
+# unchanged: replaced modules are not checksummed.
+pin-examples VERSION:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    v='{{VERSION}}'
+    [[ "$v" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "✗ VERSION must look like v1.2.3 (got '$v')" >&2; exit 1; }
+    for gomod in $(find examples -name go.mod | sort); do
+        d=$(dirname "$gomod")
+        reqs=$(grep -oE 'gosqlite\.org(/[A-Za-z0-9._/-]+)? v[0-9]' "$gomod" | awk '{print $1}' | sort -u || true)
+        repl=$(grep -oE '^replace gosqlite\.org(/[A-Za-z0-9._/-]+)? ' "$gomod" | awk '{print $2}' | sort -u || true)
+        both=$(comm -12 <(echo "$reqs") <(echo "$repl") | sed '/^$/d')
+        echo "→ $d"
+        if [ -n "$both" ]; then
+            for p in $both; do (cd "$d" && go mod edit -require="$p@$v"); echo "    pinned $p → $v"; done
+        else
+            echo "    (no locally-replaced gosqlite requires to pin)"
+        fi
+        left=$(comm -23 <(echo "$reqs") <(echo "$repl") | sed '/^$/d')
+        [ -n "$left" ] && echo "$left" | sed 's/^/    left as-is (not replaced locally): /'
+        # build into a throwaway dir so a single-main example does not drop a binary
+        (cd "$d" && tmp=$(mktemp -d) && trap 'rm -rf "$tmp"' EXIT && go build -o "$tmp/" ./...) && echo "    ✓ builds"
+    done

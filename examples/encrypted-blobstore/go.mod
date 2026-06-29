@@ -9,9 +9,9 @@ replace gosqlite.org/blobstore => ../../blobstore
 replace gosqlite.org/vfs/crypto => ../../vfs/crypto
 
 require (
-	gosqlite.org v0.11.0
-	gosqlite.org/blobstore v0.0.0-00010101000000-000000000000
-	gosqlite.org/vfs/crypto v0.0.0-00010101000000-000000000000
+	gosqlite.org v0.12.0
+	gosqlite.org/blobstore v0.12.0
+	gosqlite.org/vfs/crypto v0.12.0
 )
 
 require (

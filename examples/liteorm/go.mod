@@ -3,7 +3,7 @@ module liteormexample
 go 1.25.0
 
 require (
-	gosqlite.org v0.10.0
+	gosqlite.org v0.12.0
 	liteorm.org v0.12.0
 	liteorm.org/dialect/sqlite v0.0.0
 )
@@ -18,7 +18,7 @@ require (
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	gosqlite.org/vfs/compress v0.10.0 // indirect
-	gosqlite.org/vfs/crypto v0.10.0 // indirect
+	gosqlite.org/vfs/crypto v0.12.0 // indirect
 	lukechampine.com/adiantum v1.1.1 // indirect
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
@@ -34,3 +34,10 @@ replace gosqlite.org => ../..
 replace liteorm.org => ../../.liteorm
 
 replace liteorm.org/dialect/sqlite => ../../.liteorm/dialect/sqlite
+
+// vfs/crypto resolves to the local tree like the core. gosqlite.org/vfs/compress is
+// no longer part of gosqlite (its compression folded into vfs/vault); it survives in
+// the require block above only as a transitive dependency of the liteorm dialect,
+// pinned to its last published tag. It drops out once the liteorm dialect migrates
+// off vfs/compress.
+replace gosqlite.org/vfs/crypto => ../../vfs/crypto
