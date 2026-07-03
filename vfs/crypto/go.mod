@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	golang.org/x/crypto v0.53.0
-	gosqlite.org v0.12.0
+	gosqlite.org v0.13.0
 	lukechampine.com/adiantum v1.1.1
 	modernc.org/libc v1.73.4
 	modernc.org/sqlite v1.53.0
