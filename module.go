@@ -148,19 +148,31 @@ type vtabCtorModule struct {
 	connectCtor VTabCtor // called by xConnect (reopen of an existing vtab)
 }
 
+// Create / Connect satisfy vtab.Module. They exist so a *vtabCtorModule is a
+// valid module, but the vtab trampolines never route through them: because a
+// module is registered on every pooled connection under one name, the global
+// module record points at whichever connection registered last, so m.conn is
+// generally NOT the connection SQLite is driving the xCreate/xConnect on. The
+// trampolines resolve the executing connection from the db handle and call
+// [vtabCtorModule.invoke] directly (see vtab.go). These fallbacks use m.conn
+// only if some future generic path invokes the interface.
 func (m *vtabCtorModule) Create(_ vtab.Context, args []string) (vtab.Table, error) {
-	return m.invoke(m.createCtor, args)
+	return m.invoke(m.conn, m.createCtor, args)
 }
 
 func (m *vtabCtorModule) Connect(_ vtab.Context, args []string) (vtab.Table, error) {
-	return m.invoke(m.connectCtor, args)
+	return m.invoke(m.conn, m.connectCtor, args)
 }
 
-func (m *vtabCtorModule) invoke(ctor VTabCtor, args []string) (vtab.Table, error) {
+// invoke runs a [VTabCtor] against the connection c that is executing the
+// current xCreate/xConnect — the ctor calls c.DeclareVTab, which must target
+// the same db handle SQLite is inside, or sqlite3_declare_vtab returns
+// SQLITE_MISUSE.
+func (m *vtabCtorModule) invoke(c *Conn, ctor VTabCtor, args []string) (vtab.Table, error) {
 	if len(args) < 3 {
 		return nil, fmt.Errorf("sqlite: vtab ctor called with fewer than 3 args (got %d)", len(args))
 	}
-	return ctor(m.conn, args[0], args[1], args[2], args[3:])
+	return ctor(c, args[0], args[1], args[2], args[3:])
 }
 
 // CreateModuleSplit registers a Go-implemented virtual table module on

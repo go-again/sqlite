@@ -32,7 +32,8 @@ The high-signal map is the root-package fork surface; each sub-package documents
 
 ```
 sqlite.go               init(), driver registration ("sqlite" + "sqlite3")
-driver.go               *Driver with Extensions / ConnectHook
+driver.go               *Driver with Extensions / ConnectHook; dispatches remote-scheme DSNs
+remote.go               RegisterRemoteScheme — teaches the "sqlite" driver to open network DSNs (sql.Open("sqlite","quicsql://…")); the quicSQL seam, no network dep in the root
 conn.go                 *conn (alias *Conn); most of the work happens here
 stmt.go, rows.go, result.go, tx.go
 error.go                *Error with Code() / ExtendedCode()
@@ -174,6 +175,8 @@ Always:
 | Column metadata / runtime stats / txn state | `introspect.go` + `(*Stmt).Readonly`/`Status` in `stmt.go` |
 | cksm/crypto chaining | `vfs/crypto/crypto.go::Options.WrapVFS` + per-package `fileMap` (`cabi.PtrMap[FS]`) |
 | vtab xCreate/xConnect split | `module.go::CreateModuleSplit` (used by `ext/bloom`, `ext/spellfix1`) |
+| vtab ctor runs on the EXECUTING conn | `vtab.go::vtabInstantiate` resolves the conn from the trampoline's db via `connForDB`, not the one captured at registration — else a per-conn-registered ctor's `declare_vtab` hits the wrong handle → `SQLITE_MISUSE`. Pinned by `vtab_ctor_conn_test.go` |
+| Remote / network-backend dispatch | `remote.go::RegisterRemoteScheme` + `driver.go::(*Driver).Open` (`remoteOpenerFor`) — the seam the quicSQL forwarding driver plugs into; the root gains no network dependency |
 | Shared SQL-identifier toolkit | `internal/sqlid/sqlid.go` |
 | gorm Dialector / AutoMigrate | `gorm/sqlite.go::Dialector` / `gorm/migrator.go::recreateTable` |
 | Embedding serialization / FTS SQL | `vec/encoding.go` / `fts/fts.go::buildSearchSQL` |

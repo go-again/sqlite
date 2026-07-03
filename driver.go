@@ -131,6 +131,17 @@ func (d *Driver) Open(name string) (conn driver.Conn, err error) {
 			dmesg("name %q: (driver.Conn %p, err %v)", name, conn, err)
 		}()
 	}
+	// A URL-shaped DSN with a non-"file" scheme targets a network backend, not a
+	// local file. If a package registered an opener for that scheme (see
+	// RegisterRemoteScheme), hand off to it and skip all local-engine setup;
+	// otherwise say plainly that the providing driver must be imported.
+	if opener, remote := remoteOpenerFor(name); remote {
+		if opener == nil {
+			scheme, _ := dsnScheme(name)
+			return nil, fmt.Errorf("sqlite: no opener registered for DSN scheme %q; import the driver that provides it (e.g. the quicSQL network driver) to open %q databases", scheme, scheme)
+		}
+		return opener(name)
+	}
 	c, err := newConn(name)
 	if err != nil {
 		return nil, err

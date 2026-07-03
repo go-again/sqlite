@@ -62,6 +62,21 @@
 // (*Driver).RegisterFunction / RegisterConnectionHook once affects
 // every connection regardless of which name was used to open it.
 //
+// # Remote backends (network DSNs)
+//
+// RegisterRemoteScheme lets an out-of-tree package teach the built-in
+// "sqlite" / "sqlite3" driver to open a DSN whose URL scheme names a
+// network backend, instead of a local file:
+//
+//	import _ "quicsql.net/client/sqldriver" // registers the "quicsql" scheme
+//	db, _ := sql.Open("sqlite", "quicsql://host/app?transport=h2&token=…")
+//
+// A DSN with no "://" (a bare path, ":memory:") opens locally as always;
+// the "file" scheme is reserved for local URIs. The root gains no network
+// dependency of its own — the opener and its transports live in the
+// registering package and enter a build only when it is imported. This is
+// the seam the quicSQL forwarding driver uses; see remote.go.
+//
 // # Mattn-compatible surface
 //
 // The mattn drop-in is exhaustive — change the import path and

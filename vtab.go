@@ -214,94 +214,93 @@ func vtabConfig(tls *libc.TLS, db uintptr, op int32, args ...int32) error {
 	return nil
 }
 
-// vtabCreateTrampoline is the xCreate callback. It invokes the corresponding
-// Go vtab.Module.Create method, declares a default schema based on argv, and
-// allocates a sqlite3_vtab.
+// vtabCreateTrampoline is the xCreate callback: it instantiates a table for a
+// fresh CREATE VIRTUAL TABLE via the module's create ctor.
 func vtabCreateTrampoline(tls *libc.TLS, db uintptr, pAux uintptr, argc int32, argv uintptr, ppVtab uintptr, pzErr uintptr) int32 {
-	gm := lookupGoModule(pAux)
-	if gm == nil {
-		setVtabError(tls, pzErr, fmt.Sprintf("vtab: unknown module id %d", pAux))
-		return sqlite3.SQLITE_ERROR
-	}
-	args := extractVtabArgs(tls, argc, argv)
-	ctx := vtab.NewContextWithConfig(func(schema string) error {
-		zSchema, err := libc.CString(schema)
-		if err != nil {
-			return err
-		}
-		defer libc.Xfree(tls, zSchema)
-		if rc := sqlite3.Xsqlite3_declare_vtab(tls, db, zSchema); rc != sqlite3.SQLITE_OK {
-			return fmt.Errorf("declare_vtab failed: rc=%d", rc)
-		}
-		return nil
-	}, func() error {
-		return vtabConfig(tls, db, sqlite3.SQLITE_VTAB_CONSTRAINT_SUPPORT, 1)
-	}, func(op int32, args ...int32) error {
-		return vtabConfig(tls, db, op, args...)
-	})
-	tbl, err := gm.impl.Create(ctx, args)
-	if err != nil {
-		setVtabError(tls, pzErr, err.Error())
-		return sqlite3.SQLITE_ERROR
-	}
-	sz := unsafe.Sizeof(sqlite3.Sqlite3_vtab{})
-	p := sqlite3.Xsqlite3_malloc(tls, int32(sz))
-	if p == 0 {
-		// Create succeeded and may have allocated shadow tables / handles; on the
-		// NOMEM bail SQLite never gets a vtab to drive xDestroy against, so release
-		// the Go Table here (Create pairs with xDestroy) rather than leak it.
-		_ = tbl.Destroy()
-		setVtabError(tls, pzErr, "vtab: out of memory")
-		return sqlite3.SQLITE_NOMEM
-	}
-	mem := (*libc.RawMem)(unsafe.Pointer(p))[:sz:sz]
-	for i := range mem {
-		mem[i] = 0
-	}
-	*(*uintptr)(unsafe.Pointer(ppVtab)) = p
-
-	gt := &goTable{mod: gm, impl: tbl}
-	vtabTables.mu.Lock()
-	vtabTables.m[p] = gt
-	vtabTables.mu.Unlock()
-	return sqlite3.SQLITE_OK
+	return vtabInstantiate(tls, db, pAux, argc, argv, ppVtab, pzErr, true)
 }
 
-// vtabConnectTrampoline is the xConnect callback. It mirrors
-// vtabCreateTrampoline but calls Module.Connect.
+// vtabConnectTrampoline is the xConnect callback: it mirrors
+// vtabCreateTrampoline but uses the module's connect ctor — a reopen of an
+// existing vtab, or the sole entry point for an eponymous table-valued
+// function.
 func vtabConnectTrampoline(tls *libc.TLS, db uintptr, pAux uintptr, argc int32, argv uintptr, ppVtab uintptr, pzErr uintptr) int32 {
+	return vtabInstantiate(tls, db, pAux, argc, argv, ppVtab, pzErr, false)
+}
+
+// vtabInstantiate is the shared body of xCreate/xConnect: look up the Go
+// module by pAux, build the table via the appropriate ctor, allocate the
+// sqlite3_vtab, and record the Go table.
+//
+// A module is registered on every pooled connection under one name (that is
+// how the ext/<name>/auto ConnectHooks apply it), so the global module record
+// for a name points at whichever connection registered it LAST. For the
+// [VTabCtor] adapter, handing the ctor that captured *Conn would run its
+// sqlite3_declare_vtab (and any nested prepare) against a different db handle
+// than the one SQLite is driving right now — which returns SQLITE_MISUSE (21),
+// surfacing as a flaky "declare_vtab" failure whenever the query lands on a
+// connection other than the last registrant. Resolve the executing connection
+// from the db handle SQLite passed in so the ctor always runs against it.
+func vtabInstantiate(tls *libc.TLS, db uintptr, pAux uintptr, argc int32, argv uintptr, ppVtab uintptr, pzErr uintptr, isCreate bool) int32 {
 	gm := lookupGoModule(pAux)
 	if gm == nil {
 		setVtabError(tls, pzErr, fmt.Sprintf("vtab: unknown module id %d", pAux))
 		return sqlite3.SQLITE_ERROR
 	}
 	args := extractVtabArgs(tls, argc, argv)
-	ctx := vtab.NewContextWithConfig(func(schema string) error {
-		zSchema, err := libc.CString(schema)
-		if err != nil {
-			return err
+
+	var tbl vtab.Table
+	var err error
+	if cm, ok := gm.impl.(*vtabCtorModule); ok {
+		c := connForDB(db)
+		if c == nil {
+			setVtabError(tls, pzErr, "vtab: no connection for db handle")
+			return sqlite3.SQLITE_ERROR
 		}
-		defer libc.Xfree(tls, zSchema)
-		if rc := sqlite3.Xsqlite3_declare_vtab(tls, db, zSchema); rc != sqlite3.SQLITE_OK {
-			return fmt.Errorf("declare_vtab failed: rc=%d", rc)
+		ctor := cm.connectCtor
+		if isCreate {
+			ctor = cm.createCtor
 		}
-		return nil
-	}, func() error {
-		return vtabConfig(tls, db, sqlite3.SQLITE_VTAB_CONSTRAINT_SUPPORT, 1)
-	}, func(op int32, args ...int32) error {
-		return vtabConfig(tls, db, op, args...)
-	})
-	tbl, err := gm.impl.Connect(ctx, args)
+		tbl, err = cm.invoke(c, ctor, args)
+	} else {
+		ctx := vtab.NewContextWithConfig(func(schema string) error {
+			zSchema, err := libc.CString(schema)
+			if err != nil {
+				return err
+			}
+			defer libc.Xfree(tls, zSchema)
+			if rc := sqlite3.Xsqlite3_declare_vtab(tls, db, zSchema); rc != sqlite3.SQLITE_OK {
+				return fmt.Errorf("declare_vtab failed: rc=%d", rc)
+			}
+			return nil
+		}, func() error {
+			return vtabConfig(tls, db, sqlite3.SQLITE_VTAB_CONSTRAINT_SUPPORT, 1)
+		}, func(op int32, args ...int32) error {
+			return vtabConfig(tls, db, op, args...)
+		})
+		if isCreate {
+			tbl, err = gm.impl.Create(ctx, args)
+		} else {
+			tbl, err = gm.impl.Connect(ctx, args)
+		}
+	}
 	if err != nil {
 		setVtabError(tls, pzErr, err.Error())
 		return sqlite3.SQLITE_ERROR
 	}
+
 	sz := unsafe.Sizeof(sqlite3.Sqlite3_vtab{})
 	p := sqlite3.Xsqlite3_malloc(tls, int32(sz))
 	if p == 0 {
-		// Connect succeeded; release the Go Table (Connect pairs with
-		// xDisconnect) before bailing rather than leak its handles.
-		_ = tbl.Disconnect()
+		// The ctor succeeded and may have allocated shadow tables / handles; on
+		// the NOMEM bail SQLite never gets a vtab to drive teardown against, so
+		// release the Go Table here — Create pairs with xDestroy, Connect with
+		// xDisconnect — rather than leak it.
+		if isCreate {
+			_ = tbl.Destroy()
+		} else {
+			_ = tbl.Disconnect()
+		}
 		setVtabError(tls, pzErr, "vtab: out of memory")
 		return sqlite3.SQLITE_NOMEM
 	}
