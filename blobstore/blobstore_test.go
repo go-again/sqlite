@@ -883,3 +883,32 @@ func TestVacuumOnDelete(t *testing.T) {
 		t.Fatalf("freelist_count = %d after vacuum-on-delete, want 0", free)
 	}
 }
+
+func TestList(t *testing.T) {
+	skipUnderRace(t)
+	s, _ := newStore(t)
+	ctx := context.Background()
+
+	if ids, err := s.List(ctx); err != nil || len(ids) != 0 {
+		t.Fatalf("List on empty store = (%v, %v), want ([], nil)", ids, err)
+	}
+	a, _ := s.Create(ctx)
+	b, _ := s.Create(ctx)
+	c, _ := s.Create(ctx)
+	writeAt(t, s, b, []byte("hi"), 0)
+
+	ids, err := s.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(ids) != 3 || ids[0] != a || ids[1] != b || ids[2] != c {
+		t.Fatalf("List = %v, want ascending [%d %d %d]", ids, a, b, c)
+	}
+	if err := s.Delete(ctx, b); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	ids, err = s.List(ctx)
+	if err != nil || len(ids) != 2 || ids[0] != a || ids[1] != c {
+		t.Fatalf("List after delete = (%v, %v), want [%d %d]", ids, err, a, c)
+	}
+}

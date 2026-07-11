@@ -416,6 +416,33 @@ func (s *Store) Stat(ctx context.Context, id int64) (ObjectInfo, error) {
 	return info, nil
 }
 
+// List returns the ids of every live object in the store, in ascending id order
+// (empty if the store has none). It enables an external referential sweep — e.g.
+// deleting objects that no application row still points at — without the caller
+// having to track ids out of band. Pair with [Store.Size]/[Store.Stat] for sizes.
+func (s *Store) List(ctx context.Context) ([]int64, error) {
+	if err := s.requireProvisioned(ctx); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM `+s.objs+` ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("blobstore: List: %w", err)
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("blobstore: List: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("blobstore: List: %w", err)
+	}
+	return ids, nil
+}
+
 // Size reports the logical length in bytes of object id.
 func (s *Store) Size(ctx context.Context, id int64) (int64, error) {
 	return s.sizeOn(ctx, s.db, id)
