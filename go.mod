@@ -8,8 +8,8 @@ require (
 	golang.org/x/crypto v0.53.0
 	golang.org/x/text v0.38.0
 	lukechampine.com/blake3 v1.4.1
-	modernc.org/libc v1.73.4
-	modernc.org/sqlite v1.53.0
+	modernc.org/libc v1.74.1
+	modernc.org/sqlite v1.54.0
 )
 
 require (

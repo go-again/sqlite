@@ -9,7 +9,7 @@ replace gosqlite.org/blobstore => ../../blobstore
 replace gosqlite.org/vfs/crypto => ../../vfs/crypto
 
 require (
-	gosqlite.org v0.12.0
+	gosqlite.org v0.13.0
 	gosqlite.org/blobstore v0.12.0
 	gosqlite.org/vfs/crypto v0.12.0
 )
@@ -24,8 +24,8 @@ require (
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	lukechampine.com/adiantum v1.1.1 // indirect
-	modernc.org/libc v1.73.4 // indirect
+	modernc.org/libc v1.74.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.53.0 // indirect
+	modernc.org/sqlite v1.54.0 // indirect
 )
