@@ -39,7 +39,8 @@
 //	store.Delete(ctx, id)                                // frees the blocks it alone holds
 //
 // Open creates four tables from the name you pass — "<name>_objects" (one row
-// per object: id, logical size, chunk size, mode, retention), "<name>_blocks"
+// per object: id, logical size, chunk size, mode, retention, creation time),
+// "<name>_blocks"
 // (the reference-counted block data), "<name>_chunks" (the (object, sequence) ->
 // block mapping), and "<name>_versions" (point-in-time snapshots). The name is
 // validated as a SQL identifier. All of them share whatever database the

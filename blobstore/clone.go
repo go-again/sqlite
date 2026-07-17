@@ -41,9 +41,15 @@ func (s *Store) Clone(ctx context.Context, srcID int64) (int64, error) {
 // each referenced block per new mapping — count-correct even if two chunks share
 // one block. Shared by Clone and version snapshotting.
 func (s *Store) cloneObjectTx(ctx context.Context, sc *sql.Conn, srcID int64) (int64, bool, error) {
+	// Stamp created_at with the store clock, like Create — a clone (and the
+	// version snapshot built on it) is a new object born now, NOT a copy of the
+	// source's age. This keeps 0 meaning only "back-filled legacy row", which the
+	// age-based sweep relies on; copying the source's time would let a fresh clone
+	// read as arbitrarily old.
 	res, err := sc.ExecContext(ctx,
-		`INSERT INTO `+s.objs+` (size, chunk, codec, level, keep_versions, max_age) `+
-			`SELECT size, chunk, codec, level, keep_versions, max_age FROM `+s.objs+` WHERE id = ?`, srcID)
+		`INSERT INTO `+s.objs+` (size, chunk, codec, level, keep_versions, max_age, created_at) `+
+			`SELECT size, chunk, codec, level, keep_versions, max_age, ? FROM `+s.objs+` WHERE id = ?`,
+		s.now().UnixNano(), srcID)
 	if err != nil {
 		return 0, false, err
 	}

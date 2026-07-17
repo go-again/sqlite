@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	sqlite "gosqlite.org"
 	"gosqlite.org/internal/raceskip"
@@ -910,5 +911,282 @@ func TestList(t *testing.T) {
 	ids, err = s.List(ctx)
 	if err != nil || len(ids) != 2 || ids[0] != a || ids[1] != c {
 		t.Fatalf("List after delete = (%v, %v), want [%d %d]", ids, err, a, c)
+	}
+}
+
+func TestListObjects(t *testing.T) {
+	skipUnderRace(t)
+	s, _ := newStore(t)
+	ctx := context.Background()
+
+	// Freeze the clock so created_at is exactly predictable.
+	clk := time.Unix(1_700_000_000, 0)
+	s.now = func() time.Time { return clk }
+
+	if recs, err := s.ListObjects(ctx); err != nil || len(recs) != 0 {
+		t.Fatalf("ListObjects on empty store = (%v, %v), want ([], nil)", recs, err)
+	}
+
+	a, _ := s.Create(ctx)
+	b, _ := s.Create(ctx)
+	writeAt(t, s, b, []byte("hello"), 0)
+
+	recs, err := s.ListObjects(ctx)
+	if err != nil {
+		t.Fatalf("ListObjects: %v", err)
+	}
+	if len(recs) != 2 || recs[0].ID != a || recs[1].ID != b {
+		t.Fatalf("ListObjects ids = %v, want ascending [%d %d]", recs, a, b)
+	}
+	if !recs[0].CreatedAt.Equal(clk) || !recs[1].CreatedAt.Equal(clk) {
+		t.Fatalf("ListObjects CreatedAt = [%v %v], want both %v", recs[0].CreatedAt, recs[1].CreatedAt, clk)
+	}
+	if recs[0].Size != 0 || recs[1].Size != 5 {
+		t.Fatalf("ListObjects sizes = [%d %d], want [0 5]", recs[0].Size, recs[1].Size)
+	}
+}
+
+// TestListObjectsLegacyMigration provisions a store whose objects table predates
+// the created_at column, confirms Open back-fills the column, and confirms a row
+// written before the migration reports a zero CreatedAt while a freshly created
+// one carries the real clock.
+func TestListObjectsLegacyMigration(t *testing.T) {
+	skipUnderRace(t)
+	db, err := sqlite.OpenWAL(filepath.Join(t.TempDir(), "legacy.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	ctx := context.Background()
+
+	// Pre-create the objects table in its pre-created_at shape and drop in a row;
+	// Open's CREATE TABLE IF NOT EXISTS leaves it alone, and addColumnIfMissing
+	// must then add created_at (the legacy row defaulting to 0 = unknown).
+	if _, err := db.ExecContext(ctx,
+		`CREATE TABLE files_objects (id INTEGER PRIMARY KEY, size INTEGER NOT NULL DEFAULT 0, `+
+			`chunk INTEGER NOT NULL CHECK(chunk > 0), codec INTEGER NOT NULL DEFAULT 0, `+
+			`level INTEGER NOT NULL DEFAULT 0, `+
+			`keep_versions INTEGER NOT NULL DEFAULT 0, max_age INTEGER NOT NULL DEFAULT 0)`); err != nil {
+		t.Fatal(err)
+	}
+	res, err := db.ExecContext(ctx, `INSERT INTO files_objects (size, chunk) VALUES (7, 4096)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyID, _ := res.LastInsertId()
+
+	s, err := Open(db, "files")
+	if err != nil {
+		t.Fatalf("Open on legacy store: %v", err)
+	}
+	clk := time.Unix(1_700_000_000, 0)
+	s.now = func() time.Time { return clk }
+	fresh, _ := s.Create(ctx)
+
+	recs, err := s.ListObjects(ctx)
+	if err != nil {
+		t.Fatalf("ListObjects: %v", err)
+	}
+	byID := map[int64]ObjectRecord{}
+	for _, r := range recs {
+		byID[r.ID] = r
+	}
+	if got := byID[legacyID]; !got.CreatedAt.IsZero() {
+		t.Errorf("legacy row CreatedAt = %v, want zero", got.CreatedAt)
+	}
+	if got := byID[fresh]; !got.CreatedAt.Equal(clk) {
+		t.Errorf("fresh row CreatedAt = %v, want %v", got.CreatedAt, clk)
+	}
+
+	// Re-Open must be a no-op (idempotent migration, no "duplicate column" error).
+	if _, err := Open(db, "files"); err != nil {
+		t.Fatalf("re-Open after migration: %v", err)
+	}
+}
+
+func TestObjectsIterator(t *testing.T) {
+	skipUnderRace(t)
+	s, db := newStore(t)
+	ctx := context.Background()
+
+	// Empty store: the sequence yields nothing.
+	for range s.Objects(ctx) {
+		t.Fatal("Objects on empty store yielded a record")
+	}
+
+	var want []int64
+	for range 5 {
+		id, err := s.Create(ctx)
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		want = append(want, id)
+	}
+
+	// Full walk matches ListObjects and stays in ascending id order.
+	var got []int64
+	for rec, err := range s.Objects(ctx) {
+		if err != nil {
+			t.Fatalf("Objects: %v", err)
+		}
+		got = append(got, rec.ID)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("Objects walked %d records, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Objects order = %v, want %v", got, want)
+		}
+	}
+
+	// Early break must not leak the iteration's connection. Pin the pool to ONE
+	// connection so a leak is actually observable: if break failed to release the
+	// conn (e.g. a future refactor dropped the deferred rows.Close), the follow-up
+	// query below would block until the test's context deadline instead of running.
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { db.SetMaxOpenConns(0) })
+	seen := 0
+	for _, err := range s.Objects(ctx) {
+		if err != nil {
+			t.Fatalf("Objects (break): %v", err)
+		}
+		seen++
+		if seen == 2 {
+			break
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("early break saw %d records, want 2", seen)
+	}
+	deadline, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if _, err := s.Create(deadline); err != nil {
+		t.Fatalf("Create after early break on a 1-conn pool (connection leaked?): %v", err)
+	}
+}
+
+func TestListObjectsAfter(t *testing.T) {
+	skipUnderRace(t)
+	s, _ := newStore(t)
+	ctx := context.Background()
+
+	var ids []int64
+	for range 10 {
+		id, _ := s.Create(ctx)
+		ids = append(ids, id)
+	}
+
+	// Page through in batches of 3 with the keyset cursor; the reassembled set
+	// must equal the full ascending id list, with the final page short.
+	var paged []int64
+	after, pages := int64(0), 0
+	for {
+		recs, err := s.ListObjectsAfter(ctx, after, 3)
+		if err != nil {
+			t.Fatalf("ListObjectsAfter: %v", err)
+		}
+		if len(recs) == 0 {
+			break
+		}
+		pages++
+		for _, r := range recs {
+			paged = append(paged, r.ID)
+		}
+		if len(recs) < 3 { // short page = last
+			break
+		}
+		after = recs[len(recs)-1].ID
+	}
+	if pages != 4 { // 3+3+3+1 over 10 objects
+		t.Fatalf("paged in %d pages, want 4", pages)
+	}
+	if len(paged) != len(ids) {
+		t.Fatalf("paged %d ids, want %d", len(paged), len(ids))
+	}
+	for i := range ids {
+		if paged[i] != ids[i] {
+			t.Fatalf("paged order = %v, want %v", paged, ids)
+		}
+	}
+
+	// afterID skips everything at or below it; limit <= 0 means no bound.
+	rest, err := s.ListObjectsAfter(ctx, ids[6], 0)
+	if err != nil {
+		t.Fatalf("ListObjectsAfter unbounded: %v", err)
+	}
+	if len(rest) != 3 || rest[0].ID != ids[7] {
+		t.Fatalf("ListObjectsAfter(%d, 0) = %v, want the last 3 starting at %d", ids[6], rest, ids[7])
+	}
+}
+
+// TestEnumerationExcludesSnapshots asserts the referential-sweep enumeration
+// (List / ListObjects / Objects / ListObjectsAfter) never surfaces the hidden
+// version-snapshot object NewVersion creates — deleting it would corrupt the
+// version — while a user-facing Clone stays visible and carries a real CreatedAt.
+func TestEnumerationExcludesSnapshots(t *testing.T) {
+	skipUnderRace(t)
+	s, _ := newStore(t)
+	ctx := context.Background()
+	clk := time.Unix(1_700_000_000, 0)
+	s.now = func() time.Time { return clk }
+
+	a, err := s.Create(ctx)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	writeAt(t, s, a, []byte("payload"), 0)
+
+	// A clone is a user-facing live object: it must be listed, with a real
+	// CreatedAt (regression guard for the clone-doesn't-stamp-created_at bug).
+	clone, err := s.Clone(ctx, a)
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+
+	// NewVersion creates a hidden snapshot object under the hood.
+	if _, err := s.NewVersion(ctx, a); err != nil {
+		t.Fatalf("NewVersion: %v", err)
+	}
+
+	// Enumeration must be exactly {a, clone} — the snapshot is excluded.
+	want := map[int64]bool{a: true, clone: true}
+
+	ids, err := s.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(ids) != len(want) {
+		t.Fatalf("List = %v, want the 2 live objects %v (snapshot must be excluded)", ids, want)
+	}
+	for _, id := range ids {
+		if !want[id] {
+			t.Fatalf("List surfaced id %d — a version snapshot leaked into the sweep set", id)
+		}
+	}
+
+	recs, err := s.ListObjects(ctx)
+	if err != nil {
+		t.Fatalf("ListObjects: %v", err)
+	}
+	if len(recs) != len(want) {
+		t.Fatalf("ListObjects returned %d records, want %d (snapshot excluded)", len(recs), len(want))
+	}
+	for _, r := range recs {
+		if !want[r.ID] {
+			t.Fatalf("ListObjects surfaced snapshot id %d", r.ID)
+		}
+		if !r.CreatedAt.Equal(clk) {
+			t.Errorf("object %d CreatedAt = %v, want %v (clone must stamp created_at, not read as legacy 0)", r.ID, r.CreatedAt, clk)
+		}
+	}
+
+	// The keyset path applies the same exclusion.
+	page, err := s.ListObjectsAfter(ctx, 0, 100)
+	if err != nil {
+		t.Fatalf("ListObjectsAfter: %v", err)
+	}
+	if len(page) != len(want) {
+		t.Fatalf("ListObjectsAfter returned %d records, want %d (snapshot excluded)", len(page), len(want))
 	}
 }

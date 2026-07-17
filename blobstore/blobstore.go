@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
+	"strings"
 	"time"
 
 	sqlite "gosqlite.org"
@@ -146,7 +148,10 @@ func (s *Store) migrate(ctx context.Context) error {
 			`id INTEGER PRIMARY KEY, size INTEGER NOT NULL DEFAULT 0, ` +
 			`chunk INTEGER NOT NULL CHECK(chunk > 0), codec INTEGER NOT NULL DEFAULT 0, ` +
 			`level INTEGER NOT NULL DEFAULT 0, ` +
-			`keep_versions INTEGER NOT NULL DEFAULT 0, max_age INTEGER NOT NULL DEFAULT 0)`,
+			`keep_versions INTEGER NOT NULL DEFAULT 0, max_age INTEGER NOT NULL DEFAULT 0, ` +
+			// created_at is the store-clock time (UnixNano) at Create; 0 for rows
+			// back-filled by the migration below (their true age is unknown).
+			`created_at INTEGER NOT NULL DEFAULT 0)`,
 		// blocks holds the chunk bytes once, refcounted: refs counts the chunk
 		// mappings pointing at the row, so a block shared by a clone is copied on
 		// write and freed when the last reference goes. enc records the byte
@@ -177,6 +182,39 @@ func (s *Store) migrate(ctx context.Context) error {
 		if _, err := s.db.ExecContext(ctx, q); err != nil {
 			return fmt.Errorf("blobstore: migrate: %w", err)
 		}
+	}
+	// created_at was added after the initial objects schema. CREATE TABLE IF NOT
+	// EXISTS leaves an already-provisioned store untouched, so add the column
+	// explicitly on stores that predate it. SQLite requires a constant default on
+	// ADD COLUMN, so back-filled rows read as 0 (unknown age) — the safe direction
+	// for an age-based orphan sweep, which then treats them as old enough to reap.
+	if err := s.addColumnIfMissing(ctx, s.name+"_objects", "created_at",
+		`ALTER TABLE `+s.objs+` ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	return nil
+}
+
+// addColumnIfMissing runs ddl (an ALTER TABLE ADD COLUMN) only when table lacks
+// col, keeping the migration idempotent — a second Open on an already-migrated
+// store is a no-op rather than a "duplicate column name" error. The check and the
+// ALTER are not one atomic step, so two Opens racing on the same fresh store can
+// both see the column missing; the loser's ALTER then fails with duplicate-column,
+// which is treated as success (the column exists either way).
+func (s *Store) addColumnIfMissing(ctx context.Context, table, col, ddl string) error {
+	var n int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM pragma_table_info(?) WHERE name = ?`, table, col).Scan(&n); err != nil {
+		return fmt.Errorf("blobstore: migrate: %w", err)
+	}
+	if n > 0 {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx, ddl); err != nil {
+		if strings.Contains(err.Error(), "duplicate column name") {
+			return nil // lost the race with a concurrent Open; the column is present
+		}
+		return fmt.Errorf("blobstore: migrate: %w", err)
 	}
 	return nil
 }
@@ -232,8 +270,8 @@ func (s *Store) createOn(ctx context.Context, ex execer, opts ...CreateOption) (
 		codec = codecAZ
 	}
 	res, err := ex.ExecContext(ctx,
-		`INSERT INTO `+s.objs+` (size, chunk, codec, level, keep_versions, max_age) VALUES (0, ?, ?, ?, ?, ?)`,
-		s.chunkSize, codec, level, cc.keepVersions, int64(cc.maxAge))
+		`INSERT INTO `+s.objs+` (size, chunk, codec, level, keep_versions, max_age, created_at) VALUES (0, ?, ?, ?, ?, ?, ?)`,
+		s.chunkSize, codec, level, cc.keepVersions, int64(cc.maxAge), s.now().UnixNano())
 	if err != nil {
 		return 0, fmt.Errorf("blobstore: create: %w", err)
 	}
@@ -416,15 +454,28 @@ func (s *Store) Stat(ctx context.Context, id int64) (ObjectInfo, error) {
 	return info, nil
 }
 
+// liveObjectPredicate is the WHERE clause that limits an enumeration to
+// user-facing "live" objects — those from [Store.Create] / [Store.Clone] — and
+// excludes the hidden version-snapshot objects (rows referenced only by
+// <name>_versions.snapshot_obj). Enumeration is sold for referential/orphan
+// sweeps, so a snapshot must never surface in it: the caller, seeing an id no
+// application row references, would delete it and corrupt the version that
+// points at it. An un-versioned store has an empty versions table, so the
+// subquery is empty and every object passes.
+func (s *Store) liveObjectPredicate() string {
+	return `id NOT IN (SELECT snapshot_obj FROM ` + s.versions + `)`
+}
+
 // List returns the ids of every live object in the store, in ascending id order
 // (empty if the store has none). It enables an external referential sweep — e.g.
 // deleting objects that no application row still points at — without the caller
 // having to track ids out of band. Pair with [Store.Size]/[Store.Stat] for sizes.
+// Internal version-snapshot objects are excluded (see [Store.NewVersion]).
 func (s *Store) List(ctx context.Context) ([]int64, error) {
 	if err := s.requireProvisioned(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id FROM `+s.objs+` ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM `+s.objs+` WHERE `+s.liveObjectPredicate()+` ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("blobstore: List: %w", err)
 	}
@@ -441,6 +492,127 @@ func (s *Store) List(ctx context.Context) ([]int64, error) {
 		return nil, fmt.Errorf("blobstore: List: %w", err)
 	}
 	return ids, nil
+}
+
+// ObjectRecord is a lightweight listing row for an object — its id plus the two
+// fields an external sweep typically needs (age and logical size) — read in a
+// single indexed scan, without a per-object [Store.Stat].
+type ObjectRecord struct {
+	ID        int64     // object id
+	CreatedAt time.Time // when [Store.Create] / [Store.Clone] made it (store clock); zero only for a row predating created_at tracking
+	Size      int64     // logical (uncompressed) length in bytes
+}
+
+// scanObjectRecord reads one row of (id, created_at, size) into an ObjectRecord,
+// mapping a zero created_at (a back-filled legacy row) to a zero CreatedAt.
+func scanObjectRecord(rows *sql.Rows) (ObjectRecord, error) {
+	var rec ObjectRecord
+	var createdAt int64
+	if err := rows.Scan(&rec.ID, &createdAt, &rec.Size); err != nil {
+		return ObjectRecord{}, err
+	}
+	if createdAt != 0 {
+		rec.CreatedAt = time.Unix(0, createdAt)
+	}
+	return rec, nil
+}
+
+// Objects streams a record per live object in ascending id order (internal
+// version snapshots excluded), without materializing the whole set — the
+// memory-safe form of [Store.ListObjects] for a store with a very large object
+// count. Iteration holds one pooled connection for its whole duration, so the
+// body must not run another query needing a connection on a single-connection
+// pool (it would deadlock); break early to release it. A read error is delivered
+// as the final pair (zero record, non-nil error) and ends the sequence.
+//
+//	for rec, err := range store.Objects(ctx) {
+//	    if err != nil { return err }
+//	    // ... use rec ...
+//	}
+func (s *Store) Objects(ctx context.Context) iter.Seq2[ObjectRecord, error] {
+	return func(yield func(ObjectRecord, error) bool) {
+		if err := s.requireProvisioned(ctx); err != nil {
+			yield(ObjectRecord{}, err)
+			return
+		}
+		rows, err := s.db.QueryContext(ctx, `SELECT id, created_at, size FROM `+s.objs+` WHERE `+s.liveObjectPredicate()+` ORDER BY id`)
+		if err != nil {
+			yield(ObjectRecord{}, fmt.Errorf("blobstore: Objects: %w", err))
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			rec, err := scanObjectRecord(rows)
+			if err != nil {
+				yield(ObjectRecord{}, fmt.Errorf("blobstore: Objects: %w", err))
+				return
+			}
+			if !yield(rec, nil) {
+				return // consumer stopped; the deferred Close releases the connection
+			}
+		}
+		if err := rows.Err(); err != nil {
+			yield(ObjectRecord{}, fmt.Errorf("blobstore: Objects: %w", err))
+		}
+	}
+}
+
+// ListObjects returns a record per live object in ascending id order (empty if
+// the store has none; internal version snapshots excluded). It is [Store.List]
+// plus each object's creation time and logical size, for an age-aware referential
+// sweep — e.g. reaping objects that no application row references AND that are
+// older than a grace period — without tracking creation times out of band.
+// Objects created before the store gained created_at tracking report a zero
+// CreatedAt.
+//
+// It materializes every record; for a store with a very large object count,
+// stream with [Store.Objects] or page with [Store.ListObjectsAfter] instead.
+func (s *Store) ListObjects(ctx context.Context) ([]ObjectRecord, error) {
+	var out []ObjectRecord
+	for rec, err := range s.Objects(ctx) {
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, rec)
+	}
+	return out, nil
+}
+
+// ListObjectsAfter returns up to limit records for the live objects (internal
+// version snapshots excluded) whose id is greater than afterID, in ascending id
+// order — one keyset page. Pass afterID=0
+// for the first page and the last id of a page as the next call's afterID; a
+// short page (fewer than limit) is the last. A limit <= 0 means no bound (every
+// object after afterID). Keyset paging over the INTEGER PRIMARY KEY is a bounded
+// rowid range scan — no OFFSET cost — so it stays cheap on deep pages, which
+// suits a stateless (HTTP) enumeration boundary.
+func (s *Store) ListObjectsAfter(ctx context.Context, afterID int64, limit int) ([]ObjectRecord, error) {
+	if err := s.requireProvisioned(ctx); err != nil {
+		return nil, err
+	}
+	q := `SELECT id, created_at, size FROM ` + s.objs + ` WHERE id > ? AND ` + s.liveObjectPredicate() + ` ORDER BY id`
+	args := []any{afterID}
+	if limit > 0 {
+		q += ` LIMIT ?`
+		args = append(args, limit)
+	}
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("blobstore: ListObjectsAfter: %w", err)
+	}
+	defer rows.Close()
+	var out []ObjectRecord
+	for rows.Next() {
+		rec, err := scanObjectRecord(rows)
+		if err != nil {
+			return nil, fmt.Errorf("blobstore: ListObjectsAfter: %w", err)
+		}
+		out = append(out, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("blobstore: ListObjectsAfter: %w", err)
+	}
+	return out, nil
 }
 
 // Size reports the logical length in bytes of object id.
