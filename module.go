@@ -39,6 +39,25 @@ type VTabRenamer = vtab.Renamer
 // implement it to receive Begin / Sync / Commit / Rollback callbacks.
 type VTabTransactional = vtab.Transactional
 
+// VTabFunctionFinder is the optional interface a [VTab] implements to override a
+// SQL function applied to the table's columns — SQLite's xFindFunction hook, and
+// the mechanism behind operators like MATCH. During prepare, for a function
+// named name with nArg arguments used against the table, SQLite calls
+// FindFunction; return the Go implementation to run (same shape as a scalar UDF)
+// plus op:
+//
+//   - op <= 0 overrides the function's ordinary call — `f(col)` runs fn.
+//   - op >= SQLITE_INDEX_CONSTRAINT_FUNCTION (150) additionally makes
+//     `column op arg` an indexable constraint the module can consume in
+//     BestIndex — how a MATCH-style operator becomes a query constraint.
+//
+// Return ok=false to decline (SQLite falls back to any built-in function).
+// Declare the name first with [Conn.OverloadFunction] so it is accepted at
+// prepare time before the table is consulted.
+type VTabFunctionFinder interface {
+	FindFunction(nArg int, name string) (fn func(*FunctionContext, []Value) (Value, error), op int, ok bool)
+}
+
 // IndexInfo, Constraint, OrderBy, ConstraintOp are re-exported so a [VTab]
 // implementation of BestIndex doesn't need a second import.
 type (
@@ -134,6 +153,24 @@ func (c *Conn) DeclareVTab(schema string) error {
 	defer libc.Xfree(c.tls, zSchema)
 	if rc := sqlite3.Xsqlite3_declare_vtab(c.tls, c.db, zSchema); rc != sqlite3.SQLITE_OK {
 		return fmt.Errorf("sqlite: declare_vtab: %w", c.errstr(rc))
+	}
+	return nil
+}
+
+// OverloadFunction declares a stub SQL function named name taking nArg arguments,
+// so that a virtual table can give it a table-specific meaning through the
+// module's xFindFunction hook — the mechanism behind operators like MATCH. Without
+// the overload SQLite would reject an unknown function name at prepare time,
+// before any vtab is consulted. It never changes the behavior of a function that
+// already exists. Equivalent to sqlite3_overload_function.
+func (c *Conn) OverloadFunction(name string, nArg int) error {
+	zName, err := libc.CString(name)
+	if err != nil {
+		return err
+	}
+	defer libc.Xfree(c.tls, zName)
+	if rc := sqlite3.Xsqlite3_overload_function(c.tls, c.db, zName, int32(nArg)); rc != sqlite3.SQLITE_OK {
+		return fmt.Errorf("sqlite: overload_function %q: %w", name, c.errstr(rc))
 	}
 	return nil
 }

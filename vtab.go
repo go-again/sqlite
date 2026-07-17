@@ -75,6 +75,17 @@ type goModule struct {
 type goTable struct {
 	mod  *goModule
 	impl vtab.Table
+
+	// findFuncs caches the scalar-UDF ids registered for this table's overloaded
+	// functions (see [VTabFunctionFinder]), keyed by (name, nArg). xFindFunction
+	// runs per prepare, so caching keeps repeated prepares from leaking a fresh
+	// id each time; the ids are freed when the table disconnects or is destroyed.
+	findFuncs map[funcKey]uintptr
+}
+
+type funcKey struct {
+	name string
+	nArg int32
 }
 
 // goCursor wraps a vtab.Cursor implementation and remembers its table.
@@ -317,6 +328,73 @@ func vtabInstantiate(tls *libc.TLS, db uintptr, pAux uintptr, argc int32, argv u
 	return sqlite3.SQLITE_OK
 }
 
+// bestIndexRawCtx holds the raw sqlite3_index_info* + tls for the BestIndex
+// call currently in flight, keyed by the Go *IndexInfo handed to the module.
+// The advanced BestIndex helpers (VTabDistinct, …) need the C pointer that the
+// abstracted IndexInfo doesn't carry; an entry lives only for the one call, and
+// each concurrent call has a distinct *IndexInfo, so keys never collide.
+var bestIndexRawCtx = struct {
+	mu sync.Mutex
+	m  map[*IndexInfo]bestIndexRaw
+}{m: map[*IndexInfo]bestIndexRaw{}}
+
+type bestIndexRaw struct {
+	tls   *libc.TLS
+	pInfo uintptr
+}
+
+func setBestIndexRaw(info *IndexInfo, tls *libc.TLS, pInfo uintptr) {
+	bestIndexRawCtx.mu.Lock()
+	bestIndexRawCtx.m[info] = bestIndexRaw{tls: tls, pInfo: pInfo}
+	bestIndexRawCtx.mu.Unlock()
+}
+
+func clearBestIndexRaw(info *IndexInfo) {
+	bestIndexRawCtx.mu.Lock()
+	delete(bestIndexRawCtx.m, info)
+	bestIndexRawCtx.mu.Unlock()
+}
+
+func bestIndexRawFor(info *IndexInfo) (bestIndexRaw, bool) {
+	bestIndexRawCtx.mu.Lock()
+	r, ok := bestIndexRawCtx.m[info]
+	bestIndexRawCtx.mu.Unlock()
+	return r, ok
+}
+
+// VTabDistinctMode is how much a query relaxes the ordering/duplication of the
+// rows a virtual table returns; the result of [VTabDistinct].
+type VTabDistinctMode int
+
+const (
+	// VTabDistinctOrdered — rows must come back ordered by the ORDER BY terms
+	// (the always-safe default).
+	VTabDistinctOrdered VTabDistinctMode = 0
+	// VTabDistinctGrouped — rows may be in any order, but rows equal across the
+	// ORDER BY columns must be adjacent (grouped).
+	VTabDistinctGrouped VTabDistinctMode = 1
+	// VTabDistinctDistinct — like grouped, and the table need not return two rows
+	// that are equal across all ORDER BY columns.
+	VTabDistinctDistinct VTabDistinctMode = 2
+	// VTabDistinctUnordered — only the set of distinct values of the used columns
+	// is needed, in any order (the most freedom).
+	VTabDistinctUnordered VTabDistinctMode = 3
+)
+
+// VTabDistinct reports how much the current query lets the virtual table relax
+// row ordering and skip duplicates — so a module can, for example, return only
+// distinct values or stop sorting. Call it from a module's BestIndex.
+// Equivalent to sqlite3_vtab_distinct. It returns VTabDistinctOrdered (the safe
+// default) if called outside a BestIndex invocation. See
+// https://sqlite.org/c3ref/vtab_distinct.html for the exact contract.
+func VTabDistinct(info *IndexInfo) VTabDistinctMode {
+	r, ok := bestIndexRawFor(info)
+	if !ok {
+		return VTabDistinctOrdered
+	}
+	return VTabDistinctMode(sqlite3.Xsqlite3_vtab_distinct(r.tls, r.pInfo))
+}
+
 // vtabBestIndexTrampoline maps sqlite3_index_info to vtab.IndexInfo and
 // delegates to Table.BestIndex. It also mirrors constraint and ORDER BY
 // information into the Go structure.
@@ -337,7 +415,7 @@ func vtabBestIndexTrampoline(tls *libc.TLS, pVtab uintptr, pInfo uintptr) int32 
 		cs := make([]vtab.Constraint, 0, n)
 		base := idx.FaConstraint
 		sz := unsafe.Sizeof(cIndexConstraint{})
-		for i := 0; i < n; i++ {
+		for i := range n {
 			c := (*cIndexConstraint)(unsafe.Pointer(base + uintptr(i)*sz))
 			op := vtab.OpUnknown
 			switch int32(c.Fop) {
@@ -393,7 +471,7 @@ func vtabBestIndexTrampoline(tls *libc.TLS, pVtab uintptr, pInfo uintptr) int32 
 		obs := make([]vtab.OrderBy, 0, n)
 		base := idx.FaOrderBy
 		sz := unsafe.Sizeof(cIndexOrderBy{})
-		for i := 0; i < n; i++ {
+		for i := range n {
 			ob := (*cIndexOrderBy)(unsafe.Pointer(base + uintptr(i)*sz))
 			obs = append(obs, vtab.OrderBy{
 				Column: int(ob.FiColumn),
@@ -410,6 +488,11 @@ func vtabBestIndexTrampoline(tls *libc.TLS, pVtab uintptr, pInfo uintptr) int32 
 	if idx.FidxFlags != 0 {
 		info.IdxFlags = int(idx.FidxFlags)
 	}
+
+	// Expose the raw sqlite3_index_info to the advanced BestIndex helpers
+	// (VTabDistinct, …) for the duration of this call — the Go IndexInfo hides it.
+	setBestIndexRaw(info, tls, pInfo)
+	defer clearBestIndexRaw(info)
 
 	if err := gt.impl.BestIndex(info); err != nil {
 		// Report error via zErrMsg on pVtab.
@@ -473,6 +556,7 @@ func vtabDisconnectTrampoline(tls *libc.TLS, pVtab uintptr) int32 {
 	vtabTables.mu.RUnlock()
 	if gt != nil {
 		_ = gt.impl.Disconnect()
+		freeTableFindFuncs(gt)
 		vtabTables.mu.Lock()
 		delete(vtabTables.m, pVtab)
 		vtabTables.mu.Unlock()
@@ -488,6 +572,7 @@ func vtabDestroyTrampoline(tls *libc.TLS, pVtab uintptr) int32 {
 	vtabTables.mu.RUnlock()
 	if gt != nil {
 		_ = gt.impl.Destroy()
+		freeTableFindFuncs(gt)
 		vtabTables.mu.Lock()
 		delete(vtabTables.m, pVtab)
 		vtabTables.mu.Unlock()
@@ -706,20 +791,93 @@ func setVtabZErrMsg(tls *libc.TLS, pVtab uintptr, msg string) {
 
 // Optional vtab callbacks
 
-// vtabFindFunctionTrampoline is xFindFunction. We currently do not expose a
-// Go surface for per-table SQL functions; report not found (return 0).
+// vtabFindFunctionTrampoline is xFindFunction. A table whose impl satisfies
+// [VTabFunctionFinder] can override a SQL function applied to its columns; the
+// Go function is dispatched through the shared scalar-UDF funcTrampoline. A table
+// that declines (or doesn't implement the interface) reports not found (return 0).
 func vtabFindFunctionTrampoline(tls *libc.TLS, pVtab uintptr, nArg int32, zName uintptr, pxFunc uintptr, ppArg uintptr) int32 {
-	_ = tls
-	_ = pVtab
-	_ = nArg
-	_ = zName
+	decline := func() int32 {
+		if pxFunc != 0 {
+			*(*uintptr)(unsafe.Pointer(pxFunc)) = 0
+		}
+		if ppArg != 0 {
+			*(*uintptr)(unsafe.Pointer(ppArg)) = 0
+		}
+		return 0
+	}
+
+	vtabTables.mu.RLock()
+	gt := vtabTables.m[pVtab]
+	vtabTables.mu.RUnlock()
+	if gt == nil {
+		return decline()
+	}
+	finder, ok := gt.impl.(VTabFunctionFinder)
+	if !ok {
+		return decline()
+	}
+	name := libc.GoString(zName)
+	fn, op, found := finder.FindFunction(int(nArg), name)
+	if !found || fn == nil {
+		return decline()
+	}
+
+	// Register the Go function through the shared scalar-UDF machinery once per
+	// (name, nArg) on this table, and reuse the id on repeated prepares so
+	// per-prepare xFindFunction calls don't leak. The id (both its map entry and
+	// its id-generator bit) is released when the table disconnects — see
+	// freeTableFindFuncs.
+	key := funcKey{name: name, nArg: nArg}
+	vtabTables.mu.Lock()
+	if gt.findFuncs == nil {
+		gt.findFuncs = map[funcKey]uintptr{}
+	}
+	id, cached := gt.findFuncs[key]
+	if !cached {
+		xFuncs.mu.Lock()
+		id = xFuncs.ids.next()
+		xFuncs.m[id] = fn
+		xFuncs.mu.Unlock()
+		gt.findFuncs[key] = id
+	}
+	vtabTables.mu.Unlock()
+
+	// SQLite always passes non-null out-params here; guard symmetrically with the
+	// decline path rather than trusting that on the write branch.
 	if pxFunc != 0 {
-		*(*uintptr)(unsafe.Pointer(pxFunc)) = 0
+		*(*uintptr)(unsafe.Pointer(pxFunc)) = cFuncPointer(funcTrampoline)
 	}
 	if ppArg != 0 {
-		*(*uintptr)(unsafe.Pointer(ppArg)) = 0
+		*(*uintptr)(unsafe.Pointer(ppArg)) = id
 	}
-	return 0 // not found
+	if op <= 0 {
+		return 1 // a plain function override
+	}
+	return int32(op)
+}
+
+// freeTableFindFuncs releases the scalar-UDF ids a table registered for its
+// overloaded functions — both the closure in xFuncs.m and the id-generator bit,
+// matching every other transient xFuncs registration (see hooks.go). Called from
+// xDisconnect / xDestroy after SQLite has expired any statement that referenced
+// them, so no dispatch can still reach a reclaimed id. Holds vtabTables.mu while
+// touching gt.findFuncs, the same lock the trampoline uses to populate it.
+func freeTableFindFuncs(gt *goTable) {
+	if gt == nil {
+		return
+	}
+	vtabTables.mu.Lock()
+	defer vtabTables.mu.Unlock()
+	if len(gt.findFuncs) == 0 {
+		return
+	}
+	xFuncs.mu.Lock()
+	for _, id := range gt.findFuncs {
+		delete(xFuncs.m, id)
+		xFuncs.ids.reclaim(id)
+	}
+	xFuncs.mu.Unlock()
+	gt.findFuncs = nil
 }
 
 // vtabRenameTrampoline is xRename. Calls Table.Rename if implemented.

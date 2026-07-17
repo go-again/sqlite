@@ -175,6 +175,7 @@ Always:
 | Column metadata / runtime stats / txn state | `introspect.go` + `(*Stmt).Readonly`/`Status` in `stmt.go` |
 | cksm/crypto chaining | `vfs/crypto/crypto.go::Options.WrapVFS` + per-package `fileMap` (`cabi.PtrMap[FS]`) |
 | vtab xCreate/xConnect split | `module.go::CreateModuleSplit` (used by `ext/bloom`, `ext/spellfix1`) |
+| vtab authoring / query-plan helpers | `vtab.go::VTabDistinct` (+ `bestIndexRawCtx` stash) · `module.go::(*Conn).OverloadFunction` · `stmt.go::(*Stmt).Explain`/`IsExplain`; backlog for the rest in `.plans/plan-gosqlite-feature-backlog.md` |
 | vtab ctor runs on the EXECUTING conn | `vtab.go::vtabInstantiate` resolves the conn from the trampoline's db via `connForDB`, not the one captured at registration — else a per-conn-registered ctor's `declare_vtab` hits the wrong handle → `SQLITE_MISUSE`. Pinned by `vtab_ctor_conn_test.go` |
 | Remote / network-backend dispatch | `remote.go::RegisterRemoteScheme` + `driver.go::(*Driver).Open` (`remoteOpenerFor`) — the seam the quicSQL forwarding driver plugs into; the root gains no network dependency |
 | Shared SQL-identifier toolkit | `internal/sqlid/sqlid.go` |

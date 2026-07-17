@@ -29,6 +29,7 @@ description: Use when debugging surprising behaviour with gosqlite, or as a pre-
 - **libc version pin:** your downstream `go.mod` must use the `modernc.org/libc` version this module pins, or the C ABI drifts; `go mod tidy` against this module maintains it.
 - **Tokenizer transforms are symmetric** — a reversible FTS5 tokenizer transform is invisible to MATCH (applied to both doc and query). Inspect indexed terms via fts5vocab.
 - **Coexisting with mattn** in one binary requires registering one driver under a custom name (both claim `"sqlite3"`); blank-importing both panics at init.
+- **A query is unexpectedly slow?** Inspect its plan without re-preparing: `(*Stmt).Explain(sqlite.ExplainQueryPlan)` flips a prepared statement to EXPLAIN QUERY PLAN mode (bound parameters carry over); `ExplainOff` flips it back to run normally.
 
 ## Not supported
 

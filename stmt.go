@@ -7,6 +7,8 @@ package sqlite // import "gosqlite.org"
 import (
 	"context"
 	"database/sql/driver"
+	"errors"
+	"fmt"
 	"sync/atomic"
 	"unsafe"
 
@@ -651,4 +653,42 @@ func (s *stmt) Status(op StmtStatus, reset bool) int {
 		return 0
 	}
 	return int(sqlite3.Xsqlite3_stmt_status(s.c.tls, s.pstmt, int32(op), libc.Bool32(reset)))
+}
+
+// ExplainMode is a prepared statement's EXPLAIN mode, read or set via
+// [Stmt.IsExplain] / [Stmt.Explain] (sqlite3_stmt_isexplain / _explain).
+type ExplainMode int32
+
+const (
+	// ExplainOff runs the statement normally (produces its own results).
+	ExplainOff ExplainMode = 0
+	// ExplainFull turns the statement into EXPLAIN — stepping it yields the
+	// virtual-machine bytecode program instead of the query's rows.
+	ExplainFull ExplainMode = 1
+	// ExplainQueryPlan turns the statement into EXPLAIN QUERY PLAN — stepping it
+	// yields the high-level query plan.
+	ExplainQueryPlan ExplainMode = 2
+)
+
+// IsExplain reports the statement's current EXPLAIN mode (sqlite3_stmt_isexplain).
+func (s *stmt) IsExplain() ExplainMode {
+	if s.pstmt == 0 {
+		return ExplainOff
+	}
+	return ExplainMode(sqlite3.Xsqlite3_stmt_isexplain(s.c.tls, s.pstmt))
+}
+
+// Explain changes a prepared statement between normal, EXPLAIN, and EXPLAIN
+// QUERY PLAN mode at runtime (sqlite3_stmt_explain), so the same statement can
+// be inspected as a plan and then run — no re-preparing, and bound parameters
+// carry over. It must be called when the statement is reset / not mid-run; SQLite
+// returns an error otherwise. Requires SQLite 3.46 or newer.
+func (s *stmt) Explain(mode ExplainMode) error {
+	if s.pstmt == 0 {
+		return errors.New("sqlite: Explain on a finalized statement")
+	}
+	if rc := sqlite3.Xsqlite3_stmt_explain(s.c.tls, s.pstmt, int32(mode)); rc != sqlite3.SQLITE_OK {
+		return fmt.Errorf("sqlite: stmt_explain: %w", s.c.errstr(rc))
+	}
+	return nil
 }

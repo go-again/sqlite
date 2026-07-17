@@ -205,6 +205,13 @@
 // table be queried directly by its module name (e.g.
 // `SELECT … FROM array(?)`) without a preceding CREATE VIRTUAL TABLE.
 //
+// Advanced modules can plan and scan more efficiently: [VTabDistinct]
+// (from BestIndex) reports how far the query relaxes row ordering and
+// duplication. A module implementing [VTabFunctionFinder] (xFindFunction)
+// overrides a SQL function applied to its own columns — declare the name
+// with [Conn.OverloadFunction] so it prepares, and the module supplies the
+// body (the mechanism behind operators like MATCH).
+//
 // # Custom pointer bindings
 //
 // [Pointer] wraps an arbitrary Go value so it can be bound as a SQL

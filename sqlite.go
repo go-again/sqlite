@@ -939,6 +939,14 @@ func funcTrampoline(tls *libc.TLS, ctx uintptr, argc int32, argv uintptr) {
 	xFuncs.mu.RUnlock()
 
 	setErrorResult := errorResultFunction(tls, ctx)
+	if xFunc == nil {
+		// The registration was released — e.g. a vtab-overloaded function
+		// (VTabFunctionFinder) whose table has been disconnected. SQLite's
+		// schema-expiry contract should keep this from being reached; guard
+		// against a nil call rather than panic.
+		setErrorResult(errors.New("sqlite: function is no longer registered"))
+		return
+	}
 	sp := functionArgs(tls, argc, argv)
 	defer releaseUDFArgs(sp)
 	fc := &FunctionContext{tls: tls, ctx: ctx, argc: argc, argv: argv}

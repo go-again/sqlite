@@ -11,6 +11,7 @@ Typed `(*Conn)` / `(*Stmt)` methods that bind SQLite C-API surface beyond the `d
 | `(*Conn).TxnState` | `sqlite3_txn_state` | none / read / write | `TestConnTxnState`, `TestConnTxnState_Read` |
 | `(*Stmt).Readonly` | `sqlite3_stmt_readonly` | does the stmt write? (read/write routing) | `TestStmtReadonly` |
 | `(*Stmt).Status` | `sqlite3_stmt_status` | per-stmt VM-step / sort / fullscan counters | `TestStmtStatus` |
+| `(*Stmt).Explain` / `IsExplain` | `sqlite3_stmt_explain` / `_isexplain` | flip a prepared stmt to EXPLAIN / EXPLAIN QUERY PLAN at runtime (no re-prepare, params carry over) and read the current mode | `TestStmtExplain` |
 | `(*Conn).Filename` | `sqlite3_db_filename` | on-disk path of a schema ("" for in-memory/temp) | `TestConn_FilenameAndAutoCommit` |
 | `(*Conn).AutoCommit` | `sqlite3_get_autocommit` | true at rest, false inside a transaction | `TestConn_FilenameAndAutoCommit` |
 | `(*Conn).ErrorOffset` | `sqlite3_error_offset` | byte offset of the last parse error's token (-1 if none) | `TestConn_ErrorOffset` |
@@ -28,6 +29,18 @@ Process-global, connection-independent (serialized through one mutex-guarded TLS
 | `StrGlob` / `StrLike` / `Complete` | `sqlite3_strglob` / `_strlike` / `_complete` | exact GLOB/LIKE without a query; statement-boundary check | `TestRuntime_StringUtils` |
 
 Not wrapped: `sqlite3_memory_used` / heap-limit / `status64` — modernc disables SQLite's memstat (they return 0); use Go's `runtime/metrics` instead.
+
+## Virtual-table authoring helpers — [`module.go`](../../module.go), [`vtab.go`](../../vtab.go)
+
+Beyond `CreateModule` / `CreateEponymousModule` / `CreateModuleSplit` / `DeclareVTab`, the advanced hooks a Go-implemented module can use:
+
+| Symbol | C symbol | What it does | Test |
+|---|---|---|---|
+| `(*Conn).OverloadFunction` | `sqlite3_overload_function` | declare a stub function so a module's xFindFunction can give a name (e.g. `MATCH`) a table-specific meaning; the name is then accepted at prepare time | `TestOverloadFunction` |
+| `VTabFunctionFinder` (optional `VTab` interface) | `xFindFunction` | a module overrides a SQL function applied to its columns — return a Go scalar impl + an op (0 = plain override; ≥150 = an indexable-constraint operator like `MATCH`). Registered ids are cached per (name, nArg) and freed on disconnect | `TestVTabFindFunction`, `examples/features/advanced/vtab-overload` |
+| `VTabDistinct` / `VTabDistinctMode` | `sqlite3_vtab_distinct` | called from `BestIndex`, reports how much the query relaxes row ordering/duplication so the module can skip work (grouped / distinct / unordered) | `TestVTabDistinct` |
+
+`⚠ vtab_rhs_value` (constraint RHS at plan time) is ready to add on the same `bestIndexRawCtx` plumbing; the `vtab_in` batch-`IN` family and `vtab_nochange` need a vtab-API extension (raw values inside Filter/Column) — tracked in `.plans/plan-gosqlite-feature-backlog.md`.
 
 ## WAL control — [`wal.go`](../../wal.go)
 
